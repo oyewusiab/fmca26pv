@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notifications - PAYABLE VOUCHER 2026</title>
+
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+  <style>
+    /* Notification Page Styles */
+    .notifications-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .notification-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 15px;
+      padding: 15px;
+      background: var(--white);
+      border-radius: var(--radius);
+      border-left: 4px solid var(--info-color);
+      transition: var(--transition);
+    }
+
+    .notification-item:hover {
+      box-shadow: var(--shadow);
+    }
+
+    .notification-unread {
+      background: #f0f7ff;
+      font-weight: 500;
+    }
+
+    .notification-read {
+      opacity: 0.8;
+    }
+
+    .notification-success {
+      border-left-color: var(--success-color);
+    }
+
+    .notification-warning {
+      border-left-color: var(--warning-color);
+    }
+
+    .notification-danger {
+      border-left-color: var(--danger-color);
+    }
+
+    .notification-info {
+      border-left-color: var(--info-color);
+    }
+
+    .notification-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .notification-success .notification-icon {
+      background: #d4edda;
+      color: var(--success-color);
+    }
+
+    .notification-warning .notification-icon {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .notification-danger .notification-icon {
+      background: #f8d7da;
+      color: var(--danger-color);
+    }
+
+    .notification-info .notification-icon {
+      background: #d1ecf1;
+      color: var(--info-color);
+    }
+
+    .notification-content {
+      flex: 1;
+    }
+
+    .notification-title {
+      font-weight: 600;
+      color: var(--text-dark);
+      margin-bottom: 5px;
+    }
+
+    .notification-message {
+      color: var(--text-light);
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .notification-time {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .notification-actions {
+      display: flex;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    /* Nav badge for sidebar */
+    .nav-badge {
+      background: var(--danger-color);
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: auto;
+    }
+
+    /* Action Items Hub - Premium Redesign */
+    #actionItemsCard {
+      border: none;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      margin-bottom: 25px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    #actionItemsCard .card-header {
+      background: transparent;
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    #actionItemsCard .card-title {
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+      color: #1a1a1a;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #actionItemsCard .card-title i {
+      color: var(--primary-color);
+      font-size: 1.2rem;
+    }
+
+    #actionItemsCount {
+      background: var(--warning-color);
+      color: #856404;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+
+    /* Collapsible Container */
+    .collapsible-content {
+      max-height: 0;
+      overflow: hidden;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0;
+    }
+
+    .collapsible-content.active {
+      max-height: 2000px;
+      opacity: 1;
+      padding-bottom: 5px;
+    }
+
+    /* Action Item Row - Premium Style */
+    .action-item-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 18px;
+      padding: 16px 24px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .action-item-row:hover {
+      background: rgba(26, 95, 42, 0.03);
+      transform: translateX(4px);
+    }
+
+    .action-item-row:last-child {
+      border-bottom: none;
+    }
+
+    .action-item-icon-wrap {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+    }
+
+    .icon-wrap-danger {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    .icon-wrap-warning {
+      background: #fef3c7;
+      color: #d97706;
+    }
+
+    .icon-wrap-info {
+      background: #e0f2fe;
+      color: #0284c7;
+    }
+
+    .action-item-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .action-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .action-item-title {
+      font-weight: 700;
+      font-size: 15px;
+      color: #1a1a1a;
+      line-height: 1.4;
+    }
+
+    .action-item-msg {
+      font-size: 13.5px;
+      color: #4b5563;
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+
+    .action-item-badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .small-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: #f3f4f6;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .small-badge strong {
+      color: #374151;
+    }
+
+    .action-item-actions .btn-view {
+      background: #f8f9fa;
+      color: var(--primary-color);
+      border: 1px solid #e9ecef;
+      padding: 6px 14px;
+      font-size: 13px;
+      border-radius: 8px;
+      white-space: nowrap;
+      transition: all 0.2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .action-item-actions .btn-view:hover {
+      background: var(--primary-color);
+      color: white;
+      border-color: var(--primary-color);
+    }
+
+    /* Restoring required styles */
+    .action-item-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-danger {
+      background: var(--danger-color);
+    }
+
+    .dot-warning {
+      background: var(--warning-color);
+    }
+
+    .dot-info {
+      background: var(--info-color);
+    }
+
+    .action-item-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p class="loading-text">Loading...</p>
+  </div>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Mobile Menu Toggle -->
+      <button class="menu-toggle" id="menuToggle">
+        <i class="fas fa-bars"></i>
+      </button>
+
+      <!-- Page Header -->
+      <div class="page-header">
+        <div>
+          <h1 class="page-title"><i class="fas fa-bell"></i> Notifications</h1>
+          <p class="page-subtitle" id="notificationCount">Loading...</p>
+        </div>
+        <div>
+          <button class="btn btn-secondary" id="markAllReadBtn">
+            <i class="fas fa-check-double"></i> Mark All as Read
+          </button>
+        </div>
+      </div>
+
+      <!-- Action Items Card (ONLY ONCE, and ABOVE notifications list) -->
+      <div class="card mb-2" id="actionItemsCard" style="display:none;">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 class="card-title">
+            <i class="fas fa-list-check"></i> Action Items
+            <span class="badge badge-warning" id="actionItemsCount">0</span>
+            <button class="btn btn-sm btn-link" id="actionItemsToggleBtn" onclick="ActionItems.toggleCollapse()"
+              style="color: var(--text-muted); text-decoration: none;">
+              <i class="fas fa-chevron-up"></i>
+            </button>
+          </h3>
+
+          <div style="display:flex; gap:8px; align-items:center;">
+            <!-- Filters (Admin/DDFA/DFA only; action-items.js toggles display) -->
+            <select id="actionItemsUnitFilter" class="form-control" style="width:auto; display:none;">
+              <option value="ALL">All Units</option>
+              <option value="PAYABLE">Payable</option>
+              <option value="CPO">CPO</option>
+            </select>
+
+            <select id="actionItemsStatusFilter" class="form-control" style="width:auto; display:none;">
+              <option value="PENDING">Pending</option>
+              <option value="RESOLVED">Resolved</option>
+              <option value="ALL">All</option>
+            </select>
+
+            <button class="btn btn-sm btn-secondary" onclick="ActionItems.refreshFull()">
+              <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+
+            <button class="btn btn-sm btn-secondary" id="actionItemsSettingsBtn" style="display:none;"
+              onclick="ActionItems.openSettings()">
+              <i class="fas fa-cog"></i> Settings
+            </button>
+          </div>
+        </div>
+
+        <div id="actionItemsCollapse" class="collapsible-content active">
+          <div class="card-body" id="actionItemsList" style="padding: 0;">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Notifications List -->
+      <div class="card">
+        <div class="card-body" id="notificationsList">
+          <p class="text-muted text-center">Loading notifications...</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Action Items Settings Modal (Admin/DDFA/DFA only) -->
+  <div class="modal-overlay" id="actionItemsSettingsModal">
+    <div class="modal" style="max-width: 750px;">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="fas fa-cog"></i> Action Items Settings</h3>
+        <button class="modal-close" onclick="ActionItems.closeSettings()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="text-muted mb-2">
+          Enable/disable Action Item rules per unit.
+        </p>
+        <div id="actionItemsSettingsBody"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="ActionItems.closeSettings()">Cancel</button>
+        <button class="btn btn-primary" onclick="ActionItems.saveSettings()">
+          <i class="fas fa-save"></i> Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts (each included ONCE) -->
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/activity-tracker.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/components.js"></script>
+
+  <!-- Action Items -->
+  <script src="js/action-items.js"></script>
+
+  <!-- Notifications -->
+  <script src="js/chat.js"></script>
+  <script src="js/notifications.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      Notifications.initPage();
+      // ActionItems auto-initializes itself; no extra call needed.
+    });
+  </script>
+
+  <script src="js/footer.js"></script>
+</body>
+
+</html>

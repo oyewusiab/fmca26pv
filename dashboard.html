@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - PAYABLE VOUCHER 2026</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p class="loading-text">Loading dashboard...</p>
+    </div>
+
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Mobile Menu Toggle -->
+            <button class="menu-toggle" id="menuToggle" style="display: none;">
+                <i class="fas fa-bars"></i>
+            </button>
+
+            <!-- Page Header -->
+            <div class="page-header">
+                <div>
+                    <h1 class="page-title">Dashboard</h1>
+                    <p class="page-subtitle">Overview of Payment Vouchers for 2026</p>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <!-- Eye icon to show/hide figures -->
+                    <button class="btn btn-secondary" id="maskToggleBtn" title="Show figures">
+                        <i class="fas fa-eye"></i>
+                    </button>
+
+                    <button class="btn btn-secondary" id="refreshBtn">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-primary" id="primaryVoucherBtn">
+                        <i class="fas fa-file-invoice-dollar"></i> New Voucher
+                    </button>
+                </div>
+            </div>
+
+            <!-- Action Items Mini Card (Dashboard) -->
+            <div id="actionItemsMiniCard" class="alert alert-warning"
+                style="display:none; margin-bottom: 20px; cursor: pointer;"
+                onclick="location.href='notifications.html'">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div>
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span id="actionItemsMiniText">0 action items</span> require your attention.
+                    </div>
+                    <i class="fas fa-chevron-right"></i>
+                </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid" id="statsGrid">
+                <!-- Stats cards will be populated by JavaScript -->
+                <div class="stat-card">
+                    <div class="stat-label">Loading...</div>
+                    <div class="stat-value">-</div>
+                </div>
+            </div>
+
+            <!-- Content Grid -->
+            <div class="content-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <!-- Category Breakdown -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-pie"></i> Category Breakdown
+                        </h3>
+                    </div>
+                    <div class="card-body" id="categoryBreakdown">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+
+                <!-- Monthly Breakdown -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-calendar-alt"></i> Monthly Breakdown
+                        </h3>
+                    </div>
+                    <div class="card-body" id="monthlyBreakdown">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Vouchers -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-clock"></i> Recent Vouchers
+                    </h3>
+                    <a href="vouchers.html" class="btn btn-sm btn-secondary">View All</a>
+                </div>
+                <div class="card-body" id="recentVouchers">
+                    <p class="text-muted">Loading...</p>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-bolt"></i> Quick Actions
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        <a href="vouchers.html?new=true" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> New Voucher
+                        </a>
+                        <a href="vouchers.html?lookup=true" class="btn btn-secondary">
+                            <i class="fas fa-search"></i> Look-up Voucher
+                        </a>
+                        <a href="reports.html" class="btn btn-secondary">
+                            <i class="fas fa-file-alt"></i> View Reports
+                        </a>
+                        <a href="vouchers.html?filter=unpaid" class="btn btn-secondary">
+                            <i class="fas fa-exclamation-circle"></i> View Unpaid
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Additional Styles for Dashboard -->
+            <style>
+                /* Content Grid Responsive */
+                @media (max-width: 992px) {
+                    .content-grid {
+                        grid-template-columns: 1fr !important;
+                    }
+                }
+
+                /* Nav Badge for pending items */
+                .nav-badge {
+                    background: var(--danger-color);
+                    color: white;
+                    font-size: 10px;
+                    padding: 2px 6px;
+                    border-radius: 10px;
+                    margin-left: auto;
+                }
+
+                .nav-item {
+                    display: flex;
+                    align-items: center;
+                }
+
+                /* Mobile menu */
+                @media (max-width: 992px) {
+                    .menu-toggle {
+                        display: block !important;
+                        position: fixed;
+                        top: 15px;
+                        left: 15px;
+                        z-index: 1001;
+                        background: var(--primary-color);
+                        color: white;
+                        border: none;
+                        padding: 10px 15px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                    }
+
+                    .main-content {
+                        padding-top: 70px;
+                    }
+                }
+            </style>
+
+            <script src="js/config.js"></script>
+            <script src="js/auth.js"></script>
+            <script src="js/api.js"></script>
+            <script src="js/activity-tracker.js"></script>
+            <script src="js/components.js"></script>
+            <script src="js/notifications.js"></script>
+            <script src="js/chat.js"></script>
+            <script src="js/action-items.js"></script>
+            <script src="js/dashboard.js"></script>
+            <script src="js/footer.js"></script>
+</body>
+
+</html>

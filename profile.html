@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Profile - PAYABLE VOUCHER 2026</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p class="loading-text">Loading...</p>
+  </div>
+
+  <div class="app-container">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <main class="main-content">
+      <button class="menu-toggle" id="menuToggle">
+        <i class="fas fa-bars"></i>
+      </button>
+
+      <div class="page-header">
+        <div>
+          <h1 class="page-title"><i class="fas fa-user"></i> My Profile</h1>
+          <p class="page-subtitle">Update your profile and password</p>
+        </div>
+      </div>
+
+      <!-- Profile details -->
+      <div class="card mb-2">
+        <div class="card-header">
+          <h3 class="card-title">Profile Details</h3>
+        </div>
+
+        <div class="card-body">
+          <!-- Admin-only fields (read-only) -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>Name (Admin)</label>
+              <input id="pName" class="form-control" readonly>
+            </div>
+            <div class="form-group">
+              <label>Email (Admin)</label>
+              <input id="pEmail" class="form-control" readonly>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Username (Admin)</label>
+              <input id="pUsername" class="form-control" readonly>
+            </div>
+            <div class="form-group">
+              <label>Role (Admin)</label>
+              <input id="pRole" class="form-control" readonly>
+            </div>
+          </div>
+
+          <!-- User-editable fields -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>Phone</label>
+              <input id="pPhone" class="form-control">
+            </div>
+            <div class="form-group">
+              <label>Department</label>
+              <input id="pDepartment" class="form-control">
+            </div>
+          </div>
+
+          <button class="btn btn-primary" id="saveProfileBtn">
+            <i class="fas fa-save"></i> Save Profile
+          </button>
+        </div>
+      </div>
+
+      <!-- Change password -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Change Password</h3>
+        </div>
+
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Current Password</label>
+              <input id="oldPassword" class="form-control" type="password">
+            </div>
+            <div class="form-group">
+              <label>New Password</label>
+              <input id="newPassword" class="form-control" type="password">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Confirm New Password</label>
+            <input id="confirmNewPassword" class="form-control" type="password">
+          </div>
+
+          <button class="btn btn-secondary" id="changePasswordBtn">
+            <i class="fas fa-key"></i> Change Password
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/profile.js"></script>
+  <script src="js/footer.js"></script>
+</body>
+</html>

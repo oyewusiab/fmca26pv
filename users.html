@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - PAYABLE VOUCHER 2026</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Additional styles for users page */
+        .user-avatar-small {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        
+        .role-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .role-admin { background: #e3f2fd; color: #1565c0; }
+        .role-payable-unit-head { background: #e8f5e9; color: #2e7d32; }
+        .role-payable-unit-staff { background: #fff3e0; color: #ef6c00; }
+        .role-cpo { background: #f3e5f5; color: #7b1fa2; }
+        .role-audit-unit { background: #e0f7fa; color: #00838f; }
+        .role-ddfa { background: #fce4ec; color: #c2185b; }
+        .role-dfa { background: #ede7f6; color: #512da8; }
+        
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .action-buttons .btn {
+            padding: 5px 10px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <p class="loading-text">Loading...</p>
+    </div>
+
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <!-- Populated by JavaScript -->
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Mobile Menu Toggle -->
+            <button class="menu-toggle" id="menuToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+
+            <!-- Page Header -->
+            <div class="page-header">
+                <div>
+                    <h1 class="page-title">User Management</h1>
+                    <p class="page-subtitle">Manage system users and access control</p>
+                </div>
+                <div>
+                    <button class="btn btn-primary" onclick="Users.openUserForm()">
+                        <i class="fas fa-plus"></i> Add User
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search and Filter Bar -->
+            <div class="card mb-2">
+                <div class="card-body" style="display: flex; gap: 15px; align-items: center;">
+                    <div style="flex: 1;">
+                        <input type="text" class="form-control" id="searchUsers" 
+                               placeholder="Search by name, email or role...">
+                    </div>
+                    <div>
+                        <button class="btn btn-secondary" onclick="Users.loadUsers()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Count -->
+            <div style="margin-bottom: 15px; color: var(--text-muted);">
+                <span id="userCount">Loading...</span>
+            </div>
+
+            <!-- Users List -->
+            <div class="card">
+                <div class="card-body" id="usersList">
+                    <p class="text-muted text-center">Loading users...</p>
+                </div>
+            </div>
+
+            <!-- Role Legend -->
+            <div class="card mt-2">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-info-circle"></i> Role Permissions</h3>
+                </div>
+                <div class="card-body">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
+                        <div>
+                            <strong class="role-badge role-admin">ADMIN</strong>
+                            <p class="text-muted" style="font-size: 12px; margin-top: 5px;">
+                                Full access to all features including user management
+                            </p>
+                        </div>
+                        <div>
+                            <strong class="role-badge role-payable-unit-head">Payable Unit Head</strong>
+                            <p class="text-muted" style="font-size: 12px; margin-top: 5px;">
+                                Create, edit, delete vouchers, approve deletions
+                            </p>
+                        </div>
+                        <div>
+                            <strong class="role-badge role-payable-unit-staff">Payable Unit Staff</strong>
+                            <p class="text-muted" style="font-size: 12px; margin-top: 5px;">
+                                Create, edit drafts, look-up, request deletions
+                            </p>
+                        </div>
+                        <div>
+                            <strong class="role-badge role-cpo">CPO</strong>
+                            <p class="text-muted" style="font-size: 12px; margin-top: 5px;">
+                                Update status, set payment month, batch updates
+                            </p>
+                        </div>
+                        <div>
+                            <strong class="role-badge role-audit-unit">Audit Unit</strong>
+                            <p class="text-muted" style="font-size: 12px; margin-top: 5px;">
+                                View-only access to vouchers and reports
+                            </p>
+                        </div>
+                        <div>
+                            <strong class="role-badge role-ddfa">DDFA / DFA</strong>
+                            <p class="text-muted" style="font-size: 12px; margin-top: 5px;">
+                                View-only access to vouchers and reports
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+    <!-- User Form Modal -->
+    <div class="modal-overlay" id="userFormModal">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3 class="modal-title" id="userFormTitle">Add New User</h3>
+                <button class="modal-close" onclick="Users.closeModal('userFormModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="userForm">
+                    <div class="form-group">
+                        <label for="formName">Full Name <span class="required">*</span></label>
+                        <input type="text" class="form-control" id="formName" required
+                               placeholder="Enter full name">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formEmail">Email Address <span class="required">*</span></label>
+                        <input type="email" class="form-control" id="formEmail" required
+                               placeholder="Enter email address">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="formRole">Role <span class="required">*</span></label>
+                        <select class="form-control" id="formRole" required>
+                            <option value="">Select Role</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="formActive" checked>
+                            <label for="formActive" style="margin: 0; font-weight: normal;">Active Account</label>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info" style="font-size: 12px;">
+                        <i class="fas fa-info-circle"></i>
+                        New users will receive the default password: <strong>Welcome123</strong><br>
+                        They should change it on first login.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="Users.closeModal('userFormModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="Users.saveUser()">
+                    <i class="fas fa-save"></i> Save User
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/activity-tracker.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/components.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/users.js"></script>
+    <script src="js/footer.js"></script>
+</body>
+</html>

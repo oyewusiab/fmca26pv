@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Login – PAYABLE VOUCHER 2026</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" href="images/fmc-logo.png" type="image/png">
+
+    <link rel="stylesheet" href="css/styles.css">
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f4d2f, #09251a);
+            min-height: 100vh;
+        }
+
+        /* LEFT PANEL */
+        .brand-panel {
+            background: linear-gradient(135deg, #0f4d2f, #09251a);
+            color: #fff;
+        }
+
+        .brand-panel h1 {
+            font-weight: 700;
+        }
+
+        /* LOGIN CARD */
+        .login-card {
+            backdrop-filter: blur(12px);
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 18px;
+            padding: 40px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, .25);
+            animation: fadeIn .7s ease;
+        }
+
+        .form-control {
+            height: 50px;
+            border-radius: 12px;
+        }
+
+        .input-group-text {
+            border-radius: 12px 0 0 12px;
+            background: #0f4d2f;
+            color: #fff;
+        }
+
+        .login-btn {
+            height: 50px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #0f4d2f, #198754);
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, .2);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .footer-text {
+            font-size: 13px;
+            color: #aaa;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Loading -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <p class="loading-text">Authenticating...</p>
+    </div>
+
+    <div class="container-fluid">
+        <div class="row min-vh-100">
+
+            <script>
+                // Check for login page announcements when page loads
+                document.addEventListener('DOMContentLoaded', () => {
+                    setTimeout(() => {
+                        if (typeof Notifications !== 'undefined') {
+                            Notifications.checkAnnouncements('login');
+                        }
+                    }, 1000);
+                });
+            </script>
+
+            <!-- LEFT -->
+            <div
+                class="col-lg-6 d-none d-lg-flex flex-column justify-content-center align-items-center brand-panel text-center p-5">
+
+                <img src="images/fmc-logo.png" width="120" class="mb-4"
+                    onerror="this.src='https://via.placeholder.com/120?text=FMC'">
+
+                <h1>PAYABLE VOUCHER 2026</h1>
+                <p class="mt-3">Federal Medical Centre, Abeokuta<br>
+                    Finance & Accounts Department</p>
+
+                <hr class="w-50">
+
+                <p class="mt-3">
+                    Efficient • Secure • Transparent<br>
+                    Managing financial workflows with accuracy
+                </p>
+
+            </div>
+
+            <!-- RIGHT -->
+            <div class="col-lg-6 d-flex align-items-center justify-content-center">
+
+                <div class="login-card w-100" style="max-width:420px;">
+
+                    <h3 class="mb-2 fw-bold text-success">Welcome Back</h3>
+                    <p class="text-muted mb-4">Sign in to continue</p>
+
+                    <div id="loginError" class="alert alert-danger d-none"></div>
+
+                    <form id="loginForm">
+
+                        <!-- EMAIL -->
+                        <div class="input-group mb-3">
+                            <span class="input-group-text"><i class="fas fa-user"></i></span>
+                            <input type="text" id="email" class="form-control" name="email"
+                                placeholder="Email or Username" autocomplete="username" required>
+                        </div>
+
+                        <!-- PASSWORD -->
+                        <div class="input-group mb-2">
+                            <span class="input-group-text"><i class="fas fa-lock"></i></span>
+                            <input type="password" id="password" class="form-control" name="password"
+                                placeholder="Password" autocomplete="current-password" required>
+                            <span class="input-group-text bg-white text-dark" id="togglePassword"
+                                style="cursor:pointer">
+                                <i class="fas fa-eye"></i>
+                            </span>
+                        </div>
+
+                        <div class="d-flex justify-content-between mb-3">
+
+                            <div>
+                                <input type="checkbox" class="form-check-input" id="rememberMe">
+                                <label for="rememberMe"> Remember me</label>
+                            </div>
+
+                            <a href="forgot-password.html">Forgot Password?</a>
+
+                        </div>
+
+                        <button type="submit" id="loginBtn" class="btn login-btn w-100 mb-3">
+                            <i class="fas fa-sign-in-alt"></i> Sign In
+                        </button>
+
+                    </form>
+
+                    <div class="text-center mt-3">
+                        <a href="#" id="signupLink">Sign up</a>
+                    </div>
+
+                    <p class="text-center mt-4 footer-text">
+                        © 2026 FMC Abeokuta
+                    </p>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+
+    <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/activity-tracker.js"></script>
+
+    <script>
+
+        const loginForm = document.getElementById('loginForm');
+        const loginError = document.getElementById('loginError');
+        const loginBtn = document.getElementById('loginBtn');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+
+        document.getElementById('togglePassword').addEventListener('click', () => {
+            passwordInput.type = passwordInput.type === 'password' ? 'text' : 'password';
+        });
+
+        document.addEventListener('DOMContentLoaded', async () => {
+
+            if (Auth.isLoggedIn()) {
+                showLoading(true);
+                const v = await Auth.validateSession();
+                if (v.success) window.location.href = 'dashboard.html';
+                showLoading(false);
+            }
+            emailInput.focus();
+        });
+
+        loginForm.addEventListener('submit', async e => {
+            e.preventDefault();
+
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!email || !password) return showError('Enter email and password');
+
+            showLoading(true);
+            loginBtn.disabled = true;
+
+            const result = await Auth.login(email, password);
+
+            if (result.success) {
+                window.location.href = 'dashboard.html';
+            } else {
+                showError(result.error || 'Login failed');
+                showLoading(false);
+                loginBtn.disabled = false;
+            }
+        });
+
+
+        let loadingTimeout;
+        function showLoading(show) {
+            clearTimeout(loadingTimeout);
+            if (show) {
+                loadingOverlay.classList.remove('fade-out');
+                loadingOverlay.style.display = 'flex';
+                // Only show overlay if loading takes >600ms
+                loadingTimeout = setTimeout(() => {
+                    loadingOverlay.style.opacity = '1';
+                }, 600);
+            } else {
+                loadingOverlay.classList.add('fade-out');
+                setTimeout(() => {
+                    loadingOverlay.style.display = 'none';
+                }, 400);
+            }
+        }
+
+        function showError(msg) {
+            loginError.textContent = msg;
+            loginError.classList.remove('d-none');
+        }
+
+        document.getElementById('signupLink').addEventListener('click', e => {
+            e.preventDefault();
+            Utils.showToast('Sign up is not available. Contact Admin.', 'info');
+        });
+
+    </script>
+
+    <!-- Add these scripts if not already present -->
+    <script src="js/api.js" defer></script>
+    <script src="js/notifications.js" defer></script>
+    <script src="js/action-items.js" defer></script>
+
+    <script>
+        // Check for login page announcements
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                if (typeof Notifications !== 'undefined') {
+                    Notifications.checkAnnouncements('login');
+                }
+            }, 1000);
+        });
+    </script>
+
+    <script src="js/footer.js"></script>
+
+</body>
+
+</html>

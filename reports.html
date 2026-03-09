@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - PAYABLE VOUCHER 2026</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Additional styles for reports page */
+        .report-section {
+            margin-bottom: 30px;
+        }
+        
+        .report-section-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--primary-color);
+        }
+        
+        .totals-row {
+            background: var(--secondary-color) !important;
+            font-weight: bold;
+        }
+        
+        .progress-bar-mini {
+            width: 60px;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 5px;
+        }
+        
+        .progress-bar-mini .progress-fill {
+            height: 100%;
+            background: var(--primary-color);
+            border-radius: 4px;
+        }
+        
+        .progress-bar-mini .progress-fill.success { background: var(--success-color); }
+        .progress-bar-mini .progress-fill.warning { background: var(--warning-color); }
+        .progress-bar-mini .progress-fill.danger { background: var(--danger-color); }
+        
+        .debt-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .debt-item {
+            padding: 15px;
+            background: var(--secondary-color);
+            border-radius: var(--radius);
+        }
+        
+        .debt-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .debt-amount {
+            text-align: right;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--danger-color);
+            margin-bottom: 8px;
+        }
+        
+        .debt-bar {
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .debt-bar-fill {
+            height: 100%;
+            background: var(--danger-color);
+            border-radius: 3px;
+        }
+        
+        .report-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        
+        @media print {
+            .sidebar, .page-header, .report-actions, .menu-toggle {
+                display: none !important;
+            }
+            
+            .main-content {
+                margin-left: 0 !important;
+                padding: 0 !important;
+            }
+            
+            .card {
+                box-shadow: none !important;
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <p class="loading-text">Loading reports...</p>
+    </div>
+
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <!-- Populated by JavaScript -->
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Mobile Menu Toggle -->
+            <button class="menu-toggle" id="menuToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+
+            <!-- Page Header -->
+            <div class="page-header">
+                <div>
+                    <h1 class="page-title">Reports</h1>
+                    <p class="page-subtitle">Comprehensive Payment Voucher Analytics</p>
+                </div>
+                <div class="report-actions">
+                    <select class="form-control" id="yearSelector" style="width: auto;">
+                        <option value="2026">2026</option>
+                        <option value="2025">2025</option>
+                        <option value="2024">2024</option>
+                        <option value="2023">2023</option>
+                        <option value="<2023">&lt;2023</option>
+                    </select>
+                    <button class="btn btn-secondary" id="printBtn">
+                        <i class="fas fa-print"></i> Print
+                    </button>
+                    <button class="btn btn-primary" id="exportBtn">
+                        <i class="fas fa-file-export"></i> Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Year Summary Section -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-chart-pie"></i> Year Summary - <span id="currentYearLabel">2026</span>
+                </h2>
+                <div class="stats-grid" id="yearSummaryCards">
+                    <!-- Populated by JavaScript -->
+                    <div class="stat-card">
+                        <div class="stat-label">Loading...</div>
+                        <div class="stat-value">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-section">
+    <h2 class="report-section-title">
+        <i class="fas fa-tachometer-alt"></i> Analytics
+    </h2>
+    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); gap: 15px;">
+        <div class="stat-card" id="largestVoucher">
+            <div class="stat-label">-</div>
+        </div>
+        <div class="stat-card" id="avgVoucher">
+            <div class="stat-label">-</div>
+        </div>
+        <div class="stat-card" id="paymentRate">
+            <div class="stat-label">-</div>
+        </div>
+    </div>
+</div>
+
+    <div class="report-section">
+    <h2 class="report-section-title">
+        <i class="fas fa-chart-pie"></i> Status Distribution
+    </h2>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-hashtag"></i> By Count</h3>
+            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusCountChart', 'Status_By_Count')">
+            <i class="fas fa-download"></i> PNG
+            </button>
+        </div>
+        <div class="card-body">
+            <canvas id="statusCountChart" height="160"></canvas>
+        </div>
+        </div>
+
+        <div class="card">
+        <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-naira-sign"></i> By Amount</h3>
+            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusAmountChart', 'Status_By_Amount')">
+            <i class="fas fa-download"></i> PNG
+            </button>
+        </div>
+        <div class="card-body">
+            <canvas id="statusAmountChart" height="160"></canvas>
+        </div>
+        </div>
+    </div>
+    </div>
+
+            <!-- Category Breakdown Section -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-th-list"></i> Category Breakdown
+                        </h3>
+                    </div>
+                    <div class="card-body" id="categoryTable">
+                        <p class="text-muted text-center">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monthly Breakdown Section -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-calendar-alt"></i> Monthly Breakdown
+                        </h3>
+                    </div>
+                    <div class="card-body" id="monthlyTable">
+                        <p class="text-muted text-center">Loading...</p>
+                    </div>
+                </div>
+            </div>
+            <!-- Category Chart -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-pie"></i> Category Payments (Chart)
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="categoryChart" height="120"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category Pareto Chart -->
+                <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-chart-bar"></i> Unpaid Balance Pareto (80/20)
+                    </h3>
+                    </div>
+                    <div class="card-body">
+                    <canvas id="categoryParetoChart" height="120"></canvas>
+                    <p class="text-muted" style="font-size:12px; margin-top:8px;">
+                        Shows categories ranked by unpaid balance with cumulative percentage line.
+                    </p>
+                    </div>
+                </div>
+                </div>
+
+            <!-- Monthly Chart -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-line"></i> Monthly Payments (Chart)
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="monthlyChart" height="120"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-section" id="agingSection">
+                <h2 class="report-section-title">
+                    <i class="fas fa-hourglass-half"></i> Unpaid Aging (2026)
+                </h2>
+
+                <div class="card">
+                    <div class="card-body">
+                    <canvas id="agingChart" height="120"></canvas>
+                    <div id="agingTable" style="margin-top: 15px;"></div>
+                    <p class="text-muted" style="font-size:12px; margin-top:8px;">
+                        Computed client-side from 2026 vouchers only.
+                    </p>
+                    </div>
+                </div>
+                </div>
+
+            <!-- All Years Summary (Debt Tracking) -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-history"></i> Multi-Year Debt Tracking
+                </h2>
+                
+                <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 20px;">
+                    <div class="stat-card" id="grandTotalDebt">
+                        <div class="stat-label">Total Outstanding Debt (All Years)</div>
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-card" id="totalDebt2026">
+                        <div class="stat-label">Total Unpaid (2026)</div>
+                        <div class="stat-value">Loading...</div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-table"></i> Year-by-Year Summary
+                        </h3>
+                    </div>
+                    <div class="card-body" id="allYearsTable">
+                        <p class="text-muted text-center">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-chart-line"></i> Outstanding Debt Trend (All Years)
+                </h2>
+
+                <div class="card">
+                    <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-wave-square"></i> Trend</h3>
+                    <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('debtTrendChart', 'Debt_Trend')">
+                        <i class="fas fa-download"></i> PNG
+                    </button>
+                    </div>
+                    <div class="card-body">
+                    <canvas id="debtTrendChart" height="120"></canvas>
+                    </div>
+                </div>
+                </div>
+
+            <!-- Debt Profile Section -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-exclamation-triangle"></i> Debt Profile (2026)
+                </h2>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <!-- Debt by Category -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-chart-bar"></i> Debt by Category
+                            </h3>
+                        </div>
+                        <div class="card-body" id="debtByCategory">
+                            <p class="text-muted text-center">Loading...</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Top Debtors -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <i class="fas fa-users"></i> Top 10 Outstanding Payees
+                            </h3>
+                        </div>
+                        <div class="card-body" id="topDebtors">
+                            <p class="text-muted text-center">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="report-section">
+            <div class="card">
+                <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-users"></i> Top Debtors (Chart)</h3>
+                <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('topDebtorsChart', 'Top_Debtors')">
+                    <i class="fas fa-download"></i> PNG
+                </button>
+                </div>
+                <div class="card-body">
+                <canvas id="topDebtorsChart" height="130"></canvas>
+                </div>
+            </div>
+            </div>
+
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-bullseye"></i> Debt Concentration</h3>
+                    </div>
+                    <div class="card-body" style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:center;">
+                    <div>
+                        <canvas id="debtConcentrationChart" height="170"></canvas>
+                    </div>
+                    <div>
+                        <div class="stat-card" id="debtConcentrationKPI">
+                        <div class="stat-label">Top 10 Share of Total Debt</div>
+                        <div class="stat-value">-</div>
+                        <div class="stat-subvalue text-muted">Higher means debt is concentrated among few payees</div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+                </div>
+
+    <!-- Scripts -->
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/activity-tracker.js"></script>
+<script src="js/api.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/components.js"></script>
+<script src="js/chat.js"></script>
+
+<!-- Chart.js MUST come before reports.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- reports.js only once -->
+<script src="js/reports.js"></script>
+
+<script src="js/footer.js"></script>
+    <script>
+        
+        // Update year label when selector changes
+        document.getElementById('yearSelector').addEventListener('change', function() {
+            document.getElementById('currentYearLabel').textContent = this.value;
+        });
+    </script>
+</body>
+</html>

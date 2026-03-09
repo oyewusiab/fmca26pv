@@ -1,0 +1,207 @@
+/* Release Voucher Styles */
+.release-step h4 {
+    color: var(--primary-color);
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--primary-color);
+}
+
+.release-search-results {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 10px;
+    margin-bottom: 15px;
+}
+
+.release-selected-list {
+    background: var(--secondary-color);
+    padding: 15px;
+    border-radius: var(--radius);
+    margin-top: 15px;
+}
+
+.release-selected-list h5 {
+    margin-bottom: 10px;
+    color: var(--primary-color);
+}
+
+.release-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.release-tag {
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+}
+
+.release-summary-box {
+    background: var(--secondary-color);
+    padding: 20px;
+    border-radius: var(--radius);
+    border-left: 4px solid var(--primary-color);
+}
+
+.release-summary-box h5 {
+    margin-bottom: 15px;
+    color: var(--primary-color);
+}
+
+/* ==================== Release Voucher Styles ==================== */
+.release-search-results {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 10px;
+    margin-bottom: 15px;
+    background: var(--white);
+}
+
+.release-search-results table {
+    margin-bottom: 0;
+}
+
+.release-search-results tr {
+    cursor: pointer;
+}
+
+.release-search-results tr:hover {
+    background: rgba(26, 95, 42, 0.05);
+}
+
+.release-search-results tr.selected {
+    background: rgba(26, 95, 42, 0.1);
+}
+
+.release-selected-list {
+    background: var(--secondary-color);
+    padding: 15px;
+    border-radius: var(--radius);
+    margin-top: 15px;
+    border-left: 4px solid var(--primary-color);
+}
+
+.release-selected-list h5 {
+    margin-bottom: 10px;
+    color: var(--primary-color);
+}
+
+.release-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.release-tag {
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.release-tag .remove-tag {
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+.release-tag .remove-tag:hover {
+    opacity: 1;
+}
+
+.release-summary-box {
+    background: var(--secondary-color);
+    padding: 20px;
+    border-radius: var(--radius);
+    border-left: 4px solid var(--primary-color);
+}
+
+.release-summary-box h5 {
+    margin-bottom: 15px;
+    color: var(--primary-color);
+}
+
+.release-summary-box p {
+    margin-bottom: 8px;
+}
+
+.voucher-already-released {
+    opacity: 0.6;
+    background: #f8d7da !important;
+}
+
+.voucher-already-released td::after {
+    content: " (Already Released)";
+    color: var(--danger-color);
+    font-size: 11px;
+}
+
+/* Navigation Badge */
+.nav-badge {
+    background: var(--danger-color);
+    color: white;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: auto;
+    font-weight: 600;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+}
+
+.nav-item { display: flex; align-items: center; }
+.nav-badge {
+  background: var(--danger-color);
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.chart-card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: var(--shadow-md);
+}
+
+.chart-card.full {
+  grid-column: span 2;
+}
+
+.chart-card h4 {
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: var(--text-dark);
+}
+
+@media(max-width: 900px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .chart-card.full {
+    grid-column: span 1;
+  }
+}
