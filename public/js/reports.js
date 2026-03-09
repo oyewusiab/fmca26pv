@@ -77,6 +77,34 @@ const Reports = {
 
         // Export button
         document.getElementById('exportBtn')?.addEventListener('click', () => this.exportToCSV());
+
+        // Listen for SWR background updates
+        document.addEventListener('apiDataUpdated', (e) => {
+            const { action, data, params } = e.detail;
+
+            // If the user hasn't switched the year dropdown, re-apply the fresh data
+            if (action === 'getSummary' && params.year === this.currentYear) {
+                this.summaryData = data;
+                this.renderYearSummary(data);
+                this.renderCategoryTable(data.categoryBreakdown);
+                this.renderMonthlyTable(data.monthlyBreakdown);
+                this.drawCategoryChart(data.categoryBreakdown);
+                this.drawCategoryParetoChart(data.categoryBreakdown);
+                this.drawMonthlyChart(data.monthlyBreakdown);
+                this.drawStatusCharts(data.summary);
+            }
+            if (action === 'getAllYearsSummary') {
+                this.allYearsData = data;
+                this.renderAllYearsSummary(data);
+                this.drawDebtTrendChart(data);
+            }
+            if (action === 'getDebtProfile') {
+                this.debtProfile = data;
+                this.renderDebtProfile(data);
+                this.drawDebtConcentration(data);
+                this.drawTopDebtorsChart(data);
+            }
+        });
     },
 
     /**

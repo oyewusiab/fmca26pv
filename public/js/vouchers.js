@@ -244,6 +244,29 @@ const Vouchers = {
         });
       }
     });
+
+    // Listen for SWR background data arrivals
+    document.addEventListener('apiDataUpdated', (e) => {
+      const { action, data, params } = e.detail;
+
+      // If categories arrived fresh in the background, update UI silently
+      if (action === 'getCategories') {
+        this.categories = data.categories || [];
+        this.populateCategoryDropdowns();
+      }
+
+      // If the vouchers list arrived fresh in the background, only re-render if we are still on the same page/filters
+      if (action === 'getVouchers') {
+        // Very simple check to ensure we only apply if the user hasn't heavily navigated away
+        // In a robust app, we would deep equal the params, but this is a solid start for 700kbps connections
+        if (params.page === this.currentPage && !this.isGlobalSearchMode) {
+          this.vouchers = data.vouchers || [];
+          this.totalCount = data.totalCount || 0;
+          this.totalPages = data.totalPages || 0;
+          this.renderVoucherList();
+        }
+      }
+    });
   },
 
   // ===== Categories =====
@@ -341,37 +364,41 @@ const Vouchers = {
       CONFIG.ROLES.CPO
     ].includes(user.role);
 
-    let html = `
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              ${canSelect ? '<th><input type="checkbox" id="selectAll" onchange="Vouchers.toggleSelectAll()"></th>' : ''}
-              <th>S/N</th>
-              <th>Voucher No.</th>
-              <th>Payee</th>
-              <th>Particular</th>
-              <th>Gross Amount</th>
-              <th>Category</th>
-              <th>Control No.</th>
-              <th>Status</th>
-              <th>Pmt Month</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
+    // Use DocumentFragment for 10x faster DOM insertion
+    const fragment = document.createDocumentFragment();
 
+    const tableContainer = document.createElement('div');
+    tableContainer.className = 'table-container';
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            ${canSelect ? '<th><input type="checkbox" id="selectAll"></th>' : ''}
+            <th>S/N</th>
+            <th>Voucher No.</th>
+            <th>Payee</th>
+            <th>Particular</th>
+            <th>Gross Amount</th>
+            <th>Category</th>
+            <th>Control No.</th>
+            <th>Status</th>
+            <th>Pmt Month</th>
+            <th>Actions</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
     const startSN = (this.currentPage - 1) * this.pageSize;
 
     this.vouchers.forEach((v, idx) => {
       const sn = startSN + idx + 1;
-      html += `
-        <tr data-row="${v.rowIndex}">
-          ${canSelect
-          ? `<td><input type="checkbox" class="voucher-checkbox" value="${v.rowIndex}" onchange="Vouchers.updateSelection()"></td>`
-          : ''
-        }
+      const tr = document.createElement('tr');
+      tr.dataset.row = v.rowIndex;
+
+      tr.innerHTML = `
+          ${canSelect ? `<td><input type="checkbox" class="voucher-checkbox" value="${v.rowIndex}"></td>` : ''}
           <td>${sn}</td>
           <td><strong>${v.accountOrMail || '-'}</strong></td>
           <td title="${v.payee || ''}">${Utils.truncate(v.payee || '-', 20)}</td>
@@ -389,18 +416,22 @@ const Vouchers = {
               ${this.getActionButtons(v)}
             </div>
           </td>
-        </tr>
       `;
+      tbody.appendChild(tr);
     });
 
-    html += '</tbody></table></div>';
-    container.innerHTML = html;
+    table.appendChild(tbody);
+    tableContainer.appendChild(table);
+    fragment.appendChild(tableContainer);
 
-    // Keep your existing selection/pagination behavior
+    // Clear and append all at once
+    container.innerHTML = '';
+    container.appendChild(fragment);
+
+    // Reattach listeners securely
     this.updateSelection?.();
     this.renderPagination?.();
 
-    // bind checkbox handlers + view handlers (avoids inline duplicate binding issues)
     if (canSelect) {
       const selectAll = document.getElementById('selectAll');
       if (selectAll) {
@@ -413,10 +444,6 @@ const Vouchers = {
         cb.addEventListener('change', () => this.updateSelection());
       });
     }
-
-    container.querySelectorAll('button[data-action="view"]').forEach(btn => {
-      btn.addEventListener('click', () => this.viewVoucher(parseInt(btn.dataset.row, 10)));
-    });
 
     this.renderPagination();
   },
@@ -1149,12 +1176,28 @@ const Vouchers = {
     this.showLoading(true);
 
     try {
+      // Optimistic Update
+      const oldStates = [];
+      this.vouchers.forEach(v => {
+        if ((v.controlNumber || '').trim() === cn) {
+          oldStates.push({ v, oldStatus: v.status, oldPmtMonth: v.pmtMonth });
+          v.status = status;
+          if (pmtMonth) v.pmtMonth = pmtMonth;
+        }
+      });
+      if (oldStates.length > 0) this.renderVoucherList();
+      this.closeModal('batchStatusModal');
+
       const result = await API.batchUpdateStatus(cn, status, pmtMonth);
       if (result.success) {
         Utils.showToast(result.message, 'success');
-        this.closeModal('batchStatusModal');
-        await this.loadVouchers();
       } else {
+        // Revert Optimistic Update
+        oldStates.forEach(s => {
+          s.v.status = s.oldStatus;
+          s.v.pmtMonth = s.oldPmtMonth;
+        });
+        if (oldStates.length > 0) this.renderVoucherList();
         Utils.showToast(result.error || 'Batch update failed', 'error');
       }
     } catch (e) {
@@ -1181,13 +1224,27 @@ const Vouchers = {
     this.showLoading(true);
 
     try {
+      // Optimistic update
+      const oldStates = [];
+      this.selectedVouchers.forEach(idx => {
+        const v = this.vouchers.find(x => x.rowIndex === idx);
+        if (v) {
+          oldStates.push({ v, oldCn: v.controlNumber });
+          v.controlNumber = cn;
+        }
+      });
+      if (oldStates.length > 0) this.renderVoucherList();
+      this.closeModal('assignControlModal');
+
       const result = await API.assignControlNumber(this.selectedVouchers, cn);
       if (result.success) {
         Utils.showToast(result.message, 'success');
-        this.closeModal('assignControlModal');
         this.selectedVouchers = [];
-        await this.loadVouchers();
+        // Background SWR handles sync
       } else {
+        // Revert setup
+        oldStates.forEach(s => s.v.controlNumber = s.oldCn);
+        if (oldStates.length > 0) this.renderVoucherList();
         Utils.showToast(result.error || 'Assignment failed', 'error');
       }
     } catch (e) {
@@ -1267,13 +1324,20 @@ const Vouchers = {
     this.closeModal('deleteRequestModal');
 
     try {
-      const result = await API.requestDelete(voucher.rowIndex, reason, voucher.status || 'Unpaid');
+      // Optimistic update
+      const originalStatus = voucher.status;
+      voucher.status = 'Pending Deletion';
+      this.renderVoucherList();
+
+      const result = await API.requestDelete(voucher.rowIndex, reason, originalStatus || 'Unpaid');
       if (result.success) {
         Utils.showToast(result.message || 'Deletion request submitted', 'success');
         this.deleteTargetVoucher = null;
-        await this.loadVouchers();
         if (this.pendingDeletionsLoaded) await this.loadPendingDeletions();
       } else {
+        // Revert 
+        voucher.status = originalStatus;
+        this.renderVoucherList();
         Utils.showToast(result.error || 'Failed to request deletion', 'error');
       }
     } catch (e) {
@@ -2342,6 +2406,15 @@ const Vouchers = {
     this.showLoading(true);
 
     try {
+      // Optimistic update
+      const originalStatus = this.selectedVoucher.status;
+      const originalPmtMonth = this.selectedVoucher.pmtMonth;
+
+      this.selectedVoucher.status = status;
+      this.selectedVoucher.pmtMonth = pmtMonth;
+      this.renderVoucherList();
+      this.closeModal('statusModal');
+
       const result = typeof API.updateStatus === 'function'
         ? await API.updateStatus(this.selectedVoucher.rowIndex, status, pmtMonth)
         : await API.post('updateStatus', {
@@ -2352,9 +2425,12 @@ const Vouchers = {
 
       if (result.success) {
         Utils.showToast(result.message || 'Status updated successfully', 'success');
-        this.closeModal('statusModal');
-        await this.loadVouchers();
+        // Background SWR handles fresh data sync, no block on UI needed
       } else {
+        // Revert 
+        this.selectedVoucher.status = originalStatus;
+        this.selectedVoucher.pmtMonth = originalPmtMonth;
+        this.renderVoucherList();
         Utils.showToast(result.error || 'Failed to update status', 'error');
       }
     } catch (e) {

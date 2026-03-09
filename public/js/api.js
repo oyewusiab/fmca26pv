@@ -68,7 +68,7 @@
     // ==================== CORE REQUESTS ====================
 
     /**
-     * Makes a GET request to the API
+     * Makes a GET request to the API with SWR (Stale-While-Revalidate)
      * @param {string} action
      * @param {Object} params
      * @param {number} [customTtl] Optional override for TTL
@@ -87,48 +87,75 @@
           }
         }
 
-        // 1. Check Cache
         const cacheKey = this._getCacheKey(action, params);
         const ttl = customTtl !== null ? customTtl : (this._ttls[action] || 0);
 
+        // 1. SWR: Immediately return cached data if available
+        let cachedData = null;
         if (ttl > 0) {
-          const cached = this._getFromCache(cacheKey);
-          if (cached) return cached;
+          cachedData = this._getFromCache(cacheKey);
         }
 
-        // 2. Check In-flight (Deduplication)
-        if (this._inflightRequests.has(cacheKey)) {
-          return this._inflightRequests.get(cacheKey);
+        // 2. Fetch fresh data in the background
+        const fetchPromise = (async () => {
+          if (this._inflightRequests.has(cacheKey)) {
+            return await this._inflightRequests.get(cacheKey);
+          }
+
+          const requestPromise = fetch(url, { method: "GET", redirect: "follow" });
+
+          this._inflightRequests.set(cacheKey, requestPromise.then(async r => {
+            try {
+              const text = await r.clone().text();
+              return JSON.parse(text);
+            } catch {
+              return {};
+            }
+          }));
+
+          try {
+            const response = await requestPromise;
+            const text = await response.text();
+            let result;
+            try {
+              result = JSON.parse(text);
+            } catch (e) {
+              console.error(`API GET non-JSON response (${action}):`, text);
+              return { success: false, error: "Invalid response from server" };
+            }
+
+            if (result?.error && String(result.error).includes("Session expired")) {
+              Auth.clearSession?.();
+              window.location.href = "index.html";
+              return { success: false, error: "Session expired" };
+            }
+
+            // Set Cache
+            if (result.success && ttl > 0) {
+              this._setCache(cacheKey, result, ttl);
+
+              // Dispatch event to let UI know fresh data arrived (if they want to re-render without reloading)
+              document.dispatchEvent(new CustomEvent('apiDataUpdated', {
+                detail: { action, params, data: result }
+              }));
+            }
+
+            return result;
+          } finally {
+            this._inflightRequests.delete(cacheKey);
+          }
+        })();
+
+        // If we have stale cache, return it instantly! The background promise will silently update cache.
+        if (cachedData) {
+          // Let the caller know this is cached data so they can optionally show a loader
+          cachedData._isCached = true;
+          return cachedData;
         }
 
-        const requestPromise = fetch(url, { method: "GET", redirect: "follow" });
-        this._inflightRequests.set(cacheKey, requestPromise.then(r => r.clone().text().then(t => { try { return JSON.parse(t); } catch { return {}; } })));
-        const response = await requestPromise;
+        // Otherwise, wait for the network (first load)
+        return await fetchPromise;
 
-        // Apps Script sometimes returns HTML on errors; handle safely
-        const text = await response.text();
-        let result;
-        try {
-          result = JSON.parse(text);
-        } catch (e) {
-          console.error(`API GET non-JSON response (${action}):`, text);
-          this._inflightRequests.delete(cacheKey);
-          return { success: false, error: "Invalid response from server" };
-        }
-
-        if (result?.error && String(result.error).includes("Session expired")) {
-          Auth.clearSession?.();
-          window.location.href = "index.html";
-          return { success: false, error: "Session expired" };
-        }
-
-        // 3. Set Cache
-        if (result.success && ttl > 0) {
-          this._setCache(cacheKey, result, ttl);
-        }
-
-        this._inflightRequests.delete(cacheKey);
-        return result;
       } catch (error) {
         this._inflightRequests.delete(this._getCacheKey(action, params));
         console.error(`API GET error (${action}):`, error);
