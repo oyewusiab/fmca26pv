@@ -33,6 +33,9 @@ const Vouchers = {
     status: 'All',
     category: 'All',
     searchTerm: '',
+    pmtMonth: 'All',
+    dateFrom: '',
+    dateTo: '',
     amountMin: '',
     amountMax: '',
     release: 'All'
@@ -116,7 +119,6 @@ const Vouchers = {
       canEditVoucher: [
         CONFIG.ROLES.PAYABLE_STAFF,
         CONFIG.ROLES.PAYABLE_HEAD,
-        CONFIG.ROLES.CPO,
         CONFIG.ROLES.ADMIN
       ].includes(role),
 
@@ -331,6 +333,15 @@ const Vouchers = {
       this.totalCount = result.totalCount || 0;
       this.totalPages = result.totalPages || 0;
 
+      this.vouchers.sort((a, b) => {
+        const ar = Number(a?.rowIndex || 0);
+        const br = Number(b?.rowIndex || 0);
+        if (br !== ar) return br - ar;
+        const ad = a?.date ? new Date(a.date).getTime() : 0;
+        const bd = b?.date ? new Date(b.date).getTime() : 0;
+        return bd - ad;
+      });
+
       this.renderVoucherList();
     } catch (e) {
       console.error('loadVouchers error:', e);
@@ -461,12 +472,11 @@ const Vouchers = {
     let buttons = '';
 
     // Edit
-    if (perms.canEditVoucher && voucher.status !== 'Pending Deletion') {
+    if (perms.canEditVoucher && user.role !== CONFIG.ROLES.CPO && voucher.status !== 'Pending Deletion') {
       const canEdit =
         voucher.status === 'Unpaid' ||
         user.role === CONFIG.ROLES.ADMIN ||
-        user.role === CONFIG.ROLES.PAYABLE_HEAD ||
-        user.role === CONFIG.ROLES.CPO;
+        user.role === CONFIG.ROLES.PAYABLE_HEAD;
 
       if (canEdit) {
         buttons += `
@@ -571,6 +581,9 @@ const Vouchers = {
     this.filters.status = document.getElementById('statusFilter')?.value || 'All';
     this.filters.category = document.getElementById('categoryFilter')?.value || 'All';
     this.filters.searchTerm = document.getElementById('searchInput')?.value.trim() || '';
+    this.filters.pmtMonth = document.getElementById('pmtMonthFilter')?.value || 'All';
+    this.filters.dateFrom = document.getElementById('dateFromFilter')?.value || '';
+    this.filters.dateTo = document.getElementById('dateToFilter')?.value || '';
     this.filters.amountMin = document.getElementById('amountMinFilter')?.value || '';
     this.filters.amountMax = document.getElementById('amountMaxFilter')?.value || '';
     this.filters.release = document.getElementById('releaseFilter')?.value || 'All';
@@ -821,8 +834,71 @@ const Vouchers = {
       document.getElementById('formNet').value = '0';
     }
 
+    const oldVoucher = (voucher && voucher.oldVoucherNumber) ? String(voucher.oldVoucherNumber).trim() : '';
+    const oldAvailRaw = voucher ? voucher.oldVoucherAvailable : '';
+    const oldAvail = (oldAvailRaw === undefined || oldAvailRaw === null)
+      ? ''
+      : String(oldAvailRaw).trim().toLowerCase();
+
+    this.setOldVoucherAvailability('');
+    if (oldVoucher) {
+      this.setOldVoucherAvailability('yes');
+    } else if (oldAvail === 'yes' || oldAvail === 'true') {
+      this.setOldVoucherAvailability('yes');
+    } else if (oldAvail === 'no' || oldAvail === 'false') {
+      this.setOldVoucherAvailability('no');
+    }
+    this.applyOldVoucherAvailability();
+
     this.setupPaymentTypeHandlers();
     modal.classList.add('active');
+  },
+
+  getOldVoucherAvailability() {
+    return document.querySelector('input[name="oldVoucherAvailable"]:checked')?.value || '';
+  },
+
+  setOldVoucherAvailability(value) {
+    const yes = document.getElementById('oldVoucherAvailableYes');
+    const no = document.getElementById('oldVoucherAvailableNo');
+    if (!yes || !no) return;
+
+    if (value === 'yes') {
+      yes.checked = true;
+      no.checked = false;
+    } else if (value === 'no') {
+      yes.checked = false;
+      no.checked = true;
+    } else {
+      yes.checked = false;
+      no.checked = false;
+    }
+  },
+
+  applyOldVoucherAvailability() {
+    const choice = this.getOldVoucherAvailability();
+    const input = document.getElementById('formOldVoucherNumber');
+    const required = document.getElementById('oldVoucherRequired');
+    const lookupBtn = document.getElementById('oldVoucherLookupBtn');
+    if (!input) return;
+
+    if (choice === 'yes') {
+      input.disabled = false;
+      input.required = true;
+      if (required) required.style.display = 'inline';
+      if (lookupBtn) lookupBtn.disabled = false;
+    } else if (choice === 'no') {
+      input.value = '';
+      input.disabled = true;
+      input.required = false;
+      if (required) required.style.display = 'none';
+      if (lookupBtn) lookupBtn.disabled = true;
+    } else {
+      input.disabled = true;
+      input.required = false;
+      if (required) required.style.display = 'none';
+      if (lookupBtn) lookupBtn.disabled = true;
+    }
   },
 
   detectPaymentType(particular) {
@@ -842,6 +918,13 @@ const Vouchers = {
   },
 
   async editVoucher(rowIndex) {
+    const perms = this.getEffectivePermissions();
+    const user = Auth.getUser();
+    if (!perms.canEditVoucher || (user && user.role === CONFIG.ROLES.CPO)) {
+      Utils.showToast('You are not authorized to edit vouchers', 'error');
+      return;
+    }
+
     // If global search mode, fetch from 2026 to avoid wrong-year match
     if (this.isGlobalSearchMode) {
       this.showLoading(true);
@@ -872,6 +955,13 @@ const Vouchers = {
   },
 
   async saveVoucher() {
+    const perms = this.getEffectivePermissions();
+    const user = Auth.getUser();
+    if (this.isEditMode && (!perms.canEditVoucher || (user && user.role === CONFIG.ROLES.CPO))) {
+      Utils.showToast('You are not authorized to edit vouchers', 'error');
+      return;
+    }
+
     const particularValidation = this.validateParticular();
     if (!particularValidation.valid) {
       Utils.showToast(particularValidation.error, 'error');
@@ -893,12 +983,20 @@ const Vouchers = {
     const wht = parseFloat(document.getElementById('formWht').value) || 0;
     const stampDuty = parseFloat(document.getElementById('formStampDuty').value) || 0;
     const net = gross - (vat + wht + stampDuty);
+    const oldVoucherChoice = this.getOldVoucherAvailability();
+    let oldVoucherNumber = document.getElementById('formOldVoucherNumber').value.trim();
 
     document.getElementById('formNet').value = net.toFixed(2);
 
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
     if (!gross) return Utils.showToast('Gross amount is required', 'error');
+    if (oldVoucherChoice === 'yes' && !oldVoucherNumber) {
+      return Utils.showToast('Old voucher number is required when "Yes" is selected', 'error');
+    }
+    if (oldVoucherChoice === 'no') {
+      oldVoucherNumber = '';
+    }
 
     const voucherData = {
       payee,
@@ -914,7 +1012,8 @@ const Vouchers = {
       accountType: document.getElementById('formAccountType').value,
       date: document.getElementById('formDate').value,
       totalGross: gross,
-      oldVoucherNumber: document.getElementById('formOldVoucherNumber').value.trim()
+      oldVoucherNumber: oldVoucherNumber,
+      oldVoucherAvailable: oldVoucherChoice ? (oldVoucherChoice === 'yes' ? 'Yes' : 'No') : ''
     };
 
     this.showLoading(true);
@@ -1048,6 +1147,8 @@ const Vouchers = {
     this.openVoucherForm();
 
     setTimeout(() => {
+      this.setOldVoucherAvailability('yes');
+      this.applyOldVoucherAvailability();
       document.getElementById('formOldVoucherNumber').value = v.accountOrMail || '';
       document.getElementById('formPayee').value = v.payee || '';
       document.getElementById('formParticular').value = v.particular || '';
@@ -1067,6 +1168,10 @@ const Vouchers = {
   },
 
   async inlineLookup() {
+    const oldVoucherChoice = this.getOldVoucherAvailability();
+    if (oldVoucherChoice !== 'yes') {
+      return Utils.showToast('Select "Yes" to enter an old voucher number', 'warning');
+    }
     const oldVN = document.getElementById('formOldVoucherNumber').value.trim();
     if (!oldVN) return Utils.showToast('Enter an old voucher number first', 'warning');
 
@@ -1779,6 +1884,9 @@ const Vouchers = {
         searchTerm: term,
         status: this.filters.status,
         category: this.filters.category,
+        pmtMonth: this.filters.pmtMonth,
+        dateFrom: this.filters.dateFrom,
+        dateTo: this.filters.dateTo,
         amountMin: this.filters.amountMin,
         amountMax: this.filters.amountMax,
         release: this.filters.release
@@ -2005,6 +2113,9 @@ const Vouchers = {
     const statusFilter = document.getElementById('statusFilter');
     const categoryFilter = document.getElementById('categoryFilter');
     const searchInput = document.getElementById('searchInput');
+    const pmtMonthFilter = document.getElementById('pmtMonthFilter');
+    const dateFromFilter = document.getElementById('dateFromFilter');
+    const dateToFilter = document.getElementById('dateToFilter');
     const amountMinFilter = document.getElementById('amountMinFilter');
     const amountMaxFilter = document.getElementById('amountMaxFilter');
     const releaseFilter = document.getElementById('releaseFilter');
@@ -2012,6 +2123,9 @@ const Vouchers = {
     if (statusFilter) statusFilter.value = 'All';
     if (categoryFilter) categoryFilter.value = 'All';
     if (searchInput) searchInput.value = '';
+    if (pmtMonthFilter) pmtMonthFilter.value = 'All';
+    if (dateFromFilter) dateFromFilter.value = '';
+    if (dateToFilter) dateToFilter.value = '';
     if (amountMinFilter) amountMinFilter.value = '';
     if (amountMaxFilter) amountMaxFilter.value = '';
     if (releaseFilter) releaseFilter.value = 'All';
@@ -2020,15 +2134,9 @@ const Vouchers = {
       status: 'All',
       category: 'All',
       searchTerm: '',
-      amountMin: '',
-      amountMax: '',
-      release: 'All'
-    };
-
-    this.filters = {
-      status: 'All',
-      category: 'All',
-      searchTerm: '',
+      pmtMonth: 'All',
+      dateFrom: '',
+      dateTo: '',
       amountMin: '',
       amountMax: '',
       release: 'All'
@@ -2037,6 +2145,14 @@ const Vouchers = {
     this.isGlobalSearchMode = false;
     this.currentPage = 1;
     this.loadVouchers();
+  },
+
+  clearSearch() {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
+    this.filters.searchTerm = '';
+    this.isGlobalSearchMode = false;
+    this.applyFilters();
   },
 
   renderReleaseSearchResults() {
@@ -2309,6 +2425,15 @@ const Vouchers = {
     if (this.filters.searchTerm) {
       activeFilters.push(`"${this.filters.searchTerm}"`);
     }
+    if (this.filters.pmtMonth && this.filters.pmtMonth !== 'All') {
+      activeFilters.push(`Pmt: ${this.filters.pmtMonth}`);
+    }
+    if (this.filters.dateFrom) {
+      activeFilters.push(`From: ${this.filters.dateFrom}`);
+    }
+    if (this.filters.dateTo) {
+      activeFilters.push(`To: ${this.filters.dateTo}`);
+    }
     if (this.filters.amountMin) {
       activeFilters.push(`Min: ₦${this.filters.amountMin}`);
     }
@@ -2332,6 +2457,9 @@ const Vouchers = {
 
     document.getElementById('statusFilter')?.addEventListener('change', () => this.applyFilters());
     document.getElementById('categoryFilter')?.addEventListener('change', () => this.applyFilters());
+    document.getElementById('pmtMonthFilter')?.addEventListener('change', () => this.applyFilters());
+    document.getElementById('dateFromFilter')?.addEventListener('change', () => this.applyFilters());
+    document.getElementById('dateToFilter')?.addEventListener('change', () => this.applyFilters());
     document.getElementById('releaseFilter')?.addEventListener('change', () => this.applyFilters());
 
     document.getElementById('amountMinFilter')?.addEventListener('input', debouncedFilter);
@@ -2364,6 +2492,10 @@ const Vouchers = {
     document.getElementById('voucherForm')?.addEventListener('submit', (e) => {
       e.preventDefault();
       this.saveVoucher();
+    });
+
+    document.querySelectorAll('input[name="oldVoucherAvailable"]').forEach(radio => {
+      radio.addEventListener('change', () => this.applyOldVoucherAvailability());
     });
 
     const recalcNet = () => {
@@ -2442,26 +2574,54 @@ const Vouchers = {
   },
 
   async generateControlNumber() {
-    const target = document.getElementById('releaseTargetUnit')?.value || '';
-    if (!target || target === 'Others') {
+    const targetSelect = document.getElementById('releaseTargetUnit');
+    const target = targetSelect?.value || '';
+
+    if (!target) {
       Utils.showToast('Please select a target unit first', 'warning');
+      return;
+    }
+
+    if (target === 'Others') {
+      Utils.showToast('Please specify the target unit name for "Others"', 'warning');
       return;
     }
 
     this.showLoading(true);
 
     try {
-      const result = await API.get('getNextControlNumber', { targetUnit: target });
+      console.log('=== generateControlNumber START ===');
+      console.log('Target Unit:', target);
 
-      if (result.success && result.controlNumber) {
-        document.getElementById('releaseControlNumber').value = result.controlNumber;
-        Utils.showToast('Control number generated', 'success');
+      // Try GET first
+      let result;
+
+      if (typeof API.get === 'function') {
+        console.log('Calling API.get("getNextControlNumber", { targetUnit: "' + target + '" })');
+        result = await API.get('getNextControlNumber', { targetUnit: target });
+      } else if (typeof API.getNextControlNumber === 'function') {
+        console.log('Calling API.getNextControlNumber("' + target + '")');
+        result = await API.getNextControlNumber(target);
       } else {
-        Utils.showToast(result.error || 'Failed to generate control number', 'error');
+        // Fallback to POST
+        console.log('Calling API.post("getNextControlNumber", { targetUnit: "' + target + '" })');
+        result = await API.post('getNextControlNumber', { targetUnit: target });
+      }
+
+      console.log('API Response:', JSON.stringify(result));
+      console.log('=== generateControlNumber END ===');
+
+      if (result && result.success && result.controlNumber) {
+        document.getElementById('releaseControlNumber').value = result.controlNumber;
+        Utils.showToast('Control number generated: ' + result.controlNumber, 'success');
+      } else {
+        const errorMsg = (result && result.error) ? result.error : 'Failed to generate control number';
+        Utils.showToast(errorMsg, 'error');
+        console.error('generateControlNumber failed:', errorMsg);
       }
     } catch (e) {
-      console.error('generateControlNumber error:', e);
-      Utils.showToast('Error generating control number', 'error');
+      console.error('generateControlNumber exception:', e);
+      Utils.showToast('Error generating control number: ' + e.message, 'error');
     } finally {
       this.showLoading(false);
     }

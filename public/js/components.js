@@ -13,10 +13,7 @@ const Components = {
         if (!user) return '';
 
         const isActive = (page) => (activePage === page ? 'active' : '');
-        const isPayableUnit = [
-            CONFIG.ROLES.PAYABLE_STAFF,
-            CONFIG.ROLES.PAYABLE_HEAD
-            ].includes(user.role);
+        const isPayableStaff = user.role === CONFIG.ROLES.PAYABLE_STAFF;
 
         // Base navigation
         let navItems = `
@@ -26,7 +23,7 @@ const Components = {
             <a href="vouchers.html" class="nav-item ${isActive('vouchers')}">
             <i class="fas fa-file-invoice-dollar"></i> Vouchers
             </a>
-            ${!isPayableUnit ? `
+            ${!isPayableStaff ? `
             <a href="reports.html" class="nav-item ${isActive('reports')}">
                 <i class="fas fa-chart-bar"></i> Reports
             </a>
@@ -84,9 +81,9 @@ const Components = {
                 <i class="fas fa-sign-out-alt"></i> Logout
             </button>
             </div>
-        `;    
+        `;
     },
-    
+
     /**
      * Generates loading overlay HTML
      */
@@ -98,7 +95,7 @@ const Components = {
             </div>
         `;
     },
-    
+
     /**
      * Generates empty state HTML
      */
@@ -110,15 +107,15 @@ const Components = {
             </div>
         `;
     },
-    
+
     /**
      * Generates pagination HTML
      */
     getPagination(currentPage, totalPages, containerId = 'pagination') {
         if (totalPages <= 1) return '';
-        
+
         let html = '<div class="pagination" style="display: flex; justify-content: center; gap: 5px; margin-top: 20px;">';
-        
+
         html += `
             <button class="btn btn-sm btn-secondary" 
                     onclick="handlePageChange(${currentPage - 1})"
@@ -126,7 +123,7 @@ const Components = {
                 <i class="fas fa-chevron-left"></i>
             </button>
         `;
-        
+
         for (let i = 1; i <= totalPages; i++) {
             if (i === currentPage) {
                 html += `<button class="btn btn-sm btn-primary">${i}</button>`;
@@ -136,7 +133,7 @@ const Components = {
                 html += `<span style="padding: 5px;">...</span>`;
             }
         }
-        
+
         html += `
             <button class="btn btn-sm btn-secondary" 
                     onclick="handlePageChange(${currentPage + 1})"
@@ -144,11 +141,11 @@ const Components = {
                 <i class="fas fa-chevron-right"></i>
             </button>
         `;
-        
+
         html += '</div>';
         return html;
     },
-    
+
     /**
      * Opens a modal
      */
@@ -158,7 +155,7 @@ const Components = {
             modal.classList.add('active');
         }
     },
-    
+
     /**
      * Closes a modal
      */
@@ -168,26 +165,26 @@ const Components = {
             modal.classList.remove('active');
         }
     },
-    
+
     /**
      * Initializes common page elements
      */
     async initPage(activePage) {
         const isAuth = await Auth.requireAuth();
         if (!isAuth) return false;
-        
+
         const sidebar = document.getElementById('sidebar');
         if (sidebar) {
             sidebar.innerHTML = this.getSidebar(activePage);
         }
-        
+
         const menuToggle = document.getElementById('menuToggle');
         if (menuToggle && sidebar) {
             menuToggle.addEventListener('click', () => {
                 sidebar.classList.toggle('active');
             });
         }
-        
+
         document.addEventListener('click', (e) => {
             if (window.innerWidth <= 992 && sidebar && menuToggle) {
                 if (!sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
@@ -195,7 +192,7 @@ const Components = {
                 }
             }
         });
-        
+
         return true;
     }
 };

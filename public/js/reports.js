@@ -748,6 +748,13 @@ const Reports = {
                 <div class="stat-value">${Utils.formatNumber(stats.revalidatedVouchers)}</div>
                 <div class="stat-subvalue">With Old Voucher Number</div>
             </div>
+
+            <!-- Revalidated Without Old Voucher Number -->
+            <div class="stat-card">
+                <div class="stat-label">Revalidated (No Old Voucher No.)</div>
+                <div class="stat-value">${Utils.formatNumber(stats.revalidatedWithoutOldNumber || 0)}</div>
+                <div class="stat-subvalue">Old number not available</div>
+            </div>
         `;
     },
 
@@ -1085,6 +1092,7 @@ const Reports = {
         csv += `Total Debt,${s.totalDebt}\n`;
         csv += `Average Payment Rate (%),${s.averagePaymentPercent}\n`;
         csv += `Revalidated Vouchers (Count),${s.revalidatedVouchers}\n\n`;
+        csv += `Revalidated (No Old Voucher No.),${s.revalidatedWithoutOldNumber || 0}\n\n`;
 
         // CATEGORY BREAKDOWN
         csv += 'CATEGORY BREAKDOWN\n';

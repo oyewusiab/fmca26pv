@@ -32,7 +32,8 @@ const CONFIG = {
     STATUS: 1, PMT_MONTH: 2, PAYEE: 3, ACCOUNT_OR_MAIL: 4, PARTICULAR: 5,
     CONTRACT_SUM: 6, GROSS_AMOUNT: 7, NET: 8, VAT: 9, WHT: 10, STAMP_DUTY: 11,
     CATEGORIES: 12, TOTAL_GROSS: 13, CONTROL_NUMBER: 14, OLD_VOUCHER_NUMBER: 15,
-    DATE: 16, ACCOUNT_TYPE: 17, CREATED_AT: 18, RELEASED_AT: 19, ATTACHMENT_URL: 20
+    DATE: 16, ACCOUNT_TYPE: 17, CREATED_AT: 18, RELEASED_AT: 19, ATTACHMENT_URL: 20,
+    OLD_VOUCHER_AVAILABLE: 21
   },
   
   // User Column Indices
@@ -186,6 +187,7 @@ function rowToVoucher(row, rowIndex, has2026Format = true) {
     totalGross: parseAmount(row[cols.TOTAL_GROSS - 1]),
     controlNumber: row[cols.CONTROL_NUMBER - 1],
     oldVoucherNumber: row[cols.OLD_VOUCHER_NUMBER - 1],
+    oldVoucherAvailable: row[cols.OLD_VOUCHER_AVAILABLE - 1],
     date: row[cols.DATE - 1] ? Utilities.formatDate(new Date(row[cols.DATE - 1]), "GMT", "yyyy-MM-dd") : '',
     accountType: row[cols.ACCOUNT_TYPE - 1],
     createdAt: row[cols.CREATED_AT - 1] ? new Date(row[cols.CREATED_AT - 1]).toISOString() : '',
@@ -218,6 +220,7 @@ function voucherToRow(voucher) {
   row[cols.TOTAL_GROSS - 1] = voucher.totalGross || voucher.grossAmount;
   row[cols.CONTROL_NUMBER - 1] = voucher.controlNumber || '';
   row[cols.OLD_VOUCHER_NUMBER - 1] = voucher.oldVoucherNumber || '';
+  row[cols.OLD_VOUCHER_AVAILABLE - 1] = voucher.oldVoucherAvailable || '';
   row[cols.DATE - 1] = voucher.date ? new Date(voucher.date) : new Date();
   row[cols.ACCOUNT_TYPE - 1] = voucher.accountType || '';
   row[cols.CREATED_AT - 1] = voucher.createdAt ? new Date(voucher.createdAt) : new Date();
@@ -253,6 +256,7 @@ function doGet(e) {
         break;
       case 'getVoucherByRow': result = getVoucherByRow(params.token, params.rowIndex, params.year); break;
       case 'lookupVoucher': result = lookupVoucher(params.token, params.voucherNumber); break;
+      case 'getNextControlNumber': result = getNextControlNumber(params.token, params.targetUnit); break;
 
       // ---- USERS ----
       case 'getUsers': result = getUsers(params.token); break;
@@ -334,6 +338,7 @@ function doPost(e) {
       case 'batchUpdateStatus': result = batchUpdateStatus(token, payload.controlNumber, payload.status, payload.pmtMonth); break;
       case 'releaseVouchers': result = releaseVouchers(token, payload); break;
       case 'assignControlNumber': result = assignControlNumber(token, payload.rowIndexes, payload.controlNumber); break;
+      case 'getNextControlNumber': result = getNextControlNumber(token, payload.targetUnit); break;
       case 'requestDelete': result = requestVoucherDelete(token, payload.rowIndex, payload.reason, payload.previousStatus); break;
       case 'approveDelete': result = approveVoucherDelete(token, payload.rowIndex); break;
       case 'rejectDelete': result = rejectVoucherDelete(token, payload.rowIndex, payload.reason); break;
@@ -981,6 +986,72 @@ function assignControlNumber(token, rowIndexes, controlNumber) {
   });
 
   return { success: true, message: "Control Number Assigned" };
+}
+
+/**
+ * Returns the next control number for a target unit.
+ * Can be called by Payable Staff / Head / CPO / Admin.
+ */
+function getNextControlNumber(token, targetUnit) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (!hasPermission(session.role, [
+      CONFIG.ROLES.PAYABLE_STAFF,
+      CONFIG.ROLES.PAYABLE_HEAD,
+      CONFIG.ROLES.CPO,
+      CONFIG.ROLES.ADMIN
+    ])) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    if (!targetUnit || !String(targetUnit).trim()) {
+      return { success: false, error: 'Target unit is required' };
+    }
+
+    const controlNumber = generateControlNumber(targetUnit);
+    return { success: true, controlNumber: controlNumber };
+  } catch (error) {
+    return { success: false, error: 'Failed to generate control number: ' + error.message };
+  }
+}
+
+/**
+ * Generates a new control number for 2026 in the format:
+ * CN-<UNIT>-<N>
+ */
+function generateControlNumber(targetUnit) {
+  const unitCode = String(targetUnit || '').toUpperCase();
+  if (!unitCode) {
+    throw new Error('Target unit is required to generate control number.');
+  }
+  
+  const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return `CN-${unitCode}-1`;
+  }
+  
+  const cnCol = CONFIG.VOUCHER_COLUMNS.CONTROL_NUMBER;
+  const cnValues = sheet.getRange(2, cnCol, lastRow - 1, 1).getValues();
+  
+  const prefix = `CN-${unitCode}-`;
+  let maxNumber = 0;
+  
+  for (let i = 0; i < cnValues.length; i++) {
+    const val = String(cnValues[i][0] || '').trim().toUpperCase();
+    if (val.startsWith(prefix)) {
+      const numPart = val.substring(prefix.length);
+      const n = parseInt(numPart, 10);
+      if (!isNaN(n) && n > maxNumber) {
+        maxNumber = n;
+      }
+    }
+  }
+  
+  const nextNumber = maxNumber + 1;
+  return `${prefix}${nextNumber}`;
 }
 
 function rowToVoucher(row, rowIndex, has2026Format = true) {

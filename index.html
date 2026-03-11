@@ -5,57 +5,157 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Login – PAYABLE VOUCHER 2026</title>
+    <title>Login &ndash; PAYABLE VOUCHER 2026</title>
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Manrope:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" href="images/fmc-logo.png" type="image/png">
 
     <link rel="stylesheet" href="css/styles.css">
 
     <style>
+        :root {
+            --brand-dark: #0f4d2f;
+            --brand-deep: #0a2c1f;
+            --brand-accent: #3cc47c;
+            --brand-gold: #d4b66a;
+            --ink: #0f2d20;
+            --paper: #f6faf8;
+        }
+
         body {
-            background: linear-gradient(135deg, #0f4d2f, #09251a);
+            font-family: "Manrope", "Segoe UI", sans-serif;
+            background: linear-gradient(160deg, #0a2c1f, #0f4d2f 45%, #134c35);
             min-height: 100vh;
+            position: relative;
+            overflow: hidden;
+            color: var(--ink);
+        }
+
+        body::before {
+            content: "";
+            position: absolute;
+            inset: -20%;
+            background:
+                radial-gradient(circle at 20% 20%, rgba(60, 196, 124, 0.18), transparent 45%),
+                radial-gradient(circle at 80% 10%, rgba(212, 182, 106, 0.2), transparent 50%),
+                radial-gradient(circle at 70% 80%, rgba(255, 255, 255, 0.08), transparent 55%);
+            z-index: 0;
+        }
+
+        .container-fluid {
+            position: relative;
+            z-index: 1;
         }
 
         /* LEFT PANEL */
         .brand-panel {
-            background: linear-gradient(135deg, #0f4d2f, #09251a);
+            background:
+                linear-gradient(155deg, rgba(15, 77, 47, 0.95), rgba(9, 37, 26, 0.98)),
+                radial-gradient(circle at 10% 20%, rgba(60, 196, 124, 0.2), transparent 35%),
+                radial-gradient(circle at 80% 80%, rgba(212, 182, 106, 0.2), transparent 40%);
             color: #fff;
         }
 
         .brand-panel h1 {
             font-weight: 700;
+            font-family: "Fraunces", "Times New Roman", serif;
+            letter-spacing: 0.5px;
+        }
+
+        .brand-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #f4f7f6;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+        }
+
+        .brand-logo {
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
+            border: 2px solid rgba(212, 182, 106, 0.6);
+            padding: 12px;
+        }
+
+        .brand-logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 50%;
+        }
+
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 18px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        .feature-item {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 10px;
+            border-radius: 12px;
+            text-align: center;
+            line-height: 1.3;
+            border: 1px solid rgba(255, 255, 255, 0.12);
         }
 
         /* LOGIN CARD */
         .login-card {
-            backdrop-filter: blur(12px);
-            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(14px);
+            background: rgba(255, 255, 255, 0.92);
             border-radius: 18px;
             padding: 40px;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, .25);
+            box-shadow: 0 25px 60px rgba(0, 0, 0, .2);
+            border: 1px solid rgba(255, 255, 255, 0.6);
             animation: fadeIn .7s ease;
+            position: relative;
+            z-index: 1;
         }
 
         .form-control {
             height: 50px;
             border-radius: 12px;
+            border-color: rgba(15, 77, 47, 0.2);
+        }
+
+        .form-control:focus {
+            border-color: rgba(60, 196, 124, 0.9);
+            box-shadow: 0 0 0 0.2rem rgba(60, 196, 124, 0.2);
         }
 
         .input-group-text {
             border-radius: 12px 0 0 12px;
             background: #0f4d2f;
             color: #fff;
+            border: none;
         }
 
         .login-btn {
             height: 50px;
             border-radius: 12px;
-            background: linear-gradient(135deg, #0f4d2f, #198754);
+            background: linear-gradient(135deg, #0f4d2f, #3cc47c);
             color: #fff;
             font-weight: 600;
+            letter-spacing: 0.3px;
+            transition: transform .2s ease, box-shadow .2s ease;
         }
 
         .login-btn:hover {
@@ -79,10 +179,104 @@
             font-size: 13px;
             color: #aaa;
         }
+
+        .welcome-title {
+            font-family: "Fraunces", "Times New Roman", serif;
+            color: var(--brand-dark);
+        }
+
+        .glass-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(15, 77, 47, 0.08);
+            color: #0f4d2f;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .quick-links {
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .quick-links a {
+            color: #0f4d2f;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .quick-links a:hover {
+            text-decoration: underline;
+        }
+
+        .orb {
+            position: absolute;
+            border-radius: 999px;
+            filter: blur(2px);
+            opacity: 0.7;
+            z-index: 0;
+        }
+
+        .orb.one {
+            width: 180px;
+            height: 180px;
+            background: radial-gradient(circle at 30% 30%, rgba(60, 196, 124, 0.6), rgba(60, 196, 124, 0.1));
+            top: 8%;
+            left: 6%;
+            animation: floatOne 10s ease-in-out infinite;
+        }
+
+        .orb.two {
+            width: 220px;
+            height: 220px;
+            background: radial-gradient(circle at 30% 30%, rgba(212, 182, 106, 0.55), rgba(212, 182, 106, 0.05));
+            bottom: 5%;
+            right: 8%;
+            animation: floatTwo 12s ease-in-out infinite;
+        }
+
+        @keyframes floatOne {
+
+            0%,
+            100% {
+                transform: translate(0, 0);
+            }
+
+            50% {
+                transform: translate(10px, -14px);
+            }
+        }
+
+        @keyframes floatTwo {
+
+            0%,
+            100% {
+                transform: translate(0, 0);
+            }
+
+            50% {
+                transform: translate(-12px, 10px);
+            }
+        }
+
+        @media (max-width: 991px) {
+            body {
+                background: linear-gradient(170deg, #0a2c1f, #0f4d2f 55%, #134c35);
+            }
+
+            .login-card {
+                margin: 30px 0;
+            }
+        }
     </style>
 </head>
 
 <body>
+    <div class="orb one"></div>
+    <div class="orb two"></div>
 
     <!-- Loading -->
     <div id="loadingOverlay" class="loading-overlay hidden">
@@ -108,19 +302,33 @@
             <div
                 class="col-lg-6 d-none d-lg-flex flex-column justify-content-center align-items-center brand-panel text-center p-5">
 
-                <img src="images/fmc-logo.png" width="120" class="mb-4"
-                    onerror="this.src='https://via.placeholder.com/120?text=FMC'">
+                <div class="brand-logo mb-4">
+                    <img src="images/fmc-logo.png" alt="FMC Logo"
+                        onerror="this.src='https://via.placeholder.com/120?text=FMC'">
+                </div>
 
-                <h1>PAYABLE VOUCHER 2026</h1>
+                <h1>PAYABLE VOUCHER</h1>
                 <p class="mt-3">Federal Medical Centre, Abeokuta<br>
                     Finance & Accounts Department</p>
 
                 <hr class="w-50">
 
                 <p class="mt-3">
-                    Efficient • Secure • Transparent<br>
+                    Efficient &bull; Secure &bull; Transparent<br>
                     Managing financial workflows with accuracy
                 </p>
+
+                <div class="feature-list">
+                    <div class="feature-item">
+                        Audit-ready<br>trail
+                    </div>
+                    <div class="feature-item">
+                        Role-based<br>control
+                    </div>
+                    <div class="feature-item">
+                        Fast release<br>flow
+                    </div>
+                </div>
 
             </div>
 
@@ -129,7 +337,11 @@
 
                 <div class="login-card w-100" style="max-width:420px;">
 
-                    <h3 class="mb-2 fw-bold text-success">Welcome Back</h3>
+                    <div class="glass-badge mb-3">
+                        <i class="fas fa-shield-alt"></i>
+                        Secure Access
+                    </div>
+                    <h3 class="mb-2 fw-bold welcome-title">Welcome Back</h3>
                     <p class="text-muted mb-4">Sign in to continue</p>
 
                     <div id="loginError" class="alert alert-danger d-none"></div>
@@ -175,8 +387,12 @@
                         <a href="#" id="signupLink">Sign up</a>
                     </div>
 
+                    <div class="text-center mt-3 quick-links">
+                        Need help? <a href="forgot-password.html">Reset password</a> or contact Admin.
+                    </div>
+
                     <p class="text-center mt-4 footer-text">
-                        © 2026 FMC Abeokuta
+                        &copy; 2026 FMC Abeokuta
                     </p>
 
                 </div>
@@ -263,7 +479,7 @@
 
         document.getElementById('signupLink').addEventListener('click', e => {
             e.preventDefault();
-            Utils.showToast('Sign up is not available. Contact Admin.', 'info');
+            Utils.showToast('Please contact admin', 'info');
         });
 
     </script>

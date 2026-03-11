@@ -24,9 +24,47 @@
             min-width: 150px;
         }
 
-        .filters-bar .search-box {
+        .voucher-search-hero {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #f6f9ff 0%, #ffffff 70%);
+            border: 1px solid #e9eef6;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .voucher-search-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .voucher-search-input {
+            position: relative;
             flex: 1;
-            min-width: 220px;
+            min-width: 260px;
+        }
+
+        .voucher-search-input i {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+        }
+
+        .voucher-search-input input {
+            padding-left: 36px;
+            height: 42px;
+        }
+
+        .voucher-search-hint {
+            font-size: 12px;
+            color: var(--text-muted);
         }
 
         .action-buttons {
@@ -99,6 +137,13 @@
             flex: 1;
         }
 
+        .revalidation-options {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
         .pagination {
             display: flex;
             justify-content: center;
@@ -122,8 +167,13 @@
             }
 
             .filters-bar .form-control,
-            .filters-bar .search-box {
+            .voucher-search-input input {
                 width: 100%;
+            }
+
+            .voucher-search-row {
+                flex-direction: column;
+                align-items: stretch;
             }
 
             .input-with-button {
@@ -162,6 +212,25 @@
                 </div>
             </div>
 
+            <div class="voucher-search-hero">
+                <div class="voucher-search-row">
+                    <div class="voucher-search-input">
+                        <i class="fas fa-search"></i>
+                        <input type="text" class="form-control" id="searchInput"
+                            placeholder="Search by payee, voucher no, control no, particular...">
+                    </div>
+                    <button class="btn btn-primary" onclick="Vouchers.applyFilters()">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                    <button class="btn btn-secondary" onclick="Vouchers.clearSearch()">
+                        <i class="fas fa-times"></i> Clear Search
+                    </button>
+                </div>
+                <div class="voucher-search-hint">
+                    Tip: Searches across years when text is provided.
+                </div>
+            </div>
+
             <!-- Filter Toggle Bar -->
             <div class="filters-toggle-bar">
                 <div class="filter-summary">
@@ -193,8 +262,25 @@
                     <option value="All">All Categories</option>
                 </select>
 
-                <input type="text" class="form-control search-box" id="searchInput"
-                    placeholder="Search by payee, control no, particular...">
+                <select class="form-control" id="pmtMonthFilter">
+                    <option value="All">All Payment Months</option>
+                    <option value="January">January</option>
+                    <option value="February">February</option>
+                    <option value="March">March</option>
+                    <option value="April">April</option>
+                    <option value="May">May</option>
+                    <option value="June">June</option>
+                    <option value="July">July</option>
+                    <option value="August">August</option>
+                    <option value="September">September</option>
+                    <option value="October">October</option>
+                    <option value="November">November</option>
+                    <option value="December">December</option>
+                </select>
+
+                <input type="date" class="form-control" id="dateFromFilter" placeholder="Date From">
+
+                <input type="date" class="form-control" id="dateToFilter" placeholder="Date To">
 
                 <input type="number" class="form-control" id="amountMinFilter" placeholder="Min Amount" step="0.01"
                     min="0">
@@ -302,11 +388,30 @@
                             <span>Revalidation (Optional)</span>
                         </div>
                         <div class="form-group">
-                            <label for="formOldVoucherNumber">Old Voucher Number</label>
+                            <label>Old Voucher Number Available?</label>
+                            <div class="revalidation-options">
+                                <label class="form-check-inline">
+                                    <input class="form-check-input" type="radio" name="oldVoucherAvailable"
+                                        id="oldVoucherAvailableYes" value="yes">
+                                    <span>Yes</span>
+                                </label>
+                                <label class="form-check-inline">
+                                    <input class="form-check-input" type="radio" name="oldVoucherAvailable"
+                                        id="oldVoucherAvailableNo" value="no">
+                                    <span>No</span>
+                                </label>
+                            </div>
+                            <small class="text-muted">Select Yes or No only if this voucher is a revalidation.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="formOldVoucherNumber">Old Voucher Number
+                                <span class="required" id="oldVoucherRequired" style="display:none">*</span>
+                            </label>
                             <div class="input-with-button">
                                 <input type="text" class="form-control" id="formOldVoucherNumber"
                                     placeholder="Enter old voucher number for revalidation">
-                                <button type="button" class="btn btn-secondary" onclick="Vouchers.inlineLookup()">
+                                <button type="button" class="btn btn-secondary" id="oldVoucherLookupBtn"
+                                    onclick="Vouchers.inlineLookup()">
                                     <i class="fas fa-search"></i> Look-up
                                 </button>
                             </div>

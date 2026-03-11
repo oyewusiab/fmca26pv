@@ -251,6 +251,7 @@ const Dashboard = {
         const debt = Utils.formatCurrency(stats.totalDebt || 0);
         const pRate = `${stats.averagePaymentPercent || 0}%`;
         const revalCnt = Utils.formatNumber(stats.revalidatedVouchers || 0);
+        const revalMissing = Utils.formatNumber(stats.revalidatedWithoutOldNumber || 0);
 
         container.innerHTML = `
             <div class="stat-card">
@@ -300,6 +301,11 @@ const Dashboard = {
             <div class="stat-card">
                 <div class="stat-label">Revalidated Vouchers</div>
                 <div class="stat-value">${m ? '***' : revalCnt}</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Revalidated (No Old Voucher No.)</div>
+                <div class="stat-value">${m ? '***' : revalMissing}</div>
             </div>
         `;
     },
