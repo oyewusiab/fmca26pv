@@ -516,7 +516,7 @@
                                 Contract Sum (₦)
                                 <span class="required" id="contractSumRequired" style="display: none;">*</span>
                             </label>
-                            <input type="number" class="form-control" id="formContractSum" step="0.01" min="0"
+                            <input type="text" class="form-control" id="formContractSum" inputmode="decimal"
                                 placeholder="0.00">
                             <div class="field-note" id="contractSumNote">Required for First Part-Payment</div>
                         </div>
@@ -524,22 +524,22 @@
                         <div class="amounts-grid">
                             <div class="form-group amount-card gross">
                                 <label for="formGrossAmount">Gross Amount (₦) <span class="required">*</span></label>
-                                <input type="number" class="form-control" id="formGrossAmount" step="0.01" min="0"
+                                <input type="text" class="form-control" id="formGrossAmount" inputmode="decimal"
                                     required placeholder="0.00">
                             </div>
                             <div class="form-group amount-card">
                                 <label for="formVat">VAT (₦)</label>
-                                <input type="number" class="form-control" id="formVat" step="0.01" min="0"
+                                <input type="text" class="form-control" id="formVat" inputmode="decimal"
                                     placeholder="0.00">
                             </div>
                             <div class="form-group amount-card">
                                 <label for="formWht">WHT (₦)</label>
-                                <input type="number" class="form-control" id="formWht" step="0.01" min="0"
+                                <input type="text" class="form-control" id="formWht" inputmode="decimal"
                                     placeholder="0.00">
                             </div>
                             <div class="form-group amount-card">
                                 <label for="formStampDuty">Stamp Duty (₦)</label>
-                                <input type="number" class="form-control" id="formStampDuty" step="0.01" min="0"
+                                <input type="text" class="form-control" id="formStampDuty" inputmode="decimal"
                                     placeholder="0.00">
                             </div>
                         </div>
@@ -956,7 +956,6 @@
     <script src="js/api.js"></script>
     <script src="js/components.js"></script>
     <script src="js/notifications.js"></script>
-    <script src="js/chat.js"></script>
     <script src="js/vouchers.js"></script>
     <script src="js/footer.js"></script>
 </body>

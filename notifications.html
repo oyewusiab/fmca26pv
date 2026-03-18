@@ -2,454 +2,292 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Notifications - PAYABLE VOUCHER 2026</title>
-
-  <link rel="stylesheet" href="css/styles.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-
-  <style>
-    /* Notification Page Styles */
-    .notifications-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .notification-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 15px;
-      padding: 15px;
-      background: var(--white);
-      border-radius: var(--radius);
-      border-left: 4px solid var(--info-color);
-      transition: var(--transition);
-    }
-
-    .notification-item:hover {
-      box-shadow: var(--shadow);
-    }
-
-    .notification-unread {
-      background: #f0f7ff;
-      font-weight: 500;
-    }
-
-    .notification-read {
-      opacity: 0.8;
-    }
-
-    .notification-success {
-      border-left-color: var(--success-color);
-    }
-
-    .notification-warning {
-      border-left-color: var(--warning-color);
-    }
-
-    .notification-danger {
-      border-left-color: var(--danger-color);
-    }
-
-    .notification-info {
-      border-left-color: var(--info-color);
-    }
-
-    .notification-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      flex-shrink: 0;
-    }
-
-    .notification-success .notification-icon {
-      background: #d4edda;
-      color: var(--success-color);
-    }
-
-    .notification-warning .notification-icon {
-      background: #fff3cd;
-      color: #856404;
-    }
-
-    .notification-danger .notification-icon {
-      background: #f8d7da;
-      color: var(--danger-color);
-    }
-
-    .notification-info .notification-icon {
-      background: #d1ecf1;
-      color: var(--info-color);
-    }
-
-    .notification-content {
-      flex: 1;
-    }
-
-    .notification-title {
-      font-weight: 600;
-      color: var(--text-dark);
-      margin-bottom: 5px;
-    }
-
-    .notification-message {
-      color: var(--text-light);
-      font-size: 14px;
-      margin-bottom: 8px;
-    }
-
-    .notification-time {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    .notification-actions {
-      display: flex;
-      gap: 5px;
-      flex-shrink: 0;
-    }
-
-    /* Nav badge for sidebar */
-    .nav-badge {
-      background: var(--danger-color);
-      color: white;
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 10px;
-      margin-left: auto;
-    }
-
-    /* Action Items Hub - Premium Redesign */
-    #actionItemsCard {
-      border: none;
-      border-radius: 16px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(10px);
-      margin-bottom: 25px;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-    }
-
-    #actionItemsCard .card-header {
-      background: transparent;
-      padding: 20px 24px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    }
-
-    #actionItemsCard .card-title {
-      font-size: 1.1rem;
-      letter-spacing: -0.02em;
-      color: #1a1a1a;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    #actionItemsCard .card-title i {
-      color: var(--primary-color);
-      font-size: 1.2rem;
-    }
-
-    #actionItemsCount {
-      background: var(--warning-color);
-      color: #856404;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 8px;
-      font-size: 0.85rem;
-    }
-
-    /* Collapsible Container */
-    .collapsible-content {
-      max-height: 0;
-      overflow: hidden;
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-      opacity: 0;
-    }
-
-    .collapsible-content.active {
-      max-height: 2000px;
-      opacity: 1;
-      padding-bottom: 5px;
-    }
-
-    /* Action Item Row - Premium Style */
-    .action-item-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 18px;
-      padding: 16px 24px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-      transition: all 0.2s ease;
-      position: relative;
-    }
-
-    .action-item-row:hover {
-      background: rgba(26, 95, 42, 0.03);
-      transform: translateX(4px);
-    }
-
-    .action-item-row:last-child {
-      border-bottom: none;
-    }
-
-    .action-item-icon-wrap {
-      width: 42px;
-      height: 42px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.1rem;
-      flex-shrink: 0;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-    }
-
-    .icon-wrap-danger {
-      background: #fee2e2;
-      color: #dc2626;
-    }
-
-    .icon-wrap-warning {
-      background: #fef3c7;
-      color: #d97706;
-    }
-
-    .icon-wrap-info {
-      background: #e0f2fe;
-      color: #0284c7;
-    }
-
-    .action-item-content {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .action-item-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-
-    .action-item-title {
-      font-weight: 700;
-      font-size: 15px;
-      color: #1a1a1a;
-      line-height: 1.4;
-    }
-
-    .action-item-msg {
-      font-size: 13.5px;
-      color: #4b5563;
-      margin-bottom: 8px;
-      line-height: 1.5;
-    }
-
-    .action-item-badges {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .small-badge {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 6px;
-      background: #f3f4f6;
-      color: #6b7280;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    .small-badge strong {
-      color: #374151;
-    }
-
-    .action-item-actions .btn-view {
-      background: #f8f9fa;
-      color: var(--primary-color);
-      border: 1px solid #e9ecef;
-      padding: 6px 14px;
-      font-size: 13px;
-      border-radius: 8px;
-      white-space: nowrap;
-      transition: all 0.2s;
-      text-decoration: none;
-      display: inline-block;
-    }
-
-    .action-item-actions .btn-view:hover {
-      background: var(--primary-color);
-      color: white;
-      border-color: var(--primary-color);
-    }
-
-    /* Restoring required styles */
-    .action-item-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .dot-danger {
-      background: var(--danger-color);
-    }
-
-    .dot-warning {
-      background: var(--warning-color);
-    }
-
-    .dot-info {
-      background: var(--info-color);
-    }
-
-    .action-item-meta {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-  </style>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
 <body>
-  <!-- Loading Overlay -->
   <div id="loadingOverlay" class="loading-overlay hidden">
     <div class="spinner"></div>
-    <p class="loading-text">Loading...</p>
+    <p class="loading-text">Loading notifications...</p>
   </div>
 
   <div class="app-container">
-    <!-- Sidebar -->
     <aside class="sidebar" id="sidebar"></aside>
 
-    <!-- Main Content -->
-    <main class="main-content">
-      <!-- Mobile Menu Toggle -->
-      <button class="menu-toggle" id="menuToggle">
+    <main class="main-content notifications-hub-main">
+      <button class="menu-toggle" id="menuToggle" style="display:none;">
         <i class="fas fa-bars"></i>
       </button>
 
-      <!-- Page Header -->
       <div class="page-header">
         <div>
-          <h1 class="page-title"><i class="fas fa-bell"></i> Notifications</h1>
-          <p class="page-subtitle" id="notificationCount">Loading...</p>
+          <h1 class="page-title">Notifications Hub</h1>
+          <p class="page-subtitle">Announcements, action items, and system notifications</p>
         </div>
-        <div>
-          <button class="btn btn-secondary" id="markAllReadBtn">
-            <i class="fas fa-check-double"></i> Mark All as Read
+        <div class="notifications-header-actions">
+          <button class="btn btn-secondary btn-sm" id="refreshHubBtn">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+          <button class="btn btn-secondary btn-sm" id="markAllReadBtn">
+            <i class="fas fa-check-double"></i> Mark All Read
           </button>
         </div>
       </div>
 
-      <!-- Action Items Card (ONLY ONCE, and ABOVE notifications list) -->
-      <div class="card mb-2" id="actionItemsCard" style="display:none;">
-        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
-          <h3 class="card-title">
-            <i class="fas fa-list-check"></i> Action Items
-            <span class="badge badge-warning" id="actionItemsCount">0</span>
-            <button class="btn btn-sm btn-link" id="actionItemsToggleBtn" onclick="ActionItems.toggleCollapse()"
-              style="color: var(--text-muted); text-decoration: none;">
-              <i class="fas fa-chevron-up"></i>
-            </button>
-          </h3>
+      <section class="notification-hub-stats">
+        <article class="hub-stat-card info">
+          <div class="hub-stat-icon"><i class="fas fa-bell"></i></div>
+          <div class="hub-stat-content">
+            <div class="hub-stat-value" id="hubUnreadCount">0</div>
+            <div class="hub-stat-label">Unread Notifications</div>
+          </div>
+        </article>
+        <article class="hub-stat-card warning">
+          <div class="hub-stat-icon"><i class="fas fa-list-check"></i></div>
+          <div class="hub-stat-content">
+            <div class="hub-stat-value" id="hubActionCount">0</div>
+            <div class="hub-stat-label">Pending Action Items</div>
+          </div>
+        </article>
+        <article class="hub-stat-card danger">
+          <div class="hub-stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
+          <div class="hub-stat-content">
+            <div class="hub-stat-value" id="hubCriticalCount">0</div>
+            <div class="hub-stat-label">Critical Action Items</div>
+          </div>
+        </article>
+        <article class="hub-stat-card success">
+          <div class="hub-stat-icon"><i class="fas fa-bullhorn"></i></div>
+          <div class="hub-stat-content">
+            <div class="hub-stat-value" id="hubAnnouncementCount">0</div>
+            <div class="hub-stat-label">Active Announcements</div>
+          </div>
+        </article>
+      </section>
 
-          <div style="display:flex; gap:8px; align-items:center;">
-            <!-- Filters (Admin/DDFA/DFA only; action-items.js toggles display) -->
-            <select id="actionItemsUnitFilter" class="form-control" style="width:auto; display:none;">
+      <nav class="notification-hub-tabs" id="notificationHubTabs">
+        <button class="tab-btn active" data-target="tab-notifications">
+          <i class="fas fa-bell"></i> Notifications
+          <span class="badge badge-danger" id="tabNotificationBadge" style="display:none;">0</span>
+        </button>
+        <button class="tab-btn" data-target="tab-actionitems">
+          <i class="fas fa-list-check"></i> Action Items
+          <span class="badge badge-warning" id="tabActionBadge" style="display:none;">0</span>
+        </button>
+        <button class="tab-btn admin-only-tab" data-target="tab-announcements" id="tabAnnouncementsBtn"
+          style="display:none;">
+          <i class="fas fa-bullhorn"></i> Admin Announcements
+        </button>
+      </nav>
+
+      <section class="hub-tab-content active" id="tab-notifications">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title"><i class="fas fa-bell"></i> Notification Feed</h3>
+            <span class="text-muted" id="notificationCount">Loading...</span>
+          </div>
+          <div class="card-body" id="notificationsList">
+            <p class="text-muted text-center">Loading notifications...</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="hub-tab-content" id="tab-actionitems">
+        <div class="action-items-toolbar">
+          <div class="action-items-toolbar-left">
+            <div class="action-summary-pill">
+              <span class="pill-label">Total</span>
+              <strong id="actionItemsCount">0</strong>
+            </div>
+            <div class="action-summary-pill critical">
+              <span class="pill-label">Critical</span>
+              <strong id="actionItemsCritical">0</strong>
+            </div>
+          </div>
+          <div class="action-items-toolbar-right">
+            <select id="actionItemsUnitFilter" class="form-control" style="width: auto; min-width: 140px;">
               <option value="ALL">All Units</option>
-              <option value="PAYABLE">Payable</option>
-              <option value="CPO">CPO</option>
+              <option value="PAYABLE">Payable Unit</option>
+              <option value="CPO">CPO Unit</option>
             </select>
-
-            <select id="actionItemsStatusFilter" class="form-control" style="width:auto; display:none;">
+            <select id="actionItemsStatusFilter" class="form-control" style="width: auto; min-width: 140px;">
               <option value="PENDING">Pending</option>
               <option value="RESOLVED">Resolved</option>
               <option value="ALL">All</option>
             </select>
-
-            <button class="btn btn-sm btn-secondary" onclick="ActionItems.refreshFull()">
+            <button class="btn btn-secondary btn-sm" id="refreshActionItemsBtn">
               <i class="fas fa-sync-alt"></i> Refresh
             </button>
-
-            <button class="btn btn-sm btn-secondary" id="actionItemsSettingsBtn" style="display:none;"
-              onclick="ActionItems.openSettings()">
-              <i class="fas fa-cog"></i> Settings
+            <button class="btn btn-secondary btn-sm" id="actionItemsSettingsBtn" style="display:none;">
+              <i class="fas fa-sliders-h"></i> Settings
             </button>
           </div>
         </div>
 
-        <div id="actionItemsCollapse" class="collapsible-content active">
-          <div class="card-body" id="actionItemsList" style="padding: 0;">
-            <!-- Populated by JS -->
+        <div class="card" id="actionItemsCard">
+          <div class="card-body" id="actionItemsList">
+            <p class="text-muted text-center">Loading action items...</p>
           </div>
         </div>
-      </div>
+      </section>
 
-      <!-- Notifications List -->
-      <div class="card">
-        <div class="card-body" id="notificationsList">
-          <p class="text-muted text-center">Loading notifications...</p>
+      <section class="hub-tab-content" id="tab-announcements">
+        <div class="announcements-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title"><i class="fas fa-pen"></i> Create Announcement</h3>
+              <span class="badge badge-info">Admin Only</span>
+            </div>
+            <div class="card-body">
+              <div class="announcement-form-grid">
+                <div class="form-group">
+                  <label>Where should the message be displayed?</label>
+                  <div class="announcement-choice-grid">
+                    <label class="announcement-choice">
+                      <input type="checkbox" id="annLocationLogin">
+                      <span><i class="fas fa-right-to-bracket"></i> Login Page</span>
+                    </label>
+                    <label class="announcement-choice">
+                      <input type="checkbox" id="annLocationDashboard" checked>
+                      <span><i class="fas fa-gauge-high"></i> Dashboard</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>To</label>
+                  <div class="announcement-choice-grid">
+                    <label class="announcement-choice">
+                      <input type="checkbox" id="annToAll" checked>
+                      <span><i class="fas fa-users"></i> All Users</span>
+                    </label>
+                    <label class="announcement-choice">
+                      <input type="checkbox" id="annToSpecific">
+                      <span><i class="fas fa-user-check"></i> Select Specific Users</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-group" id="annSpecificUsersWrap" style="display:none;">
+                  <label for="annUserSearch">Select Users</label>
+                  <input type="text" class="form-control" id="annUserSearch" placeholder="Search by name, email or role">
+                  <div class="announcement-users-list" id="annSpecificUsersList"></div>
+                </div>
+
+                <div class="form-group">
+                  <label>Message (formatted)</label>
+                  <div class="announcement-editor">
+                    <div class="announcement-editor-toolbar" id="announcementEditorToolbar">
+                      <button type="button" class="toolbar-btn" data-cmd="bold" title="Bold"><b>B</b></button>
+                      <button type="button" class="toolbar-btn" data-cmd="italic" title="Italic"><i>I</i></button>
+                      <button type="button" class="toolbar-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+                      <span class="toolbar-divider"></span>
+                      <button type="button" class="toolbar-btn" data-cmd="formatBlock" data-value="H2"
+                        title="Heading">H</button>
+                      <button type="button" class="toolbar-btn" data-cmd="formatBlock" data-value="P"
+                        title="Paragraph">P</button>
+                      <button type="button" class="toolbar-btn" data-cmd="insertUnorderedList" title="Bullet List">
+                        <i class="fas fa-list-ul"></i>
+                      </button>
+                      <button type="button" class="toolbar-btn" data-cmd="insertOrderedList" title="Numbered List">
+                        <i class="fas fa-list-ol"></i>
+                      </button>
+                    </div>
+                    <div id="announcementEditor" class="announcement-editor-content" contenteditable="true"
+                      data-placeholder="Type announcement here..."></div>
+                  </div>
+                </div>
+
+                <div class="announcement-form-row">
+                  <div class="form-group">
+                    <label for="annExpiryPreset">Expiring Date/Time</label>
+                    <select id="annExpiryPreset" class="form-control">
+                      <option value="1h">Next 1 hour</option>
+                      <option value="6h">Next 6 hours</option>
+                      <option value="24h" selected>Next 24 hours</option>
+                      <option value="48h">Next 2 days</option>
+                      <option value="720h">Next 30 days</option>
+                      <option value="custom">Others, Specify</option>
+                    </select>
+                    <input type="datetime-local" id="annExpiryCustom" class="form-control mt-1" style="display:none;">
+                  </div>
+                  <div class="form-group">
+                    <label for="annAllowDismiss">Users can activate "Do not show again"</label>
+                    <select id="annAllowDismiss" class="form-control">
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="announcement-form-actions">
+                  <button class="btn btn-secondary" id="clearAnnouncementBtn" type="button">
+                    <i class="fas fa-eraser"></i> Clear
+                  </button>
+                  <button class="btn btn-primary" id="sendAnnouncementBtn" type="button">
+                    <i class="fas fa-paper-plane"></i> Send Announcement
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" id="announcementsListCard">
+            <div class="card-header">
+              <h3 class="card-title"><i class="fas fa-bullhorn"></i> Active Announcements</h3>
+              <button class="btn btn-secondary btn-sm" id="refreshAnnouncementsBtn">
+                <i class="fas fa-rotate"></i> Refresh
+              </button>
+            </div>
+            <div class="card-body" id="announcementsListContent">
+              <p class="text-muted">No active announcements.</p>
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
     </main>
   </div>
 
-  <!-- Action Items Settings Modal (Admin/DDFA/DFA only) -->
   <div class="modal-overlay" id="actionItemsSettingsModal">
-    <div class="modal" style="max-width: 750px;">
+    <div class="modal" style="max-width: 760px;">
       <div class="modal-header">
-        <h3 class="modal-title"><i class="fas fa-cog"></i> Action Items Settings</h3>
-        <button class="modal-close" onclick="ActionItems.closeSettings()">&times;</button>
+        <h3 class="modal-title"><i class="fas fa-sliders-h"></i> Action Item Settings</h3>
+        <button class="modal-close" id="closeActionSettingsBtn">&times;</button>
       </div>
-
       <div class="modal-body">
-        <p class="text-muted mb-2">
-          Enable/disable Action Item rules per unit.
-        </p>
+        <p class="text-muted mb-2">Enable or disable action item rules by unit.</p>
         <div id="actionItemsSettingsBody"></div>
       </div>
-
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="ActionItems.closeSettings()">Cancel</button>
-        <button class="btn btn-primary" onclick="ActionItems.saveSettings()">
+        <button class="btn btn-secondary" id="cancelActionSettingsBtn">Cancel</button>
+        <button class="btn btn-primary" id="saveActionSettingsBtn">
           <i class="fas fa-save"></i> Save Settings
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Scripts (each included ONCE) -->
+  <div id="announcementPopupHost"></div>
+
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
-  <script src="js/activity-tracker.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/activity-tracker.js"></script>
   <script src="js/components.js"></script>
-
-  <!-- Action Items -->
-  <script src="js/action-items.js"></script>
-
-  <!-- Notifications -->
-  <script src="js/chat.js"></script>
   <script src="js/notifications.js"></script>
+  <script src="js/action-items.js"></script>
+  <script src="js/announcements.js"></script>
+  <script src="js/footer.js"></script>
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       Notifications.initPage();
-      // ActionItems auto-initializes itself; no extra call needed.
     });
   </script>
-
-  <script src="js/footer.js"></script>
 </body>
 
 </html>

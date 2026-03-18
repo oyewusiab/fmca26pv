@@ -169,6 +169,143 @@
                 </div>
             </div>
 
+            <!-- Financial Insights -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-coins"></i> Financial Insights
+                </h2>
+                <div class="stats-grid" id="financialInsightsCards">
+                    <div class="stat-card">
+                        <div class="stat-label">Loading...</div>
+                        <div class="stat-value">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cash Outflow vs Commitment -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-scale-balanced"></i> Cash Outflow vs Commitment Split
+                        </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('cashCommitChart', 'Cash_Commitment_Split')">
+                            <i class="fas fa-download"></i> PNG
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="cashCommitChart" height="120"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Accruals Snapshot -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-file-invoice-dollar"></i> Accruals Snapshot
+                        </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('accrualsSnapshotChart', 'Accruals_Snapshot')">
+                            <i class="fas fa-download"></i> PNG
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="accrualsSnapshotChart" height="110"></canvas>
+                        <div id="accrualsSnapshotNote" class="text-muted" style="font-size:12px; margin-top:8px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Net Payable Position -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-layer-group"></i> Net Payable Position (All Years)
+                </h2>
+                <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items:center;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-chart-pie"></i> Current vs Prior Years</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="netPayableChart" height="150"></canvas>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="netPayableKPI">
+                        <div class="stat-label">Net Payable Position</div>
+                        <div class="stat-value">-</div>
+                        <div class="stat-subvalue">All years combined</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Voucher Value & Distribution -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-chart-area"></i> Average Voucher Value & Distribution
+                </h2>
+                <div class="stats-grid" id="voucherValueCards">
+                    <div class="stat-card">
+                        <div class="stat-label">Loading...</div>
+                        <div class="stat-value">-</div>
+                    </div>
+                </div>
+                <div class="card" style="margin-top: 12px;">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-signal"></i> Voucher Value Distribution</h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('voucherDistChart', 'Voucher_Distribution')">
+                            <i class="fas fa-download"></i> PNG
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="voucherDistChart" height="120"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tax Liability vs Paid -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-receipt"></i> Tax Analysis
+                </h2>
+                <div class="stats-grid" id="taxSummaryCards" style="margin-bottom: 20px;">
+                    <div class="stat-card info">
+                        <div class="stat-label">Total Tax Liability</div>
+                        <div class="stat-value" id="taxTotalLiability">₦0.00</div>
+                        <div class="stat-subvalue">VAT + WHT + Stamp Duty</div>
+                    </div>
+                    <div class="stat-card paid">
+                        <div class="stat-label">Total Tax Paid</div>
+                        <div class="stat-value text-success" id="taxTotalPaid">₦0.00</div>
+                        <div class="stat-subvalue">Remitted to FIRS</div>
+                    </div>
+                    <div class="stat-card cancelled">
+                        <div class="stat-label">Total Tax Outstanding</div>
+                        <div class="stat-value text-danger" id="taxTotalOutstanding">₦0.00</div>
+                        <div class="stat-subvalue">Unremitted balance</div>
+                    </div>
+                    <div class="stat-card info">
+                        <div class="stat-label">Tax Compliance Rate</div>
+                        <div class="stat-value" id="taxComplianceRate">0.0%</div>
+                        <div class="stat-subvalue">Paid / Liability</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-line"></i> Tax Liability vs Tax Paid (Month-wise)
+                        </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('taxSplitChart', 'Tax_Liability_vs_Paid')">
+                            <i class="fas fa-download"></i> PNG
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="taxSplitChart" height="120"></canvas>
+                    </div>
+                </div>
+            </div>
+
+
             <div class="report-section">
     <h2 class="report-section-title">
         <i class="fas fa-tachometer-alt"></i> Analytics
@@ -227,6 +364,20 @@
                         </h3>
                     </div>
                     <div class="card-body" id="categoryTable">
+                        <p class="text-muted text-center">Loading...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Account Type Breakdown Section -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-university"></i> Account Type Breakdown
+                        </h3>
+                    </div>
+                    <div class="card-body" id="accountTypeTable">
                         <p class="text-muted text-center">Loading...</p>
                     </div>
                 </div>
@@ -292,7 +443,7 @@
 
             <div class="report-section" id="agingSection">
                 <h2 class="report-section-title">
-                    <i class="fas fa-hourglass-half"></i> Unpaid Aging (2026)
+                    <i class="fas fa-hourglass-half"></i> Outstanding by Age (Amount + Count Trend)
                 </h2>
 
                 <div class="card">
@@ -300,7 +451,7 @@
                     <canvas id="agingChart" height="120"></canvas>
                     <div id="agingTable" style="margin-top: 15px;"></div>
                     <p class="text-muted" style="font-size:12px; margin-top:8px;">
-                        Computed client-side from 2026 vouchers only.
+                        Computed client-side from vouchers in the selected year.
                     </p>
                     </div>
                 </div>
@@ -420,6 +571,70 @@
                 </div>
                 </div>
 
+            <!-- Revalidated Impact -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-rotate-right"></i> Revalidated Impact
+                </h2>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:center;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-chart-pie"></i> Revalidated vs New</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="revalidatedImpactChart" height="150"></canvas>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="revalidatedImpactKPI">
+                        <div class="stat-label">Revalidated Share</div>
+                        <div class="stat-value">-</div>
+                        <div class="stat-subvalue">Of total voucher amount</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category Margin/Share Shift -->
+            <div class="report-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-bar"></i> Category Margin / Share Shift
+                        </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('categoryShareShiftChart', 'Category_Share_Shift')">
+                            <i class="fas fa-download"></i> PNG
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="categoryShareShiftChart" height="140"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cancelled Voucher Financial Impact -->
+            <div class="report-section">
+                <h2 class="report-section-title">
+                    <i class="fas fa-ban"></i> Cancelled Voucher Financial Impact
+                </h2>
+                <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items:center;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-chart-line"></i> Cancelled Amount by Month</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('cancelledImpactChart', 'Cancelled_Impact')">
+                                <i class="fas fa-download"></i> PNG
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="cancelledImpactChart" height="130"></canvas>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="cancelledImpactKPI">
+                        <div class="stat-label">Cancelled Impact</div>
+                        <div class="stat-value">-</div>
+                        <div class="stat-subvalue">Share of total voucher amount</div>
+                    </div>
+                </div>
+            </div>
+
     <!-- Scripts -->
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
@@ -427,7 +642,6 @@
 <script src="js/api.js"></script>
 <script src="js/notifications.js"></script>
 <script src="js/components.js"></script>
-<script src="js/chat.js"></script>
 
 <!-- Chart.js MUST come before reports.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

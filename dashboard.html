@@ -50,17 +50,16 @@
                 </div>
             </div>
 
-            <!-- Action Items Mini Card (Dashboard) -->
-            <div id="actionItemsMiniCard" class="alert alert-warning"
+            <!-- Action Items Widget (Dashboard) -->
+            <div id="actionItemsMiniCard" class="dashboard-action-widget"
                 style="display:none; margin-bottom: 20px; cursor: pointer;"
                 onclick="location.href='notifications.html'">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <div>
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <span id="actionItemsMiniText">0 action items</span> require your attention.
-                    </div>
-                    <i class="fas fa-chevron-right"></i>
+                <div class="widget-count" id="widgetCount">0</div>
+                <div class="widget-text">
+                    <strong>Action Items Pending</strong>
+                    <span id="actionItemsMiniText">Click to view</span>
                 </div>
+                <i class="fas fa-chevron-right" style="color: white; font-size: 18px;"></i>
             </div>
 
             <!-- Stats Grid -->
@@ -186,10 +185,10 @@
             <script src="js/config.js"></script>
             <script src="js/auth.js"></script>
             <script src="js/api.js"></script>
+            <script src="js/announcements.js"></script>
             <script src="js/activity-tracker.js"></script>
             <script src="js/components.js"></script>
             <script src="js/notifications.js"></script>
-            <script src="js/chat.js"></script>
             <script src="js/action-items.js"></script>
             <script src="js/dashboard.js"></script>
             <script src="js/footer.js"></script>

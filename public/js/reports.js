@@ -9,6 +9,10 @@ const Reports = {
     summaryData: null,
     allYearsData: null,
     debtProfile: null,
+    voucherCache: {},
+    voucherStats: null,
+    taxMonthlyData: null,
+    taxSummary: null,
     categoryChart: null,
     monthlyChart: null,
     statusCountChart: null,
@@ -18,6 +22,14 @@ const Reports = {
     categoryParetoChart: null,
     debtConcentrationChart: null,
     agingChart: null,
+    cashCommitChart: null,
+    accrualsSnapshotChart: null,
+    netPayableChart: null,
+    voucherDistChart: null,
+    taxSplitChart: null,
+    revalidatedImpactChart: null,
+    categoryShareShiftChart: null,
+    cancelledImpactChart: null,
 
     /**
      * Initialize reports page
@@ -86,23 +98,33 @@ const Reports = {
             if (action === 'getSummary' && params.year === this.currentYear) {
                 this.summaryData = data;
                 this.renderYearSummary(data);
+                this.renderFinancialInsights(data.summary);
                 this.renderCategoryTable(data.categoryBreakdown);
+                this.renderAccountTypeTable(data.accountTypeBreakdown);
                 this.renderMonthlyTable(data.monthlyBreakdown);
                 this.drawCategoryChart(data.categoryBreakdown);
                 this.drawCategoryParetoChart(data.categoryBreakdown);
+                this.drawCategoryShareShiftChart(data.categoryBreakdown);
                 this.drawMonthlyChart(data.monthlyBreakdown);
                 this.drawStatusCharts(data.summary);
+                this.drawCashCommitChart(data.summary);
+                this.drawAccrualsSnapshot(data.summary);
             }
             if (action === 'getAllYearsSummary') {
                 this.allYearsData = data;
                 this.renderAllYearsSummary(data);
                 this.drawDebtTrendChart(data);
+                this.drawNetPayableChart(data);
             }
             if (action === 'getDebtProfile') {
                 this.debtProfile = data;
                 this.renderDebtProfile(data);
                 this.drawDebtConcentration(data);
                 this.drawTopDebtorsChart(data);
+            }
+            if (action === 'getTaxByMonth' && params.year === this.currentYear) {
+                this.taxMonthlyData = data;
+                this.drawTaxSplitChart(data);
             }
         });
     },
@@ -136,21 +158,26 @@ const Reports = {
         if (result.success) {
             this.summaryData = result;
             this.renderYearSummary(result);
+            this.renderFinancialInsights(result.summary);
             this.renderCategoryTable(result.categoryBreakdown);
+            this.renderAccountTypeTable(result.accountTypeBreakdown);
             this.renderMonthlyTable(result.monthlyBreakdown);
             this.drawCategoryChart(result.categoryBreakdown);
             this.drawCategoryParetoChart(result.categoryBreakdown);
+            this.drawCategoryShareShiftChart(result.categoryBreakdown);
             this.drawMonthlyChart(result.monthlyBreakdown);
             this.drawStatusCharts(result.summary);
+            this.drawCashCommitChart(result.summary);
+            this.drawAccrualsSnapshot(result.summary);
         } else {
             Utils.showToast(result.error || 'Failed to load summary', 'error');
         }
 
-        if (this.currentYear === '2026') {
-            await this.loadAgingAnalysis2026();
-        } else {
-            document.getElementById('agingSection')?.classList.add('hidden');
-        }
+        await Promise.all([
+            this.loadVoucherAnalytics(),
+            this.loadTaxByMonth(),
+            this.loadTaxSummary()
+        ]);
     },
 
     parseDateFlexible(value) {
@@ -288,6 +315,122 @@ const Reports = {
             Utils.showToast('Could not compute aging analysis', 'warning');
         } finally {
             this.showLoading(false);
+        }
+    },
+
+    getVoucherAmount(voucher) {
+        const val = voucher?.grossAmount ?? voucher?.amount ?? voucher?.totalAmount ?? voucher?.contractSum ?? 0;
+        const num = Number(val);
+        return Number.isFinite(num) ? num : 0;
+    },
+
+    getTotalVoucherAmount(summary) {
+        if (!summary) return 0;
+        const paid = Number(summary.totalPaidAmount || 0);
+        const unpaid = Number(summary.totalUnpaidAmount || 0);
+        const cancelled = Number(summary.totalCancelledAmount || 0);
+        return paid + unpaid + cancelled;
+    },
+
+    drawAgingAnalysisFromVouchers(vouchers) {
+        const section = document.getElementById('agingSection');
+        section?.classList.remove('hidden');
+
+        const unpaid = (vouchers || []).filter(v => String(v.status || '').toLowerCase() === 'unpaid');
+        if (!unpaid.length) {
+            document.getElementById('agingTable')?.replaceChildren();
+            if (this.agingChart) this.agingChart.destroy();
+            return;
+        }
+
+        const now = new Date();
+        const buckets = [
+            { label: '0-7 days', min: 0, max: 7, count: 0, amount: 0 },
+            { label: '8-14 days', min: 8, max: 14, count: 0, amount: 0 },
+            { label: '15-30 days', min: 15, max: 30, count: 0, amount: 0 },
+            { label: '31-60 days', min: 31, max: 60, count: 0, amount: 0 },
+            { label: '61-90 days', min: 61, max: 90, count: 0, amount: 0 },
+            { label: '90+ days', min: 91, max: 99999, count: 0, amount: 0 },
+        ];
+
+        unpaid.forEach(v => {
+            const created = this.parseDateFlexible(v.createdAt || v.date);
+            if (!created) return;
+
+            const ageDays = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+            const amt = this.getVoucherAmount(v);
+
+            const b = buckets.find(x => ageDays >= x.min && ageDays <= x.max);
+            if (!b) return;
+            b.count += 1;
+            b.amount += amt;
+        });
+
+        const ctx = document.getElementById('agingChart');
+        if (ctx) {
+            if (this.agingChart) this.agingChart.destroy();
+
+            this.agingChart = new Chart(ctx, {
+                data: {
+                    labels: buckets.map(b => b.label),
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Outstanding Amount',
+                            data: buckets.map(b => b.amount),
+                            backgroundColor: 'rgba(255,193,7,0.65)',
+                            yAxisID: 'y'
+                        },
+                        {
+                            type: 'line',
+                            label: 'Voucher Count',
+                            data: buckets.map(b => b.count),
+                            borderColor: 'rgba(23,162,184,1)',
+                            backgroundColor: 'rgba(23,162,184,0.2)',
+                            tension: 0.3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'top' } },
+                    scales: {
+                        y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } },
+                        y1: {
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            ticks: { callback: v => Number(v).toLocaleString() }
+                        }
+                    }
+                }
+            });
+        }
+
+        const t = document.getElementById('agingTable');
+        if (t) {
+            t.innerHTML = `
+            <div class="table-container">
+            <table>
+                <thead>
+                <tr>
+                    <th>Bucket</th>
+                    <th class="text-center">Count</th>
+                    <th class="text-right">Total Amount</th>
+                </tr>
+                </thead>
+                <tbody>
+                ${buckets.map(b => `
+                    <tr>
+                    <td><strong>${b.label}</strong></td>
+                    <td class="text-center">${Utils.formatNumber(b.count)}</td>
+                    <td class="text-right">${Utils.formatCurrency(b.amount)}</td>
+                    </tr>
+                `).join('')}
+                </tbody>
+            </table>
+            </div>
+        `;
         }
     },
 
@@ -458,6 +601,574 @@ const Reports = {
         });
     },
 
+    renderFinancialInsights(summary) {
+        const container = document.getElementById('financialInsightsCards');
+        if (!container || !summary) return;
+
+        const totalVoucherAmount = this.getTotalVoucherAmount(summary);
+        const paid = Number(summary.totalPaidAmount || 0);
+        const unpaid = Number(summary.totalUnpaidAmount || 0);
+        const cancelled = Number(summary.totalCancelledAmount || 0);
+        const contractSum = Number(summary.totalProcessedContractSum || 0);
+        const paymentEfficiency = totalVoucherAmount > 0 ? (paid / totalVoucherAmount) * 100 : 0;
+        const accrualRate = totalVoucherAmount > 0 ? (unpaid / totalVoucherAmount) * 100 : 0;
+        const commitmentGap = Math.max(contractSum - paid, 0);
+        const avgVoucher = this.voucherStats?.average || (summary.totalVouchersRaised ? (totalVoucherAmount / summary.totalVouchersRaised) : 0);
+
+        container.innerHTML = `
+            <div class="stat-card info">
+                <div class="stat-label">Total Voucher Amount (Raised)</div>
+                <div class="stat-value">${Utils.formatCurrency(totalVoucherAmount)}</div>
+                <div class="stat-subvalue">Paid + Unpaid + Cancelled</div>
+            </div>
+            <div class="stat-card paid">
+                <div class="stat-label">Cash Outflow (Paid)</div>
+                <div class="stat-value">${Utils.formatCurrency(paid)}</div>
+                <div class="stat-subvalue">Actual cash impact</div>
+            </div>
+            <div class="stat-card unpaid">
+                <div class="stat-label">Accrued Expenses</div>
+                <div class="stat-value">${Utils.formatCurrency(unpaid)}</div>
+                <div class="stat-subvalue">${accrualRate.toFixed(1)}% of raised</div>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-label">Payment Efficiency</div>
+                <div class="stat-value">${paymentEfficiency.toFixed(1)}%</div>
+                <div class="stat-subvalue">
+                    Paid / Total Raised
+                    <div class="progress-bar-mini" style="margin-top:5px;">
+                        <div class="progress-fill success" style="width: ${Math.min(paymentEfficiency, 100)}%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Average Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(avgVoucher)}</div>
+                <div class="stat-subvalue">Per voucher (amount)</div>
+            </div>
+            <div class="stat-card cancelled">
+                <div class="stat-label">Commitment Gap</div>
+                <div class="stat-value">${Utils.formatCurrency(commitmentGap)}</div>
+                <div class="stat-subvalue">Contract Sum - Paid</div>
+            </div>
+        `;
+    },
+
+    drawCashCommitChart(summary) {
+        const ctx = document.getElementById('cashCommitChart');
+        if (!ctx || !summary) return;
+
+        const totalVoucherAmount = this.getTotalVoucherAmount(summary);
+        const paid = Number(summary.totalPaidAmount || 0);
+        const contractSum = Number(summary.totalProcessedContractSum || 0);
+
+        if (this.cashCommitChart) this.cashCommitChart.destroy();
+
+        this.cashCommitChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Paid (Cash Outflow)', 'Total Voucher Amount', 'Contract Sum'],
+                datasets: [{
+                    label: 'Amount',
+                    data: [paid, totalVoucherAmount, contractSum],
+                    backgroundColor: ['rgba(40,167,69,0.7)', 'rgba(0,123,255,0.6)', 'rgba(255,193,7,0.7)']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } }
+                }
+            }
+        });
+    },
+
+    drawAccrualsSnapshot(summary) {
+        const ctx = document.getElementById('accrualsSnapshotChart');
+        if (!ctx || !summary) return;
+
+        const paid = Number(summary.totalPaidAmount || 0);
+        const unpaid = Number(summary.totalUnpaidAmount || 0);
+        const cancelled = Number(summary.totalCancelledAmount || 0);
+        const total = paid + unpaid + cancelled;
+        const accrualRate = total > 0 ? (unpaid / total) * 100 : 0;
+        const contractSum = Number(summary.totalProcessedContractSum || 0);
+        const accrualToContract = contractSum > 0 ? (unpaid / contractSum) * 100 : 0;
+
+        if (this.accrualsSnapshotChart) this.accrualsSnapshotChart.destroy();
+
+        this.accrualsSnapshotChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Total Raised'],
+                datasets: [
+                    { label: 'Paid', data: [paid], backgroundColor: 'rgba(40,167,69,0.7)' },
+                    { label: 'Unpaid (Accrual)', data: [unpaid], backgroundColor: 'rgba(220,53,69,0.7)' },
+                    { label: 'Cancelled', data: [cancelled], backgroundColor: 'rgba(108,117,125,0.6)' }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { stacked: true },
+                    y: {
+                        stacked: true,
+                        ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() }
+                    }
+                }
+            }
+        });
+
+        const note = document.getElementById('accrualsSnapshotNote');
+        if (note) {
+            note.textContent = `Accrual rate: ${accrualRate.toFixed(1)}% of raised | Accrual vs Contract: ${accrualToContract.toFixed(1)}%`;
+        }
+    },
+
+    drawCategoryShareShiftChart(categories) {
+        const ctx = document.getElementById('categoryShareShiftChart');
+        if (!ctx || !categories || !categories.length) return;
+
+        const totalPaid = categories.reduce((s, c) => s + Number(c.amountPaid || 0), 0) || 1;
+        const totalUnpaid = categories.reduce((s, c) => s + Number(c.balance || 0), 0) || 1;
+
+        const rows = categories.map(c => ({
+            category: c.category,
+            paidShare: Number(((Number(c.amountPaid || 0) / totalPaid) * 100).toFixed(2)),
+            unpaidShare: Number(((Number(c.balance || 0) / totalUnpaid) * 100).toFixed(2))
+        }));
+
+        rows.sort((a, b) => b.unpaidShare - a.unpaidShare);
+
+        if (this.categoryShareShiftChart) this.categoryShareShiftChart.destroy();
+
+        this.categoryShareShiftChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: rows.map(r => r.category),
+                datasets: [
+                    {
+                        label: 'Paid Share %',
+                        data: rows.map(r => r.paidShare),
+                        backgroundColor: 'rgba(40,167,69,0.7)'
+                    },
+                    {
+                        label: 'Unpaid Share %',
+                        data: rows.map(r => r.unpaidShare),
+                        backgroundColor: 'rgba(220,53,69,0.7)'
+                    }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { ticks: { callback: v => v + '%' } }
+                }
+            }
+        });
+    },
+
+    drawNetPayableChart(allYearsData) {
+        const ctx = document.getElementById('netPayableChart');
+        if (!ctx || !allYearsData || !allYearsData.yearsSummary) return;
+
+        const total = Number(allYearsData.grandTotals?.currentOutstandingBalance || 0);
+        const currentRow = allYearsData.yearsSummary.find(y => y.label === this.currentYear);
+        const current = Number(currentRow?.currentBalance || 0);
+        const prior = Math.max(total - current, 0);
+
+        if (this.netPayableChart) this.netPayableChart.destroy();
+
+        this.netPayableChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Current Year', 'Prior Years'],
+                datasets: [{
+                    data: [current, prior],
+                    backgroundColor: ['rgba(0,123,255,0.7)', 'rgba(108,117,125,0.5)']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: c => `${c.label}: â‚¦${Number(c.raw || 0).toLocaleString()}`
+                        }
+                    }
+                }
+            }
+        });
+
+        const kpi = document.getElementById('netPayableKPI');
+        if (kpi) {
+            const share = total > 0 ? (current / total) * 100 : 0;
+            kpi.innerHTML = `
+                <div class="stat-label">Net Payable Position</div>
+                <div class="stat-value text-danger">${Utils.formatCurrency(total)}</div>
+                <div class="stat-subvalue">Current year share: ${share.toFixed(1)}%</div>
+            `;
+        }
+    },
+
+    async loadTaxSummary() {
+        if (!API.getTaxSummary) return;
+        const result = await API.getTaxSummary(this.currentYear);
+        if (result.success) {
+            this.taxSummary = result.summary;
+            this.renderTaxSummary(result.summary);
+        }
+    },
+
+    renderTaxSummary(summary) {
+        if (!summary) return;
+        
+        const liabilityEl = document.getElementById('taxTotalLiability');
+        const paidEl = document.getElementById('taxTotalPaid');
+        const outstandingEl = document.getElementById('taxTotalOutstanding');
+        const complianceEl = document.getElementById('taxComplianceRate');
+        
+        if (liabilityEl) liabilityEl.textContent = Utils.formatCurrency(summary.totalTaxLiability);
+        if (paidEl) paidEl.textContent = Utils.formatCurrency(summary.totalPaid);
+        if (outstandingEl) outstandingEl.textContent = Utils.formatCurrency(summary.totalOutstanding);
+        if (complianceEl) complianceEl.textContent = (summary.complianceRate || 0).toFixed(1) + '%';
+    },
+
+    async loadTaxByMonth() {
+        if (!API.getTaxByMonth) return;
+        const result = await API.getTaxByMonth(this.currentYear);
+        if (result.success) {
+            this.taxMonthlyData = result;
+            this.drawTaxSplitChart(result);
+        } else {
+            Utils.showToast(result.error || 'Failed to load tax monthly data', 'error');
+        }
+    },
+
+    drawTaxSplitChart(data) {
+        const ctx = document.getElementById('taxSplitChart');
+        if (!ctx || !data) return;
+        const months = data.months || data;
+        if (!months || !months.length) return;
+
+        const labels = months.map(m => m.month);
+        const liability = months.map(m => Number(m.totalTax || 0));
+        const paid = months.map(m => Number(m.paidTax || 0));
+
+        if (this.taxSplitChart) this.taxSplitChart.destroy();
+
+        this.taxSplitChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Total Tax Liability',
+                        data: liability,
+                        backgroundColor: 'rgba(255,193,7,0.7)'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Tax Paid',
+                        data: paid,
+                        borderColor: 'rgba(40,167,69,1)',
+                        backgroundColor: 'rgba(40,167,69,0.2)',
+                        tension: 0.3,
+                        yAxisID: 'y'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } }
+                }
+            }
+        });
+    },
+
+    async loadVoucherAnalytics() {
+        const year = this.currentYear;
+        if (this.voucherCache[year]) {
+            this.applyVoucherAnalytics(this.voucherCache[year]);
+            return;
+        }
+
+        const all = [];
+        try {
+            const firstRes = await API.getVouchers(year, null, 1, 200);
+            if (!firstRes.success) return;
+
+            all.push(...(firstRes.vouchers || []));
+            const totalPages = firstRes.totalPages || 1;
+
+            if (totalPages > 1) {
+                const promises = [];
+                for (let p = 2; p <= totalPages; p++) {
+                    promises.push(API.getVouchers(year, null, p, 200));
+                }
+                const results = await Promise.all(promises);
+                results.forEach(res => {
+                    if (res.success && res.vouchers) all.push(...res.vouchers);
+                });
+            }
+        } catch (e) {
+            console.error('Voucher analytics load error:', e);
+        }
+
+        this.voucherCache[year] = all;
+        this.applyVoucherAnalytics(all);
+    },
+
+    getMonthIndexFromVoucher(voucher) {
+        const pmtMonth = voucher?.pmtMonth || voucher?.paymentMonth;
+        if (pmtMonth) {
+            const idx = CONFIG.MONTHS.findIndex(m => m.toLowerCase() === String(pmtMonth).toLowerCase());
+            if (idx >= 0) return idx;
+        }
+
+        const date = this.parseDateFlexible(voucher?.createdAt || voucher?.date);
+        if (date) return date.getMonth();
+        return null;
+    },
+
+    applyVoucherAnalytics(vouchers) {
+        const stats = this.computeVoucherStats(vouchers || []);
+        this.voucherStats = stats;
+        this.renderFinancialInsights(this.summaryData?.summary);
+        this.renderVoucherValueCards(stats);
+        this.drawVoucherDistributionChart(stats);
+        this.drawRevalidatedImpactChart(stats);
+        this.drawCancelledImpactChart(stats);
+        this.drawAgingAnalysisFromVouchers(vouchers || []);
+    },
+
+    computeVoucherStats(vouchers) {
+        const amounts = vouchers.map(v => this.getVoucherAmount(v)).filter(v => v > 0);
+        const total = amounts.reduce((s, v) => s + v, 0);
+        const count = amounts.length;
+        const avg = count ? total / count : 0;
+
+        const sorted = [...amounts].sort((a, b) => a - b);
+        const pct = (p) => {
+            if (!sorted.length) return 0;
+            const idx = Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)));
+            return sorted[idx];
+        };
+
+        const revalidated = vouchers.filter(v => (v.oldVoucherNumber && String(v.oldVoucherNumber).trim() !== '') || String(v.oldVoucherAvailable || '').toLowerCase() === 'yes');
+        const revalidatedAmount = revalidated.reduce((s, v) => s + this.getVoucherAmount(v), 0);
+
+        const cancelled = vouchers.filter(v => String(v.status || '').toLowerCase() === 'cancelled');
+        const cancelledAmount = cancelled.reduce((s, v) => s + this.getVoucherAmount(v), 0);
+
+        const cancelledByMonth = Array(12).fill(0);
+        const cancelledCountByMonth = Array(12).fill(0);
+        cancelled.forEach(v => {
+            const idx = this.getMonthIndexFromVoucher(v);
+            if (idx === null || idx === undefined) return;
+            cancelledByMonth[idx] += this.getVoucherAmount(v);
+            cancelledCountByMonth[idx] += 1;
+        });
+
+        return {
+            totalAmount: total,
+            count,
+            average: avg,
+            median: pct(0.5),
+            p75: pct(0.75),
+            p90: pct(0.9),
+            amounts: sorted,
+            revalidatedCount: revalidated.length,
+            revalidatedAmount,
+            cancelledCount: cancelled.length,
+            cancelledAmount,
+            cancelledByMonth,
+            cancelledCountByMonth
+        };
+    },
+
+    renderVoucherValueCards(stats) {
+        const container = document.getElementById('voucherValueCards');
+        if (!container || !stats) return;
+
+        container.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-label">Average Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.average)}</div>
+                <div class="stat-subvalue">Mean amount</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Median Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.median)}</div>
+                <div class="stat-subvalue">P50</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">P75 Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.p75)}</div>
+                <div class="stat-subvalue">Upper quartile</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">P90 Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.p90)}</div>
+                <div class="stat-subvalue">High value threshold</div>
+            </div>
+        `;
+    },
+
+    drawVoucherDistributionChart(stats) {
+        const ctx = document.getElementById('voucherDistChart');
+        if (!ctx || !stats || !stats.amounts || stats.amounts.length === 0) return;
+
+        const values = stats.amounts;
+        const min = values[0];
+        const max = values[values.length - 1];
+        const binCount = 6;
+        const step = (max - min) / binCount || 1;
+
+        const bins = Array(binCount).fill(0);
+        values.forEach(v => {
+            const idx = Math.min(binCount - 1, Math.floor((v - min) / step));
+            bins[idx] += 1;
+        });
+
+        const labels = bins.map((_, i) => {
+            const start = min + (step * i);
+            const end = i === binCount - 1 ? max : (start + step);
+            return `${Utils.formatCurrency(start)} - ${Utils.formatCurrency(end)}`;
+        });
+
+        if (this.voucherDistChart) this.voucherDistChart.destroy();
+
+        this.voucherDistChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Voucher Count',
+                    data: bins,
+                    backgroundColor: 'rgba(0,123,255,0.6)'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { ticks: { callback: v => Number(v).toLocaleString() } }
+                }
+            }
+        });
+    },
+
+    drawRevalidatedImpactChart(stats) {
+        const ctx = document.getElementById('revalidatedImpactChart');
+        if (!ctx || !stats) return;
+
+        const totalAmount = this.getTotalVoucherAmount(this.summaryData?.summary || {});
+        const revalidatedAmount = Number(stats.revalidatedAmount || 0);
+        const newAmount = Math.max(totalAmount - revalidatedAmount, 0);
+        const share = totalAmount > 0 ? (revalidatedAmount / totalAmount) * 100 : 0;
+
+        if (this.revalidatedImpactChart) this.revalidatedImpactChart.destroy();
+
+        this.revalidatedImpactChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Revalidated', 'New'],
+                datasets: [{
+                    data: [revalidatedAmount, newAmount],
+                    backgroundColor: ['rgba(0,123,255,0.7)', 'rgba(108,117,125,0.4)']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: c => `${c.label}: â‚¦${Number(c.raw || 0).toLocaleString()}`
+                        }
+                    }
+                }
+            }
+        });
+
+        const kpi = document.getElementById('revalidatedImpactKPI');
+        if (kpi) {
+            kpi.innerHTML = `
+                <div class="stat-label">Revalidated Share</div>
+                <div class="stat-value">${share.toFixed(1)}%</div>
+                <div class="stat-subvalue">${Utils.formatCurrency(revalidatedAmount)} (${Utils.formatNumber(stats.revalidatedCount)} vouchers)</div>
+            `;
+        }
+    },
+
+    drawCancelledImpactChart(stats) {
+        const ctx = document.getElementById('cancelledImpactChart');
+        if (!ctx || !stats) return;
+
+        const labels = CONFIG.MONTHS;
+        const amountSeries = stats.cancelledByMonth || Array(12).fill(0);
+        const countSeries = stats.cancelledCountByMonth || Array(12).fill(0);
+
+        if (this.cancelledImpactChart) this.cancelledImpactChart.destroy();
+
+        this.cancelledImpactChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Cancelled Amount',
+                        data: amountSeries,
+                        backgroundColor: 'rgba(220,53,69,0.65)',
+                        yAxisID: 'y'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Cancelled Count',
+                        data: countSeries,
+                        borderColor: 'rgba(108,117,125,1)',
+                        backgroundColor: 'rgba(108,117,125,0.2)',
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } },
+                    y1: {
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { callback: v => Number(v).toLocaleString() }
+                    }
+                }
+            }
+        });
+
+        const totalAmount = this.getTotalVoucherAmount(this.summaryData?.summary || {});
+        const cancelledAmount = Number(stats.cancelledAmount || 0);
+        const share = totalAmount > 0 ? (cancelledAmount / totalAmount) * 100 : 0;
+
+        const kpi = document.getElementById('cancelledImpactKPI');
+        if (kpi) {
+            kpi.innerHTML = `
+                <div class="stat-label">Cancelled Impact</div>
+                <div class="stat-value">${Utils.formatCurrency(cancelledAmount)}</div>
+                <div class="stat-subvalue">${share.toFixed(1)}% of total (${Utils.formatNumber(stats.cancelledCount)} vouchers)</div>
+            `;
+        }
+    },
+
     /**
      * Load all years summary for debt tracking
      */
@@ -468,6 +1179,7 @@ const Reports = {
             this.allYearsData = result;
             this.renderAllYearsSummary(result);
             this.drawDebtTrendChart(result);
+            this.drawNetPayableChart(result);
         } else {
             Utils.showToast(result.error || 'Failed to load all-years summary', 'error');
         }
@@ -838,6 +1550,71 @@ const Reports = {
         container.innerHTML = html;
     },
 
+    renderAccountTypeTable(accountTypes) {
+        const container = document.getElementById('accountTypeTable');
+        if (!container) return;
+
+        if (!accountTypes || accountTypes.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No account type data available</p>';
+            return;
+        }
+
+        let totalCount = 0;
+        let totalAmount = 0;
+        let totalPaid = 0;
+        let totalUnpaid = 0;
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Account Type</th>
+                            <th class="text-center">Vouchers</th>
+                            <th class="text-right">Total Amount</th>
+                            <th class="text-right">Paid Amount</th>
+                            <th class="text-right">Unpaid Amount</th>
+                            <th class="text-center">Payment Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        accountTypes.forEach(row => {
+            totalCount += Number(row.count || 0);
+            totalAmount += Number(row.totalAmount || 0);
+            totalPaid += Number(row.paidAmount || 0);
+            totalUnpaid += Number(row.unpaidAmount || 0);
+
+            html += `
+                <tr>
+                    <td><strong>${row.accountType || 'Unspecified'}</strong></td>
+                    <td class="text-center">${Utils.formatNumber(row.count || 0)}</td>
+                    <td class="text-right">${Utils.formatCurrency(row.totalAmount || 0)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(row.paidAmount || 0)}</td>
+                    <td class="text-right text-danger">${Utils.formatCurrency(row.unpaidAmount || 0)}</td>
+                    <td class="text-center">${Number(row.paymentRate || 0).toFixed(2)}%</td>
+                </tr>
+            `;
+        });
+
+        const paymentRate = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
+
+        html += `
+            <tr class="totals-row">
+                <td><strong>TOTAL</strong></td>
+                <td class="text-center"><strong>${Utils.formatNumber(totalCount)}</strong></td>
+                <td class="text-right"><strong>${Utils.formatCurrency(totalAmount)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-danger"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
+                <td class="text-center"><strong>${paymentRate.toFixed(2)}%</strong></td>
+            </tr>
+        `;
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    },
+
     /**
      * Render monthly breakdown table
      */
@@ -1101,6 +1878,15 @@ const Reports = {
             csv += `${cat.category},${cat.vouchersRaised},${cat.amountPaid},${cat.balance},${cat.percentagePaid}%\n`;
         });
         csv += '\n';
+
+        if (Array.isArray(this.summaryData.accountTypeBreakdown) && this.summaryData.accountTypeBreakdown.length) {
+            csv += 'ACCOUNT TYPE BREAKDOWN\n';
+            csv += 'Account Type,Vouchers,Total Amount,Paid Amount,Unpaid Amount,Payment Rate %\n';
+            this.summaryData.accountTypeBreakdown.forEach(typeRow => {
+                csv += `${typeRow.accountType || 'Unspecified'},${typeRow.count || 0},${typeRow.totalAmount || 0},${typeRow.paidAmount || 0},${typeRow.unpaidAmount || 0},${typeRow.paymentRate || 0}\n`;
+            });
+            csv += '\n';
+        }
 
         // MONTHLY BREAKDOWN
         csv += 'MONTHLY BREAKDOWN\n';

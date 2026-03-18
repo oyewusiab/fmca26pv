@@ -32,7 +32,8 @@ const CONFIG = {
         AUDIT: 'Audit Unit',
         DDFA: 'DDFA',
         DFA: 'DFA',
-        ADMIN: 'ADMIN'
+        ADMIN: 'ADMIN',
+        TAX: 'Tax Unit'
     },
 
     // Years for lookup

@@ -122,8 +122,32 @@ const Dashboard = {
         const menuToggle = document.getElementById('menuToggle');
         const sidebar = document.getElementById('sidebar');
         if (menuToggle && sidebar) {
-            menuToggle.addEventListener('click', () => {
+            const closeSidebar = () => sidebar.classList.remove('active');
+
+            menuToggle.addEventListener('click', (event) => {
+                event.stopPropagation();
                 sidebar.classList.toggle('active');
+            });
+
+            document.addEventListener('click', (event) => {
+                if (window.innerWidth > 992) return;
+                if (!sidebar.contains(event.target) && !menuToggle.contains(event.target)) {
+                    closeSidebar();
+                }
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') closeSidebar();
+            });
+
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 992) closeSidebar();
+            });
+
+            sidebar.querySelectorAll('.nav-item').forEach((link) => {
+                link.addEventListener('click', () => {
+                    if (window.innerWidth <= 992) closeSidebar();
+                });
             });
         }
 
@@ -444,20 +468,27 @@ const Dashboard = {
 
 async function loadDashboardActionItems() {
     try {
-        const res = await API.getActionItemCount();
-
-        if (!res.success) return;
-
         const card = document.getElementById("actionItemsMiniCard");
         const text = document.getElementById("actionItemsMiniText");
+        const countBubble = document.getElementById("widgetCount");
 
         if (!card || !text) return;
+
+        const res = await API.getActionItemCount();
+
+        if (!res.success) {
+            card.style.display = "none";
+            return;
+        }
 
         const count = res.count || 0;
 
         if (count > 0) {
             text.textContent = `${count} action item${count === 1 ? '' : 's'}`;
-            card.style.display = "block";
+            if (countBubble) {
+                countBubble.textContent = count > 99 ? '99+' : String(count);
+            }
+            card.style.display = "flex";
         } else {
             card.style.display = "none";
         }

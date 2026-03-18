@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tax Management - PAYABLE VOUCHER 2026</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .tax-dashboard {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+        }
+
+        .tax-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border-top: 4px solid var(--primary-color);
+        }
+
+        .tax-card.vat { border-top-color: var(--success-color); }
+        .tax-card.wht { border-top-color: var(--warning-color); }
+        .tax-card.stamp { border-top-color: var(--danger-color); }
+
+        .tax-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .tax-card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-light);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tax-card-icon {
+            font-size: 20px;
+            opacity: 0.5;
+        }
+
+        .tax-card-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+
+        .tax-card-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #f0f0f0;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .stat-value {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .stat-value.success { color: var(--success-color); }
+        .stat-value.danger { color: var(--danger-color); }
+
+        .progress-container {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            margin-top: 8px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            border-radius: 3px;
+            background: var(--primary-color);
+            transition: width 1s ease-in-out;
+        }
+
+        .compliance-rate {
+            position: absolute;
+            right: 0;
+            top: -18px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .compliance-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .compliance-badge.excellent { background: #e6fcf5; color: #087f5b; }
+        .compliance-badge.good { background: #ebfbee; color: #2b8a3e; }
+        .compliance-badge.fair { background: #fff9db; color: #f08c00; }
+        .compliance-badge.poor { background: #fff5f5; color: #e03131; }
+
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .chart-container {
+            height: 350px;
+            position: relative;
+        }
+
+        .tax-table-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-toolbar {
+            padding: 15px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .toolbar-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .table-responsive {
+            padding: 0;
+            overflow-x: auto;
+        }
+
+        tr.totals-row {
+            background: #f8fafc;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        tr.totals-row td {
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+
+        .progress-fill.success { background-color: var(--success-color); }
+        .progress-fill.warning { background-color: var(--warning-color); }
+        .progress-fill.danger { background-color: var(--danger-color); }
+
+        .progress-bar-mini {
+            width: 80px;
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            display: inline-block;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+
+        @media (max-width: 1200px) {
+            .analytics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .card-toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .filter-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p class="loading-text">Loading Tax Data...</p>
+    </div>
+
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar"></aside>
+
+        <main class="main-content">
+            <button class="menu-toggle" id="menuToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+
+            <div class="page-header">
+                <div>
+                    <h1 class="page-title">Tax Management</h1>
+                    <p class="page-subtitle">Track, analyze and manage VAT, WHT, and Stamp Duty</p>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" id="exportTaxBtn">
+                        <i class="fas fa-file-export"></i> Export Report
+                    </button>
+                    <button class="btn btn-primary" id="recordPaymentBtn">
+                        <i class="fas fa-plus"></i> Record Tax Payment
+                    </button>
+                </div>
+            </div>
+
+            <div class="tax-dashboard">
+                <!-- Summary Cards -->
+                <div class="summary-cards">
+                    <div class="tax-card">
+                        <div class="tax-card-header">
+                            <span class="tax-card-title">Overall Compliance</span>
+                            <div id="complianceBadge"></div>
+                        </div>
+                        <div class="tax-card-value font-bold" id="complianceRate">0.0%</div>
+                        <div class="stat-item">
+                            <span class="stat-label">Total Tax Liability</span>
+                            <span class="stat-value" id="totalLiability">₦0.00</span>
+                        </div>
+                        <div class="tax-card-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Total Paid</span>
+                                <span class="stat-value success" id="totalPaid">₦0.00</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Outstanding</span>
+                                <span class="stat-value danger" id="totalOutstanding">₦0.00</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tax-card vat">
+                        <div class="tax-card-header">
+                            <span class="tax-card-title">VAT (Value Added Tax)</span>
+                            <i class="fas fa-percent tax-card-icon text-success"></i>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Liability</span>
+                            <span class="stat-value" id="vatLiability">₦0.00</span>
+                        </div>
+                        <div class="tax-card-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Paid</span>
+                                <span class="stat-value success" id="vatPaid">₦0.00</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Outstanding</span>
+                                <span class="stat-value danger" id="vatOutstanding">₦0.00</span>
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="vatProgress" style="width: 0%"></div>
+                            <span class="compliance-rate" id="vatRate">0%</span>
+                        </div>
+                    </div>
+
+                    <div class="tax-card wht">
+                        <div class="tax-card-header">
+                            <span class="tax-card-title">WHT (Withholding Tax)</span>
+                            <i class="fas fa-hand-holding-usd tax-card-icon text-warning"></i>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Liability</span>
+                            <span class="stat-value" id="whtLiability">₦0.00</span>
+                        </div>
+                        <div class="tax-card-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Paid</span>
+                                <span class="stat-value success" id="whtPaid">₦0.00</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Outstanding</span>
+                                <span class="stat-value danger" id="whtOutstanding">₦0.00</span>
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="whtProgress" style="width: 0%"></div>
+                            <span class="compliance-rate" id="whtRate">0%</span>
+                        </div>
+                    </div>
+
+                    <div class="tax-card stamp">
+                        <div class="tax-card-header">
+                            <span class="tax-card-title">Stamp Duty</span>
+                            <i class="fas fa-stamp tax-card-icon text-danger"></i>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Liability</span>
+                            <span class="stat-value" id="stampLiability">₦0.00</span>
+                        </div>
+                        <div class="tax-card-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Paid</span>
+                                <span class="stat-value success" id="stampPaid">₦0.00</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Outstanding</span>
+                                <span class="stat-value danger" id="stampOutstanding">₦0.00</span>
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="stampProgress" style="width: 0%"></div>
+                            <span class="compliance-rate" id="stampRate">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Section -->
+                <div class="analytics-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Tax Trends by Month</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="monthlyTaxChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Monthly Breakdown</h3>
+                        </div>
+                        <div class="card-body table-responsive" id="monthlyTaxTable">
+                            <p class="text-muted text-center">Loading monthly data...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Table -->
+                <div class="tax-table-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Tax Liability by Expenditure Category</h3>
+                        <button class="btn btn-sm btn-secondary" id="expandCategoriesBtn">
+                            <i class="fas fa-expand-alt"></i> View All
+                        </button>
+                    </div>
+                    <div class="card-body table-responsive" id="categoryTaxTable">
+                        <p class="text-muted text-center">Loading category data...</p>
+                    </div>
+                </div>
+
+                <div class="tax-table-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Tax Liability by Account Type</h3>
+                    </div>
+                    <div class="card-body table-responsive" id="accountTypeTaxTable">
+                        <p class="text-muted text-center">Loading account type tax data...</p>
+                    </div>
+                </div>
+
+                <!-- Payee Analysis -->
+                <div class="tax-table-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Payee Tax Analysis</h3>
+                    </div>
+                    <div class="card-toolbar">
+                        <div class="filter-group">
+                            <select class="form-control" id="payeeCategoryFilter">
+                                <option value="">All Categories</option>
+                            </select>
+                            <select class="form-control" id="payeeMonthFilter">
+                                <option value="">All Months</option>
+                            </select>
+                            <button class="btn btn-sm btn-secondary" id="applyPayeeFilters">Apply</button>
+                            <button class="btn btn-sm btn-secondary" id="clearPayeeFilters">Clear</button>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive" id="payeeTaxTable">
+                        <p class="text-muted text-center">Loading payee data...</p>
+                    </div>
+                </div>
+
+                <!-- Tax Schedules -->
+                <div class="tax-table-card">
+                    <div class="card-header">
+                        <h3 class="card-title">Tax Planning & Schedules</h3>
+                        <div class="toolbar-actions">
+                            <button class="btn btn-sm btn-primary" id="addScheduleBtn">
+                                <i class="fas fa-calendar-plus"></i> Add Schedule
+                            </button>
+                            <button class="btn btn-sm btn-secondary" id="refreshSchedulesBtn">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive" id="schedulesTable">
+                        <p class="text-muted text-center">Loading tax schedules...</p>
+                    </div>
+                </div>
+
+                <!-- Payment History -->
+                <div class="tax-table-card">
+                    <div class="card-header">
+                        <h3 class="card-title">FIRS Remittance History</h3>
+                        <div class="toolbar-actions">
+                            <button class="btn btn-sm btn-secondary" id="refreshPaymentsBtn">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive" id="paymentsTable">
+                        <p class="text-muted text-center">Loading payment records...</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Record Payment Modal -->
+    <div class="modal-overlay" id="paymentModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Record Tax Remittance</h3>
+                <button class="modal-close" id="closePaymentModal">&times;</button>
+            </div>
+            <form id="paymentForm">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Tax Type <span class="required">*</span></label>
+                        <select name="taxType" class="form-control" required>
+                            <option value="">Select Type</option>
+                            <option value="VAT">VAT (Value Added Tax)</option>
+                            <option value="WHT">WHT (Withholding Tax)</option>
+                            <option value="Stamp Duty">Stamp Duty</option>
+                            <option value="All tax type">All tax type</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Remittance Date <span class="required">*</span></label>
+                            <input type="date" name="date" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Amount (₦) <span class="required">*</span></label>
+                            <input type="number" step="0.01" name="amount" class="form-control" placeholder="0.00" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Period (Month) <span class="required">*</span></label>
+                            <select name="period" class="form-control" required id="paymentPeriodSelect">
+                                <option value="">Select Month</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Payment Method <span class="required">*</span></label>
+                            <select name="paymentMethod" class="form-control" required>
+                                <option value="Remita">Remita (RRR)</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="Cheque">Cheque</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Reference Number (RRR)</label>
+                            <input type="text" name="referenceNumber" class="form-control" placeholder="e.g. 1234-5678-9012">
+                        </div>
+                        <div class="form-group">
+                            <label>Bank</label>
+                            <input type="text" name="bank" class="form-control" placeholder="e.g. CBN, First Bank">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" class="form-control" placeholder="Additional details..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="cancelPaymentBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="savePaymentBtn">Record Payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- Tax Schedule Modal -->
+    <div class="modal-overlay" id="scheduleModal">
+        <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3 class="modal-title" id="scheduleModalTitle">Add Tax Schedule</h3>
+                <button class="modal-close" id="closeScheduleModal">&times;</button>
+            </div>
+            <form id="scheduleForm">
+                <input type="hidden" name="id" id="scheduleIdField">
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Month <span class="required">*</span></label>
+                            <select name="month" class="form-control" id="scheduleMonthSelect" required>
+                                <option value="">Select Month</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Year <span class="required">*</span></label>
+                            <input type="text" name="year" class="form-control" value="2026" readonly>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Due Date <span class="required">*</span></label>
+                            <input type="date" name="dueDate" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Tax Type <span class="required">*</span></label>
+                            <select name="taxType" class="form-control" required>
+                                <option value="VAT">VAT</option>
+                                <option value="WHT">WHT</option>
+                                <option value="Stamp Duty">Stamp Duty</option>
+                                <option value="All">All Types</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Planned Amount (₦) <span class="required">*</span></label>
+                            <input type="number" step="0.01" name="amount" class="form-control" placeholder="0.00" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select name="status" class="form-control">
+                                <option value="Pending">Pending</option>
+                                <option value="In Progress">In Progress</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Overdue">Overdue</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" class="form-control" placeholder="Schedule details or requirements..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="cancelScheduleBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveScheduleBtn">Save Schedule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/components.js"></script>
+    <script src="js/tax.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Populate month dropdowns
+            const monthSelects = ['payeeMonthFilter', 'paymentPeriodSelect', 'scheduleMonthSelect'];
+            monthSelects.forEach(id => {
+                const select = document.getElementById(id);
+                if (select) {
+                    CONFIG.MONTHS.forEach(month => {
+                        const option = document.createElement('option');
+                        option.value = month;
+                        option.textContent = month;
+                        select.appendChild(option);
+                    });
+                }
+            });
+
+            // Initialize Tax Module
+            if (window.Tax) {
+                Tax.init().catch(err => {
+                    console.error('Tax init error:', err);
+                });
+            }
+        });
+    </script>
+</body>
+
+</html>

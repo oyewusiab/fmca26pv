@@ -13,42 +13,74 @@ const Components = {
         if (!user) return '';
 
         const isActive = (page) => (activePage === page ? 'active' : '');
-        const isPayableStaff = user.role === CONFIG.ROLES.PAYABLE_STAFF;
+
+        // Role checks
+        const isPayableUnit = [
+            CONFIG.ROLES.PAYABLE_STAFF,
+            CONFIG.ROLES.PAYABLE_HEAD
+        ].includes(user.role);
+
+        const roleNorm = String(user.role || '').trim().toLowerCase();
+        const deptNorm = String(user.department || '').trim().toLowerCase();
+        const isAdmin = roleNorm === String(CONFIG.ROLES.ADMIN || '').trim().toLowerCase() || roleNorm === 'admin';
+        const isTaxUnit = roleNorm === String(CONFIG.ROLES.TAX || '').trim().toLowerCase()
+            || roleNorm === 'tax unit'
+            || roleNorm === 'tax'
+            || roleNorm.includes('tax')
+            || deptNorm.includes('tax');
+        const canAccessTax = isAdmin || isTaxUnit;
 
         // Base navigation
         let navItems = `
             <a href="dashboard.html" class="nav-item ${isActive('dashboard')}">
-            <i class="fas fa-tachometer-alt"></i> Dashboard
+                <i class="fas fa-tachometer-alt"></i> Dashboard
             </a>
             <a href="vouchers.html" class="nav-item ${isActive('vouchers')}">
-            <i class="fas fa-file-invoice-dollar"></i> Vouchers
-            </a>
-            ${!isPayableStaff ? `
-            <a href="reports.html" class="nav-item ${isActive('reports')}">
-                <i class="fas fa-chart-bar"></i> Reports
-            </a>
-            ` : ''}
-            <a href="notifications.html" class="nav-item ${isActive('notifications')}" id="notificationBell">
-            <i class="fas fa-bell"></i> Notifications
-            <span class="nav-badge" id="notificationBadge" style="display:none;">0</span>
+                <i class="fas fa-file-invoice-dollar"></i> Vouchers
             </a>
         `;
 
-        // Admin-only Audit Trail
-        if (user.role === CONFIG.ROLES.ADMIN) {
+        // Reports (NOT for Payable Unit or Tax Unit)
+        if (!isPayableUnit && !isTaxUnit) {
             navItems += `
-            <a href="audit-trail.html" class="nav-item ${isActive('auditTrail')}">
-                <i class="fas fa-clipboard-list"></i> Audit Trail
-            </a>
+                <a href="reports.html" class="nav-item ${isActive('reports')}">
+                    <i class="fas fa-chart-bar"></i> Reports
+                </a>
             `;
         }
 
-        // Admin-only User Management
-        if (user.role === CONFIG.ROLES.ADMIN) {
+        // Tax Management (ONLY for Tax Unit and Admin)
+        if (canAccessTax) {
             navItems += `
-            <a href="users.html" class="nav-item ${isActive('users')}">
-                <i class="fas fa-users-cog"></i> User Management
+                <a href="tax.html" class="nav-item ${isActive('tax')}">
+                    <i class="fas fa-file-invoice"></i> Tax Management
+                </a>
+            `;
+        }
+
+        // Notifications (Everyone)
+        navItems += `
+            <a href="notifications.html" class="nav-item ${isActive('notifications')}" id="notificationBell">
+                <i class="fas fa-bell"></i> Notifications
+                <span class="nav-badge" id="notificationBadge" style="display:none;">0</span>
             </a>
+        `;
+
+        // Audit Trail (Admin only)
+        if (isAdmin) {
+            navItems += `
+                <a href="audit-trail.html" class="nav-item ${isActive('auditTrail')}">
+                    <i class="fas fa-clipboard-list"></i> Audit Trail
+                </a>
+            `;
+        }
+
+        // User Management (Admin only)
+        if (isAdmin) {
+            navItems += `
+                <a href="users.html" class="nav-item ${isActive('users')}">
+                    <i class="fas fa-users-cog"></i> User Management
+                </a>
             `;
         }
 

@@ -287,17 +287,6 @@
     <div class="container-fluid">
         <div class="row min-vh-100">
 
-            <script>
-                // Check for login page announcements when page loads
-                document.addEventListener('DOMContentLoaded', () => {
-                    setTimeout(() => {
-                        if (typeof Notifications !== 'undefined') {
-                            Notifications.checkAnnouncements('login');
-                        }
-                    }, 1000);
-                });
-            </script>
-
             <!-- LEFT -->
             <div
                 class="col-lg-6 d-none d-lg-flex flex-column justify-content-center align-items-center brand-panel text-center p-5">
@@ -486,19 +475,9 @@
 
     <!-- Add these scripts if not already present -->
     <script src="js/api.js" defer></script>
+    <script src="js/announcements.js" defer></script>
+    <!-- Notifications included in case it holds some shared badge logic, but announcements handle login broadcast now -->
     <script src="js/notifications.js" defer></script>
-    <script src="js/action-items.js" defer></script>
-
-    <script>
-        // Check for login page announcements
-        document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(() => {
-                if (typeof Notifications !== 'undefined') {
-                    Notifications.checkAnnouncements('login');
-                }
-            }, 1000);
-        });
-    </script>
 
     <script src="js/footer.js"></script>
 

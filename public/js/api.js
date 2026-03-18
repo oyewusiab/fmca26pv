@@ -27,9 +27,14 @@
       'getVouchers': 60,             // 1 minute (list views)
       'getUsers': 3600,              // 1 hour
       'getCategories': 86400,        // 24 hours
-      'getChatUsers': 120,           // 2 minutes
       'getActionItems': 60,          // 1 minute
-      'getRolePermissions': 3600     // 1 hour
+      'getRolePermissions': 3600,    // 1 hour
+      'getTaxSummary': 600,          // 10 minutes
+      'getTaxByCategory': 900,       // 15 minutes
+      'getTaxByMonth': 900,          // 15 minutes
+      'getTaxByPayee': 600,          // 10 minutes
+      'getTaxPayments': 300,         // 5 minutes
+      'getTaxSchedule': 300          // 5 minutes
     },
 
     _getCacheKey(action, params) {
@@ -75,6 +80,7 @@
      */
     async get(action, params = {}, customTtl = null) {
       try {
+        params = params || {};
         const token = Auth.getToken?.();
         let url = `${CONFIG.API_URL}?action=${encodeURIComponent(action)}`;
 
@@ -341,30 +347,22 @@
       return await this.get("getAuditTrail", { limit, offset });
     },
 
-    // ==================== CHAT ====================
-
-    async getChatUsers() {
-      return await this.get("getChatUsers");
+    // ==========================================
+    // ANNOUNCEMENTS / MESSAGES endpoints
+    // ==========================================
+    async getActiveAnnouncements(location = null) {
+        const params = {};
+        if (location) params.location = location;
+        return await this.get('getActiveAnnouncements', params, 30);
     },
 
-    async getChatThread(otherEmail, limit = 50) {
-      return await this.get("getChatThread", { otherEmail, limit });
+    async dismissAnnouncement(announcementId) {
+        return this.post('dismissAnnouncement', { announcementId });
     },
 
-    async sendChatMessage(toEmail, message) {
-      return await this.post("sendChatMessage", { toEmail, message });
-    },
-
-    async markChatRead(otherEmail) {
-      return await this.post("markChatRead", { otherEmail });
-    },
-
-    async getChatUnreadCount() {
-      return await this.get("getChatUnreadCount");
-    },
-
-    async getChatUnreadSummary() {
-      return await this.get("getChatUnreadSummary");
+    async createAnnouncement(announcement) {
+        // announcement expects { message, targets, locations, expiresAt, allowDismiss }
+        return this.post('createAnnouncement', { announcement });
     },
 
     // ==================== SUMMARY / REPORTS ====================
@@ -383,6 +381,62 @@
 
     async getDebtProfile() {
       return await this.get("getDebtProfile");
+    },
+
+    async getTaxSummary(year = "2026") {
+      return await this.get("getTaxSummary", { year });
+    },
+
+    async getTaxByCategory(year = "2026") {
+      return await this.get("getTaxByCategory", { year });
+    },
+
+    async getTaxByMonth(year = "2026") {
+      return await this.get("getTaxByMonth", { year });
+    },
+
+    async getTaxByPayee(year = "2026", filters = null) {
+      return await this.get("getTaxByPayee", { year, filters });
+    },
+
+    async getTaxPayments(year = "2026") {
+      return await this.get("getTaxPayments", { year });
+    },
+
+    async recordTaxPayment(payment) {
+      const result = await this.post("recordTaxPayment", { payment });
+      if (result && result.success) {
+        this._invalidateCache("getTax");
+      }
+      return result;
+    },
+
+    async updateTaxPayment(paymentId, updates) {
+      const result = await this.post("updateTaxPayment", { paymentId, updates });
+      if (result && result.success) {
+        this._invalidateCache("getTax");
+      }
+      return result;
+    },
+
+    async deleteTaxPayment(paymentId) {
+      const result = await this.post("deleteTaxPayment", { paymentId });
+      if (result && result.success) {
+        this._invalidateCache("getTax");
+      }
+      return result;
+    },
+
+    async getTaxSchedule(year = "2026") {
+      return await this.get("getTaxSchedule", { year });
+    },
+
+    async createTaxSchedule(schedule) {
+      return await this.post("createTaxSchedule", { schedule });
+    },
+
+    async updateTaxSchedule(scheduleId, updates) {
+      return await this.post("updateTaxSchedule", { scheduleId, updates });
     },
 
     async getQuickStats() {

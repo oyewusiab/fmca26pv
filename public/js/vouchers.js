@@ -25,6 +25,7 @@ const Vouchers = {
   categories: [],
   categoriesLoaded: false,
   paymentTypeHandlersReady: false,
+  amountFormattingReady: false,
 
   permissions: null,
   isEditMode: false,
@@ -80,6 +81,7 @@ const Vouchers = {
     this.setupEventListeners();
     this.handleUrlParams();
     this.setupUppercaseInputs();
+    this.bindAmountFormattingHandlers();
   },
 
   normalizePermissions(rawPermissions) {
@@ -268,6 +270,88 @@ const Vouchers = {
           this.renderVoucherList();
         }
       }
+    });
+  },
+
+  getAmountFieldIds() {
+    return ['formContractSum', 'formGrossAmount', 'formVat', 'formWht', 'formStampDuty'];
+  },
+
+  parseCurrencyInputValue(value) {
+    const cleaned = String(value ?? '')
+      .replace(/,/g, '')
+      .replace(/[^\d.]/g, '');
+    if (!cleaned) return 0;
+    const parsed = parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  },
+
+  formatCurrencyInputValue(value) {
+    const raw = String(value ?? '').replace(/,/g, '').trim();
+    if (!raw) return '';
+    const num = this.parseCurrencyInputValue(raw);
+    if (!Number.isFinite(num)) return '';
+    return num.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  },
+
+  setAmountFieldValue(fieldId, value) {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    const num = Number(value);
+    if (!Number.isFinite(num) || num === 0) {
+      el.value = '';
+      return;
+    }
+    el.value = num.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  },
+
+  getAmountFieldValue(fieldId) {
+    const el = document.getElementById(fieldId);
+    return el ? this.parseCurrencyInputValue(el.value) : 0;
+  },
+
+  recalculateVoucherNet() {
+    const gross = this.getAmountFieldValue('formGrossAmount');
+    const vat = this.getAmountFieldValue('formVat');
+    const wht = this.getAmountFieldValue('formWht');
+    const stamp = this.getAmountFieldValue('formStampDuty');
+    const net = gross - (vat + wht + stamp);
+
+    const netField = document.getElementById('formNet');
+    if (netField) netField.value = net.toFixed(2);
+
+    const netDisplay = document.getElementById('formNetDisplay');
+    if (netDisplay) netDisplay.textContent = Utils.formatNumber(net);
+  },
+
+  bindAmountFormattingHandlers() {
+    if (this.amountFormattingReady) return;
+    this.amountFormattingReady = true;
+
+    this.getAmountFieldIds().forEach((fieldId) => {
+      const el = document.getElementById(fieldId);
+      if (!el) return;
+
+      el.addEventListener('focus', () => {
+        const num = this.parseCurrencyInputValue(el.value);
+        el.value = num ? String(num) : '';
+      });
+
+      el.addEventListener('input', () => {
+        el.value = String(el.value || '').replace(/[^\d.,]/g, '');
+        this.recalculateVoucherNet();
+      });
+
+      el.addEventListener('blur', () => {
+        el.value = this.formatCurrencyInputValue(el.value);
+        this.recalculateVoucherNet();
+      });
     });
   },
 
@@ -816,13 +900,13 @@ const Vouchers = {
       document.getElementById('formPayee').value = voucher.payee || '';
       document.getElementById('formAccountOrMail').value = voucher.accountOrMail || '';
       document.getElementById('formParticular').value = voucher.particular || '';
-      document.getElementById('formContractSum').value = voucher.contractSum || '';
-      document.getElementById('formGrossAmount').value = voucher.grossAmount || '';
+      this.setAmountFieldValue('formContractSum', voucher.contractSum);
+      this.setAmountFieldValue('formGrossAmount', voucher.grossAmount);
+      this.setAmountFieldValue('formVat', voucher.vat);
+      this.setAmountFieldValue('formWht', voucher.wht);
+      this.setAmountFieldValue('formStampDuty', voucher.stampDuty);
       document.getElementById('formNet').value = voucher.net || '';
       document.getElementById('formNetDisplay').textContent = Utils.formatNumber(voucher.net || 0);
-      document.getElementById('formVat').value = voucher.vat || '';
-      document.getElementById('formWht').value = voucher.wht || '';
-      document.getElementById('formStampDuty').value = voucher.stampDuty || '';
       document.getElementById('formCategories').value = voucher.categories || '';
       document.getElementById('formAccountType').value = voucher.accountType || '';
       document.getElementById('formDate').value = formatDateForInput(voucher.date);
@@ -851,6 +935,7 @@ const Vouchers = {
     this.applyOldVoucherAvailability();
 
     this.setupPaymentTypeHandlers();
+    this.recalculateVoucherNet();
     modal.classList.add('active');
   },
 
@@ -969,7 +1054,7 @@ const Vouchers = {
     }
 
     const paymentType = document.querySelector('input[name="paymentType"]:checked')?.value;
-    const contractSum = parseFloat(document.getElementById('formContractSum').value) || 0;
+    const contractSum = this.getAmountFieldValue('formContractSum');
 
     if (paymentType === 'firstPart' && !contractSum) {
       Utils.showToast('Contract Sum is required for First Part-Payment', 'error');
@@ -978,10 +1063,10 @@ const Vouchers = {
 
     const payee = document.getElementById('formPayee').value.trim();
     const accountOrMail = document.getElementById('formAccountOrMail').value.trim();
-    const gross = parseFloat(document.getElementById('formGrossAmount').value) || 0;
-    const vat = parseFloat(document.getElementById('formVat').value) || 0;
-    const wht = parseFloat(document.getElementById('formWht').value) || 0;
-    const stampDuty = parseFloat(document.getElementById('formStampDuty').value) || 0;
+    const gross = this.getAmountFieldValue('formGrossAmount');
+    const vat = this.getAmountFieldValue('formVat');
+    const wht = this.getAmountFieldValue('formWht');
+    const stampDuty = this.getAmountFieldValue('formStampDuty');
     const net = gross - (vat + wht + stampDuty);
     const oldVoucherChoice = this.getOldVoucherAvailability();
     let oldVoucherNumber = document.getElementById('formOldVoucherNumber').value.trim();
@@ -1002,7 +1087,7 @@ const Vouchers = {
       payee,
       accountOrMail,
       particular: document.getElementById('formParticular').value.trim(),
-      contractSum: parseFloat(document.getElementById('formContractSum').value) || 0,
+      contractSum: contractSum,
       grossAmount: gross,
       vat,
       wht,
@@ -1152,18 +1237,13 @@ const Vouchers = {
       document.getElementById('formOldVoucherNumber').value = v.accountOrMail || '';
       document.getElementById('formPayee').value = v.payee || '';
       document.getElementById('formParticular').value = v.particular || '';
-      document.getElementById('formContractSum').value = v.contractSum || '';
-      document.getElementById('formGrossAmount').value = v.grossAmount || '';
-      document.getElementById('formVat').value = v.vat || '';
-      document.getElementById('formWht').value = v.wht || '';
-      document.getElementById('formStampDuty').value = v.stampDuty || '';
+      this.setAmountFieldValue('formContractSum', v.contractSum);
+      this.setAmountFieldValue('formGrossAmount', v.grossAmount);
+      this.setAmountFieldValue('formVat', v.vat);
+      this.setAmountFieldValue('formWht', v.wht);
+      this.setAmountFieldValue('formStampDuty', v.stampDuty);
       document.getElementById('formCategories').value = v.categories || '';
-
-      const gross = parseFloat(v.grossAmount) || 0;
-      const vat = parseFloat(v.vat) || 0;
-      const wht = parseFloat(v.wht) || 0;
-      const stamp = parseFloat(v.stampDuty) || 0;
-      document.getElementById('formNet').value = (gross - (vat + wht + stamp)).toFixed(2);
+      this.recalculateVoucherNet();
     }, 100);
   },
 
@@ -1184,18 +1264,13 @@ const Vouchers = {
 
         document.getElementById('formPayee').value = v.payee || '';
         document.getElementById('formParticular').value = v.particular || '';
-        document.getElementById('formContractSum').value = v.contractSum || '';
-        document.getElementById('formGrossAmount').value = v.grossAmount || '';
-        document.getElementById('formVat').value = v.vat || '';
-        document.getElementById('formWht').value = v.wht || '';
-        document.getElementById('formStampDuty').value = v.stampDuty || '';
+        this.setAmountFieldValue('formContractSum', v.contractSum);
+        this.setAmountFieldValue('formGrossAmount', v.grossAmount);
+        this.setAmountFieldValue('formVat', v.vat);
+        this.setAmountFieldValue('formWht', v.wht);
+        this.setAmountFieldValue('formStampDuty', v.stampDuty);
         document.getElementById('formCategories').value = v.categories || '';
-
-        const gross = parseFloat(v.grossAmount) || 0;
-        const vat = parseFloat(v.vat) || 0;
-        const wht = parseFloat(v.wht) || 0;
-        const stamp = parseFloat(v.stampDuty) || 0;
-        document.getElementById('formNet').value = (gross - (vat + wht + stamp)).toFixed(2);
+        this.recalculateVoucherNet();
 
         Utils.showToast(`Found in ${result.sourceYear}. Filled fields.`, 'success');
       } else {
@@ -2498,20 +2573,7 @@ const Vouchers = {
       radio.addEventListener('change', () => this.applyOldVoucherAvailability());
     });
 
-    const recalcNet = () => {
-      const gross = parseFloat(document.getElementById('formGrossAmount').value) || 0;
-      const vat = parseFloat(document.getElementById('formVat').value) || 0;
-      const wht = parseFloat(document.getElementById('formWht').value) || 0;
-      const stamp = parseFloat(document.getElementById('formStampDuty').value) || 0;
-      const net = gross - (vat + wht + stamp);
-
-      document.getElementById('formNet').value = net.toFixed(2);
-
-      const netDisplay = document.getElementById('formNetDisplay');
-      if (netDisplay) {
-        netDisplay.textContent = Utils.formatNumber(net);
-      }
-    };
+    const recalcNet = () => this.recalculateVoucherNet();
 
     ['formGrossAmount', 'formVat', 'formWht', 'formStampDuty'].forEach(id => {
       const el = document.getElementById(id);

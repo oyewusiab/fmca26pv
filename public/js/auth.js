@@ -218,6 +218,25 @@ const Auth = {
             return false;
         }
 
+        const user = this.getUser();
+        const roleNorm = String(user?.role || '').trim().toLowerCase();
+        const deptNorm = String(user?.department || '').trim().toLowerCase();
+        const isTax = roleNorm === String(CONFIG.ROLES.TAX || '').trim().toLowerCase()
+            || roleNorm === 'tax unit'
+            || roleNorm === 'tax'
+            || roleNorm.includes('tax')
+            || deptNorm.includes('tax');
+
+        if (isTax) {
+            const path = (window.location.pathname || '').toLowerCase();
+            const isTaxPage = path.endsWith('/tax.html') || path.endsWith('\\tax.html') || path.endsWith('tax.html');
+            const isLogin = path.endsWith('/index.html') || path.endsWith('index.html') || path.endsWith('/login.html') || path.endsWith('login.html');
+            if (!isTaxPage && !isLogin) {
+                window.location.href = 'tax.html';
+                return false;
+            }
+        }
+
         return true;
     }
 };
