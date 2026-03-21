@@ -34,7 +34,9 @@
       'getTaxByMonth': 900,          // 15 minutes
       'getTaxByPayee': 600,          // 10 minutes
       'getTaxPayments': 300,         // 5 minutes
-      'getTaxSchedule': 300          // 5 minutes
+      'getTaxSchedule': 300,         // 5 minutes
+      'getDebtProfileRequestStatus': 30, // 30 seconds
+      'getDebtProfileFullData': 0    // No cache for full data
     },
 
     _getCacheKey(action, params) {
@@ -383,6 +385,34 @@
       return await this.get("getDebtProfile");
     },
 
+    async requestDebtProfile(reportData) {
+      return await this.post("requestDebtProfile", { filterData: reportData });
+    },
+
+    async getDebtProfileRequestStatus() {
+      return await this.get("getDebtProfileRequestStatus", {}, 30);
+    },
+
+    async approveDebtProfile(requestId, comments) {
+      return await this.post("approveDebtProfile", { requestId, comments });
+    },
+
+    async rejectDebtProfile(requestId, comments) {
+      return await this.post("rejectDebtProfile", { requestId, comments });
+    },
+
+    async getDebtProfileFullData(requestId) {
+      return await this.get("getDebtProfileFullData", { requestId }, 0);
+    },
+    
+    async getDebtProfilePDF(requestId) {
+      return await this.get("generateDebtProfilePDF", { requestId }, 0);
+    },
+    
+    async getDebtProfileExcel(requestId) {
+      return await this.get("generateDebtProfileExcel", { requestId }, 0);
+    },
+
     async getTaxSummary(year = "2026") {
       return await this.get("getTaxSummary", { year });
     },
@@ -719,4 +749,17 @@
         });
       });
     };
+
+  /**
+   * Helper to convert base64 to Blob for downloads
+   */
+  Utils.base64ToBlob = function (base64, type) {
+    const binStr = atob(base64);
+    const len = binStr.length;
+    const arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        arr[i] = binStr.charCodeAt(i);
+    }
+    return new Blob([arr], { type: type });
+  };
 })();

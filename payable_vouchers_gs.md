@@ -123,11 +123,21 @@ function doGet(e) {
             case 'getDebtProfile':
                 result = getDebtProfile(params.token);
                 break;
+            case 'getDebtProfileRequestStatus':
+                result = getDebtProfileRequestStatus(params.token);
+                break;
+            case 'getDebtProfileFullData':
+                result = getDebtProfileFullData(params.token, params.requestId);
+                break;
+            case 'generateDebtProfilePDF':
+                result = generateDebtProfilePDF(params.token, params.requestId);
+                break;
+            case 'generateDebtProfileExcel':
+                result = generateDebtProfileExcel(params.token, params.requestId);
+                break;
             case 'getQuickStats':
                 result = getQuickStats(params.token);
                 break;
-
-            // ---- USERS ----
             case 'getUsers':
                 result = getUsers(params.token);
                 break;
@@ -340,6 +350,17 @@ function doPost(e) {
             // ---- PROFILE ----
             case 'updateMyProfile':
                 result = updateMyProfile(token, payload.profile);
+                break;
+
+            // ---- DEBT PROFILE WORKFLOW ----
+            case 'requestDebtProfile':
+                result = requestDebtProfile(token, payload);
+                break;
+            case 'approveDebtProfile':
+                result = handleDebtProfileApproval(token, payload.requestId, 'approve', payload.comments);
+                break;
+            case 'rejectDebtProfile':
+                result = handleDebtProfileApproval(token, payload.requestId, 'reject', payload.comments);
                 break;
 
             // ---- ANNOUNCEMENTS ----
@@ -4650,4 +4671,590 @@ function diagnosticCheck() {
   // Should output something like:
   // { success: true, controlNumber: "CN-CPO-001" }
 }
+}
+
+/**
+ * DEBT PROFILE REQUEST & APPROVAL SYSTEM
+ */
+
+/**
+ * Request a new Debt Profile generation
+ */
+function requestDebtProfile(token, filterData) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    // Permission check: Any user with reporting access can request, but only senior roles auto-approve
+    if (!hasPermission(session.role, [CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.DDFA, CONFIG.ROLES.DFA, CONFIG.ROLES.ADMIN])) {
+      return { success: false, error: 'Unauthorized: You do not have permission to request debt profile generation.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    let sheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!sheet) {
+      sheet = ss.insertSheet(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+      sheet.getRange(1, 1, 1, 14).setValues([[
+        'REQUEST_ID', 'TIMESTAMP', 'REQUESTER_EMAIL', 'REQUESTER_NAME', 
+        'FILTERS', 'STATUS', 'APPROVER_EMAIL', 'APPROVAL_DATE', 'COMMENTS', 'REPORT_ID',
+        'REPORT_TITLE', 'EXECUTIVE_SUMMARY', 'ANALYSIS', 'RECOMMENDATIONS'
+      ]]);
+      sheet.getRange(1, 1, 1, 14).setFontWeight('bold').setBackground('#e0e0e0');
+    }
+    
+    // Senior roles auto-approve
+    const isSeniorRole = [CONFIG.ROLES.DDFA, CONFIG.ROLES.DFA, CONFIG.ROLES.ADMIN].includes(session.role);
+    const status = isSeniorRole ? 'APPROVED' : 'PENDING';
+    const requestId = 'REQ-' + Utilities.getUuid().substring(0, 8).toUpperCase();
+    const ts = getNigerianTimestamp();
+    
+    // Extract metadata from filterData if provided as object
+    let filters = '';
+    let reportTitle = 'Debt Profile Report 2026';
+    let execSummary = '';
+    let analysis = '';
+    let recommendations = '';
+    
+    if (typeof filterData === 'object') {
+      // Handle the case where the API wraps everything in a 'filterData' key
+      const actualData = filterData.filterData || filterData;
+      
+      filters = JSON.stringify(actualData.filters || {});
+      reportTitle = actualData.title || reportTitle;
+      execSummary = actualData.summary || '';
+      analysis = actualData.analysis || '';
+      recommendations = actualData.recommendations || '';
+    } else {
+      filters = typeof filterData === 'string' ? filterData : JSON.stringify(filterData || {});
+    }
+    
+    sheet.appendRow([
+      requestId, ts, session.email, session.name, 
+      filters, status, 
+      isSeniorRole ? session.email : '', 
+      isSeniorRole ? ts : '', 
+      isSeniorRole ? 'System Auto-Approved' : '', 
+      '',
+      reportTitle, execSummary, analysis, recommendations
+    ]);
+    
+    // Ensure data is immediately available for subsequent calls in the same execution
+    SpreadsheetApp.flush();
+    
+    if (!isSeniorRole) {
+      const approverRoles = [CONFIG.ROLES.DDFA, CONFIG.ROLES.DFA, CONFIG.ROLES.ADMIN];
+      const usersSheet = getSheet(CONFIG.SHEETS.USERS);
+      const usersData = usersSheet.getDataRange().getValues();
+      const approverEmails = [];
+      
+      for (let i = 1; i < usersData.length; i++) {
+        if (approverRoles.includes(usersData[i][3]) && usersData[i][4]) {
+          approverEmails.push(usersData[i][1]);
+        }
+      }
+      
+      createNotifications(
+        approverEmails, 
+        'Debt Profile Generation Request', 
+        `${session.name} has requested a comprehensive Debt Profile Report. Approval required.`,
+        'reports.html?tab=debt-profile',
+        'warning'
+      );
+    }
+    
+    return { 
+      success: true, 
+      requestId: requestId, 
+      message: isSeniorRole ? 'Report generated successfully.' : 'Request submitted for approval.',
+      status: status
+    };
+  } catch (e) {
+    return { success: false, error: 'Request failed: ' + e.message };
+  }
+}
+
+function getDebtProfileRequestStatus(token) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!sheet) return { success: true, status: 'NONE' };
+    
+    const data = sheet.getDataRange().getValues();
+    // Search backwards for the latest request by THIS user
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      if (row[2] === session.email) {
+        return {
+          success: true,
+          requestId: row[0],
+          timestamp: row[1],
+          requester: row[3],
+          filters: JSON.parse(row[4] || '{}'),
+          status: row[5],
+          approver: row[6],
+          approvalDate: row[7],
+          comments: row[8],
+          narrative: {
+            title: row[10],
+            summary: row[11],
+            analysis: row[12],
+            recommendations: row[13]
+          }
+        };
+      }
+    }
+    
+    return { success: true, status: 'NONE' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function handleDebtProfileApproval(token, requestId, action, comments) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    if (!hasPermission(session.role, [CONFIG.ROLES.DDFA, CONFIG.ROLES.DFA, CONFIG.ROLES.ADMIN])) {
+      return { success: false, error: 'Unauthorized.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!sheet) return { success: false, error: 'No requests.' };
+    
+    const data = sheet.getDataRange().getValues();
+    let rowIndex = -1;
+    let requesterEmail = '';
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === requestId) {
+        rowIndex = i + 1;
+        requesterEmail = data[i][2];
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) return { success: false, error: 'Request not found.' };
+    
+    const status = action === 'approve' ? 'APPROVED' : 'REJECTED';
+    const ts = getNigerianTimestamp();
+    
+    sheet.getRange(rowIndex, 6).setValue(status);
+    sheet.getRange(rowIndex, 7).setValue(session.email);
+    sheet.getRange(rowIndex, 8).setValue(ts);
+    sheet.getRange(rowIndex, 9).setValue(comments || '');
+    
+    createNotifications(
+      [requesterEmail],
+      'Debt Profile Request',
+      `Your request for ${requestId} has been ${action}d by ${session.name}.`,
+      'reports.html?tab=debt-profile',
+      status === 'APPROVED' ? 'success' : 'danger'
+    );
+    
+    return { success: true, message: `Request ${action}d successfully.` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function getDebtProfileFullData(token, requestId) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    SpreadsheetApp.flush();
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const requestsSheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!requestsSheet) return { success: false, error: 'Requests sheet missing.' };
+    
+    const requestsData = requestsSheet.getDataRange().getValues();
+    let request = null;
+    const reqCols = CONFIG.DEBT_REQUEST_COLUMNS;
+    
+    for (let i = 1; i < requestsData.length; i++) {
+      if (requestsData[i][0] === requestId) {
+        request = {
+          id: requestsData[i][0],
+          filters: JSON.parse(requestsData[i][reqCols.FILTERS - 1] || '{}'),
+          status: requestsData[i][reqCols.STATUS - 1],
+          title: requestsData[i][reqCols.REPORT_TITLE - 1] || 'Debt Profile Report',
+          summary: requestsData[i][reqCols.EXECUTIVE_SUMMARY - 1] || '',
+          analysis: requestsData[i][reqCols.ANALYSIS - 1] || '',
+          recommendations: requestsData[i][reqCols.RECOMMENDATIONS - 1] || ''
+        };
+        break;
+      }
+    }
+    
+    if (!request) return { success: false, error: 'Request not found.' };
+    if (request.status !== 'APPROVED' && session.role !== CONFIG.ROLES.ADMIN) {
+      return { success: false, error: 'Request not approved yet.' };
+    }
+    
+    const filters = request.filters;
+    const startDate = filters.startDate ? new Date(filters.startDate) : null;
+    const endDate = filters.endDate ? new Date(filters.endDate) : null;
+    
+    const vouchersSheet = ss.getSheetByName(CONFIG.SHEETS.VOUCHERS_2026);
+    const data = vouchersSheet.getDataRange().getValues();
+    const cols = CONFIG.VOUCHER_COLUMNS;
+    
+    // ----- FETCH 2025 DATA FOR BALANCE B/F -----
+    let balanceBF = 0;
+    try {
+      const sheet2025 = ss.getSheetByName(CONFIG.SHEETS.VOUCHERS_2025);
+      if (sheet2025) {
+        const data2025 = sheet2025.getDataRange().getValues();
+        const cols2025 = CONFIG.VOUCHER_COLUMNS;
+        for (let i = 1; i < data2025.length; i++) {
+          const status = String(data2025[i][cols2025.STATUS - 1]).trim().toLowerCase();
+          if (status === 'unpaid') {
+            balanceBF += parseAmount(data2025[i][cols2025.GROSS_AMOUNT - 1]);
+          }
+        }
+      }
+    } catch (e) {
+      Logger.log("Warning: Could not fetch 2025 data for B/F: " + e.message);
+    }
+
+    const result = {
+      summary: { 
+        totalDebt: 0, 
+        count: 0, 
+        overdueCount: 0, 
+        overdueAmount: 0,
+        balanceBF: balanceBF,
+        revalidatedAmount: 0,
+        currentUnpaid2026: 0,
+        totalContractSum: 0,
+        totalPayments: 0,
+        paymentEfficiency: 0,
+        debtGrowthRate: 0
+      },
+      currentMonth: {
+        name: '',
+        newObligations: 0,
+        payments: 0,
+        unpaid: 0
+      },
+      taxSummary: { totalVAT: 0, totalWHT: 0, totalStampDuty: 0, totalTax: 0 },
+      byCategory: {},
+      byDepartment: {},
+      byAge: { '0-30 Days': 0, '31-90 Days': 0, '91+ Days': 0 },
+      details: []
+    };
+    
+    const now = new Date();
+    const currentMonthName = Utilities.formatDate(now, "GMT", "MMMM");
+    result.currentMonth.name = currentMonthName;
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const status = String(row[cols.STATUS - 1]).trim().toLowerCase();
+      const voucherMonth = String(row[cols.PMT_MONTH - 1]).trim();
+      
+      const grossAmount = parseAmount(row[cols.GROSS_AMOUNT - 1]);
+      const contractSum = parseAmount(row[cols.CONTRACT_SUM - 1]);
+      const isRevalidated = !!String(row[cols.OLD_VOUCHER_NUMBER - 1] || '').trim();
+      
+      // Multi-metric tracking (Performance Summary)
+      result.summary.totalContractSum += contractSum;
+      if (status === 'paid') {
+        result.summary.totalPayments += grossAmount;
+        if (voucherMonth === currentMonthName) {
+          result.currentMonth.payments += grossAmount;
+        }
+      }
+      
+      if (status !== 'unpaid') continue;
+      
+      // Filtering for report period if requested
+      const dateVal = row[cols.DATE - 1];
+      const voucherDate = dateVal ? new Date(dateVal) : null;
+      if (startDate && voucherDate && voucherDate < startDate) continue;
+      if (endDate && voucherDate && voucherDate > endDate) continue;
+      
+      const amount = grossAmount;
+      const vat = parseAmount(row[cols.VAT - 1]);
+      const wht = parseAmount(row[cols.WHT - 1]);
+      const stampDuty = parseAmount(row[cols.STAMP_DUTY - 1]);
+      
+      const category = String(row[cols.CATEGORIES - 1]).trim() || 'Uncategorized';
+      const department = String(row[cols.ACCOUNT_TYPE - 1]).trim() || 'General';
+      const createdAt = row[cols.CREATED_AT - 1] ? new Date(row[cols.CREATED_AT - 1]) : voucherDate;
+      
+      result.summary.totalDebt += amount;
+      result.summary.count++;
+      result.summary.currentUnpaid2026 += amount;
+      if (isRevalidated) result.summary.revalidatedAmount += amount;
+
+      if (voucherMonth === currentMonthName) {
+        result.currentMonth.newObligations += amount;
+        result.currentMonth.unpaid += amount;
+      }
+      
+      result.taxSummary.totalVAT += vat;
+      result.taxSummary.totalWHT += wht;
+      result.taxSummary.totalStampDuty += stampDuty;
+      result.taxSummary.totalTax += (vat + wht + stampDuty);
+      
+      if (!result.byCategory[category]) result.byCategory[category] = 0;
+      result.byCategory[category] += amount;
+      
+      if (!result.byDepartment[department]) result.byDepartment[department] = 0;
+      result.byDepartment[department] += amount;
+      
+      if (createdAt) {
+        const ageDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+        if (ageDays <= 30) result.byAge['0-30 Days'] += amount;
+        else if (ageDays <= 90) result.byAge['31-90 Days'] += amount;
+        else {
+          result.byAge['91+ Days'] += amount;
+          result.summary.overdueCount++;
+          result.summary.overdueAmount += amount;
+        }
+      } else {
+        result.byAge['0-30 Days'] += amount;
+      }
+      
+      // Captured detail records (Full schedule for official report)
+      result.details.push({
+        payee: row[cols.PAYEE - 1],
+        particular: row[cols.PARTICULAR - 1],
+        amount: amount,
+        date: voucherDate ? Utilities.formatDate(voucherDate, "GMT", "yyyy-MM-dd") : 'N/A',
+        category: category,
+        department: department
+      });
+    }
+    
+    // Final Performance Calculations
+    const vouchersRaised2026 = result.summary.totalPayments + result.summary.currentUnpaid2026;
+    result.summary.paymentEfficiency = vouchersRaised2026 > 0 
+      ? (result.summary.totalPayments / vouchersRaised2026) * 100 
+      : 0;
+    
+    result.summary.debtGrowthRate = result.summary.balanceBF > 0 
+      ? ((result.summary.totalDebt / result.summary.balanceBF) - 1) * 100 
+      : 0;
+
+    // Convert and sort breakdowns for easier consumption in the template
+    const categoryBreakdown = Object.entries(result.byCategory)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+      
+    const departmentBreakdown = Object.entries(result.byDepartment)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return { 
+      success: true, 
+      data: result, 
+      categoryBreakdown: categoryBreakdown, // SHOW ALL CATEGORIES
+      departmentBreakdown: departmentBreakdown, // SHOW ALL DEPARTMENTS
+      balanceBF: result.summary.balanceBF,
+      total2026Unpaid: result.summary.currentUnpaid2026,
+      revalidated: result.summary.revalidatedAmount,
+      totalDebtProfile: result.summary.balanceBF + result.summary.currentUnpaid2026,
+      performance: {
+        contractSum: result.summary.totalContractSum,
+        vouchersRaised: vouchersRaised2026,
+        paymentsMade: result.summary.totalPayments,
+        unpaidBalance: result.summary.currentUnpaid2026,
+        efficiency: result.summary.paymentEfficiency.toFixed(1) + '%',
+        growth: result.summary.debtGrowthRate.toFixed(1) + '%'
+      },
+      currentMonth: result.currentMonth,
+      filters: filters, 
+      narrative: {
+        title: request.title,
+        summary: request.summary,
+        analysis: request.analysis,
+        recommendations: request.recommendations
+      },
+      generatedAt: getNigerianTimestamp() 
+    };
+  } catch (error) {
+    return { success: false, error: 'Data aggregation failed: ' + error.message };
+  }
+}
+
+/**
+ * Generates a professional PDF for the Debt Profile
+ */
+function generateDebtProfilePDF(token, requestId) {
+  try {
+    const res = getDebtProfileFullData(token, requestId);
+    if (!res.success) return res;
+    
+    const data = res.data;
+    const narrative = res.narrative;
+    
+    // Check if template exists to avoid script crash (which causes CORS/500 errors)
+    let htmlTemplate;
+    try {
+      htmlTemplate = HtmlService.createTemplateFromFile('DebtReportTemplate');
+    } catch (templateError) {
+      return { 
+        success: false, 
+        error: "PDF Template 'DebtReportTemplate' not found in Google Apps Script project. Please create an HTML file with this name in the GAS editor and paste the template code." 
+      };
+    }
+
+    // Robust assignment with defaults to prevent "is not defined" errors in template
+    htmlTemplate.data = res.data || { summary: {}, details: [], taxSummary: {} };
+    htmlTemplate.narrative = res.narrative || { title: 'Debt Profile', summary: '', analysis: '', recommendations: '' };
+    htmlTemplate.categoryBreakdown = res.categoryBreakdown || [];
+    htmlTemplate.departmentBreakdown = res.departmentBreakdown || [];
+    htmlTemplate.balanceBF = res.balanceBF || 0;
+    htmlTemplate.revalidated = res.revalidated || 0;
+    htmlTemplate.total2026Unpaid = res.total2026Unpaid || 0;
+    htmlTemplate.totalDebtProfile = res.totalDebtProfile || 0;
+    htmlTemplate.performance = res.performance || { vouchersRaised: 0, paymentsMade: 0, efficiency: '0%', growth: '0%', contractSum: 0 };
+    htmlTemplate.currentMonth = res.currentMonth || { name: 'Month', newObligations: 0, payments: 0, unpaid: 0 };
+    htmlTemplate.generatedAt = res.generatedAt || new Date().toLocaleString();
+    
+    const html = htmlTemplate.evaluate().getContent();
+    const blob = Utilities.newBlob(html, 'text/html', 'report.html');
+    const pdf = blob.getAs('application/pdf').setName(narrative.title.replace(/\s+/g, '_') + '.pdf');
+    
+    // In GAS, we usually return a base64 string or a Drive file URL. 
+    // For direct web apps, returning base64 is common for small files.
+    return { 
+      success: true, 
+      pdfBase64: Utilities.base64Encode(pdf.getBytes()),
+      fileName: pdf.getName()
+    };
+  } catch (e) {
+    return { success: false, error: 'PDF Generation failed: ' + e.message };
+  }
+}
+
+function generateDebtProfileExcel(token, requestId) {
+  try {
+    const res = getDebtProfileFullData(token, requestId);
+    if (!res.success) return res;
+    
+    const data = res.data;
+    const narrative = res.narrative;
+    const catBreakdown = res.categoryBreakdown || [];
+    const perf = res.performance || {};
+    const cm = res.currentMonth || {};
+    
+    const ss = SpreadsheetApp.create('Debt_Profile_Analytical_Report_' + requestId);
+    
+    // --- SHEET 1: POSITION & SUMMARY ---
+    const posSheet = ss.getSheets()[0];
+    posSheet.setName('1-2. Summary & Position');
+    
+    posSheet.getRange('A1:C1').merge().setValue('FEDERAL MEDICAL CENTRE, ABEOKUTA').setFontWeight('bold').setFontSize(14).setHorizontalAlignment('center');
+    posSheet.getRange('A2:C2').merge().setValue('DEBT PROFILE ANALYTICAL REPORT').setFontWeight('bold').setFontSize(12).setHorizontalAlignment('center');
+    posSheet.getRange('A3:C3').merge().setValue('As of ' + res.generatedAt).setFontStyle('italic').setHorizontalAlignment('center');
+    
+    posSheet.getRange('A5').setValue('1. OVERVIEW & OBJECTIVES').setFontWeight('bold').setBackground('#f3f3f3');
+    posSheet.getRange('A6:C6').merge().setValue(narrative.summary).setWrap(true);
+    posSheet.setRowHeight(6, 80);
+    
+    posSheet.getRange('A8').setValue('2. CURRENT FINANCIAL POSITION').setFontWeight('bold').setBackground('#f3f3f3');
+    posSheet.getRange('A9:C9').setValues([['Liability Type', 'Amount (₦)', 'Description']]).setBackground('#003366').setFontColor('white');
+    posSheet.getRange('A10:C13').setValues([
+      ['Balance B/F (2025)', res.balanceBF, 'Unpaid vouchers carried into 2026'],
+      ['Revalidated Vouchers', res.revalidated, 'Verified historical obligations'],
+      ['Current Unpaid (2026)', res.total2026Unpaid, 'Newly incurred debt'],
+      ['TOTAL DEBT PROFILE', res.totalDebtProfile, 'Total institutional liability']
+    ]);
+    posSheet.getRange('B10:B13').setNumberFormat('₦#,##0.00');
+    posSheet.getRange('A13:C13').setFontWeight('bold').setBackground('#fff2cc');
+    posSheet.setColumnWidth(1, 200);
+    posSheet.setColumnWidth(2, 200);
+    posSheet.setColumnWidth(3, 300);
+
+    // --- SHEET 2: PERFORMANCE & COMPARISON ---
+    const perfSheet = ss.insertSheet('3-4. Performance & Comparison');
+    perfSheet.getRange('A1').setValue('3. FINANCIAL PERFORMANCE (2026)').setFontWeight('bold').setBackground('#f3f3f3');
+    perfSheet.getRange('A2:B2').setValues([['Metric', 'Value']]).setBackground('#003366').setFontColor('white');
+    perfSheet.getRange('A3:B8').setValues([
+      ['Total Vouchers Raised', perf.vouchersRaised],
+      ['Total Payments Made', perf.paymentsMade],
+      ['Unpaid Balance', perf.unpaidBalance],
+      ['Payment Efficiency', perf.efficiency],
+      ['Debt Growth Rate', perf.growth],
+      ['Total Contract Sum', perf.contractSum]
+    ]);
+    perfSheet.getRange('B3:B5').setNumberFormat('₦#,##0.00');
+    perfSheet.getRange('B8').setNumberFormat('₦#,##0.00');
+    
+    perfSheet.getRange('A10').setValue('4. PERIOD COMPARISON').setFontWeight('bold').setBackground('#f3f3f3');
+    perfSheet.getRange('A11:C11').setValues([['Metric', 'Current Month ('+cm.name+')', 'Cumulative (YTD)']]).setBackground('#003366').setFontColor('white');
+    perfSheet.getRange('A12:C14').setValues([
+      ['New Obligations', cm.newObligations, perf.vouchersRaised],
+      ['Actual Payments', cm.payments, perf.paymentsMade],
+      ['Unpaid Balance', cm.unpaid, res.totalDebtProfile]
+    ]);
+    perfSheet.getRange('B12:C14').setNumberFormat('₦#,##0.00');
+    perfSheet.autoResizeColumns(1, 3);
+
+    // --- SHEET 3: EXPENDITURE ANALYSIS ---
+    const expSheet = ss.insertSheet('5. Expenditure Analysis');
+    expSheet.getRange('A1').setValue('SECTORAL DEBT DISTRIBUTION (ALL CATEGORIES)').setFontWeight('bold');
+    expSheet.getRange('A2:B2').setValues([['Category', 'Amount (₦)']]).setBackground('#003366').setFontColor('white');
+    if (catBreakdown.length > 0) {
+      const rows = catBreakdown.map(c => [c.name, c.amount]);
+      expSheet.getRange(3, 1, rows.length, 2).setValues(rows);
+      expSheet.getRange(3, 2, rows.length, 1).setNumberFormat('₦#,##0.00');
+    }
+    
+    const taxRow = catBreakdown.length + 5;
+    expSheet.getRange(taxRow, 1).setValue('STATUTORY TAX FORECAST').setFontWeight('bold');
+    expSheet.getRange(taxRow + 1, 1, 1, 2).setValues([['Tax Type', 'Amount (₦)']]).setBackground('#003366').setFontColor('white');
+    expSheet.getRange(taxRow + 2, 1, 4, 2).setValues([
+      ['VAT', data.taxSummary.totalVAT],
+      ['WHT', data.taxSummary.totalWHT],
+      ['Stamp Duty', data.taxSummary.totalStampDuty],
+      ['Total Liability', data.taxSummary.totalTax]
+    ]);
+    expSheet.getRange(taxRow + 2, 2, 4, 1).setNumberFormat('₦#,##0.00');
+    expSheet.getRange(taxRow + 5, 1, 1, 2).setFontWeight('bold').setBackground('#fff2cc');
+    
+    expSheet.getRange('D1').setValue('5. ANALYTICAL COMMENTARY').setFontWeight('bold');
+    expSheet.getRange('D2:G2').merge().setValue(narrative.analysis).setWrap(true);
+    expSheet.setColumnWidth(4, 400);
+    expSheet.autoResizeColumns(1, 3);
+
+    // --- SHEET 4: RECOMMENDATIONS ---
+    const recSheet = ss.insertSheet('6. Recommendations');
+    recSheet.getRange('A1').setValue('6. STRATEGIC OBSERVATIONS & RECOMMENDATIONS').setFontWeight('bold').setBackground('#f3f3f3');
+    recSheet.getRange('A2:E6').merge().setValue(narrative.recommendations).setWrap(true).setVerticalAlignment('top');
+    recSheet.setRowHeight(2, 200);
+    recSheet.setColumnWidth(1, 600);
+
+    // --- SHEET 5: DETAILED SCHEDULE ---
+    const detSheet = ss.insertSheet('7. Detailed Schedule');
+    detSheet.appendRow(['Payee', 'Particular', 'Amount', 'Date', 'Category']);
+    detSheet.getRange(1, 1, 1, 5).setBackground('#003366').setFontColor('white').setFontWeight('bold');
+    if (data.details && data.details.length > 0) {
+      const detailRows = data.details.map(d => [d.payee, d.particular, d.amount, d.date, d.category]);
+      detSheet.getRange(2, 1, detailRows.length, 5).setValues(detailRows);
+      detSheet.getRange(2, 3, detailRows.length, 1).setNumberFormat('₦#,##0.00');
+    }
+    detSheet.setFrozenRows(1);
+    detSheet.autoResizeColumns(1, 5);
+    
+    SpreadsheetApp.flush();
+    
+    try {
+      DriveApp.getFileById(ss.getId()).setAnonymousAccess(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (e) {
+      return { success: true, downloadUrl: ss.getUrl(), message: 'Excel generated. Permissions error: ' + e.message };
+    }
+    
+    return { success: true, downloadUrl: ss.getUrl(), message: 'Comprehensive Analytical Excel report generated successfully.' };
+  } catch (e) {
+    return { success: false, error: 'Excel Generation failed: ' + e.message };
+  }
 }

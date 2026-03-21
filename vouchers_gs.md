@@ -602,6 +602,22 @@ function createVoucher(token, voucher) {
         }
       }
     }
+
+    // Check for duplicate VOUCHER NUMBER (Account/Ref No.)
+    if (voucher.accountOrMail && voucher.accountOrMail.trim()) {
+      const data = sheet.getDataRange().getValues();
+      const newVN = voucher.accountOrMail.trim().toUpperCase();
+      
+      for (let i = 1; i < data.length; i++) {
+        const existingVN = String(data[i][CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
+        if (existingVN === newVN) {
+          return { 
+            success: false, 
+            error: 'Duplicate: Voucher number "' + voucher.accountOrMail + '" already exists in Row ' + (i + 1) + '. Please use a unique number.'
+          };
+        }
+      }
+    }
     
     // Set defaults
     voucher.status = voucher.status || 'Unpaid';
@@ -793,6 +809,24 @@ function updateVoucher(token, rowIndex, voucher) {
           return { 
             success: false, 
             error: 'Duplicate: This Old Voucher Number already exists in Row ' + (i + 1)
+          };
+        }
+      }
+    }
+
+    // Check for duplicate VOUCHER NUMBER (Account/Ref No.)
+    if (voucher.accountOrMail && voucher.accountOrMail.trim()) {
+      const data = sheet.getDataRange().getValues();
+      const newVN = voucher.accountOrMail.trim().toUpperCase();
+      
+      for (let i = 1; i < data.length; i++) {
+        if (i + 1 === rowIndex) continue; // Skip current row
+        
+        const existingVN = String(data[i][CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
+        if (existingVN === newVN) {
+          return { 
+            success: false, 
+            error: 'Duplicate: Voucher number "' + voucher.accountOrMail + '" already exists in Row ' + (i + 1) + '. Please use a unique number.'
           };
         }
       }

@@ -30,6 +30,11 @@ const Reports = {
     revalidatedImpactChart: null,
     categoryShareShiftChart: null,
     cancelledImpactChart: null,
+    debtRequestStatus: null,
+    debtReportData: null,
+    reportAgingChart: null,
+    reportCategoryChart: null,
+    reportDepartmentChart: null,
 
     /**
      * Initialize reports page
@@ -50,6 +55,7 @@ const Reports = {
         this.setupSidebar();
         this.setupEventListeners();
         await this.loadAllReports();
+        await this.checkDebtProfileStatus();
     },
 
     /**
@@ -89,6 +95,60 @@ const Reports = {
 
         // Export button
         document.getElementById('exportBtn')?.addEventListener('click', () => this.exportToCSV());
+
+        // Debt Profile Request
+        document.getElementById('requestDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileRequest());
+        document.getElementById('reRequestDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileRequest());
+
+        // Debt Profile Approval
+        document.getElementById('approveDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileApproval('approve'));
+        document.getElementById('rejectDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileApproval('reject'));
+
+        // View Report
+        document.getElementById('viewApprovedReportBtn')?.addEventListener('click', () => this.loadFullDebtReport());
+
+        // Debt Profile Events (using delegation for components that might be re-rendered)
+        document.addEventListener('click', (e) => {
+            const id = e.target.id || e.target.closest('button')?.id;
+            
+            if (id === 'editNarrativeBtn') {
+                console.log('Edit Narrative button clicked');
+                this.handleDebtProfileRequest();
+            } else if (id === 'createNewReportBtn') {
+                console.log('Create New Report button clicked');
+                this.handleDebtProfileRequest(true); // pass true for fresh report
+            } else if (id === 'downloadFullPDF') {
+                this.downloadDebtReportGenerated('pdf');
+            } else if (id === 'downloadFullExcel') {
+                this.downloadDebtReportGenerated('excel');
+            }
+        });
+        
+        // Auto-Generate button (inside modal)
+        document.getElementById('autoGenerateBtn')?.addEventListener('click', () => this.generateSmartNarrative());
+
+        // Modal Close logic
+        const modalOverlay = document.getElementById('analyticalFormModalOverlay');
+        if (modalOverlay) {
+            modalOverlay.querySelectorAll('.close-modal, .cancel-modal').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    console.log('Closing modal');
+                    modalOverlay.classList.remove('active');
+                });
+            });
+        } else {
+            console.error('analyticalFormModalOverlay not found in DOM');
+        }
+
+        // Modal Submit logic
+        const analyticalForm = document.getElementById('analyticalReportForm');
+        if (analyticalForm) {
+            analyticalForm.onsubmit = async (e) => {
+                e.preventDefault();
+                console.log('Submitting analytical report form');
+                await this.submitDebtProfileRequest();
+            };
+        }
 
         // Listen for SWR background updates
         document.addEventListener('apiDataUpdated', (e) => {
@@ -1916,6 +1976,391 @@ const Reports = {
             } else {
                 loader.classList.add('hidden');
             }
+        }
+    },
+
+    // ==================== DEBT PROFILE WORKFLOW ====================
+
+    async checkDebtProfileStatus() {
+        const result = await API.getDebtProfileRequestStatus();
+        if (result.success) {
+            this.debtRequestStatus = result;
+            this.renderDebtProfileStatus();
+        }
+    },
+
+    renderDebtProfileStatus() {
+        const status = this.debtRequestStatus?.status || 'NONE';
+        const user = Auth.getUser();
+        const isAdmin = user && [CONFIG.ROLES.ADMIN, CONFIG.ROLES.DFA, CONFIG.ROLES.DDFA].includes(user.role);
+
+        // Hide all
+        ['Initial', 'Pending', 'Rejected', 'Approved'].forEach(s => {
+            document.getElementById(`debtProfileStatus${s}`)?.classList.add('hidden');
+        });
+
+        if (status === 'NONE') {
+            document.getElementById('debtProfileStatusInitial')?.classList.remove('hidden');
+        } else if (status === 'PENDING') {
+            document.getElementById('debtProfileStatusPending')?.classList.remove('hidden');
+            document.getElementById('pendingRequester').textContent = this.debtRequestStatus.requester;
+            document.getElementById('pendingDate').textContent = Utils.formatDateTime(this.debtRequestStatus.timestamp);
+            
+            if (isAdmin) {
+                document.getElementById('approverActions')?.classList.remove('hidden');
+            }
+        } else if (status === 'REJECTED') {
+            document.getElementById('debtProfileStatusRejected')?.classList.remove('hidden');
+            document.getElementById('rejectionReason').textContent = `Reason: ${this.debtRequestStatus.comments || 'No comments'}`;
+        } else if (status === 'APPROVED') {
+            document.getElementById('debtProfileStatusApproved')?.classList.remove('hidden');
+            document.getElementById('approvalDateLabel').textContent = Utils.formatDateTime(this.debtRequestStatus.approvalDate);
+        }
+    },
+
+    async handleDebtProfileRequest(fresh = false) {
+        console.log('handleDebtProfileRequest called', { fresh });
+        const modal = document.getElementById('analyticalFormModalOverlay');
+        if (modal) {
+            // Reset fields if fresh
+            const titleInput = document.getElementById('reportTitle');
+            const summaryInput = document.getElementById('reportSummary');
+            const analysisInput = document.getElementById('reportAnalysis');
+            const recommendationsInput = document.getElementById('reportRecommendations');
+
+            if (fresh) {
+                if (titleInput) titleInput.value = `Debt Profile Report - ${this.currentYear}`;
+                if (summaryInput) summaryInput.value = '';
+                if (analysisInput) analysisInput.value = '';
+                if (recommendationsInput) recommendationsInput.value = '';
+            } else if (this.debtRequestStatus?.narrative) {
+                // If we have existing narrative, pre-fill it for editing
+                const n = this.debtRequestStatus.narrative;
+                if (titleInput) titleInput.value = n.title || `Debt Profile Report - ${this.currentYear}`;
+                if (summaryInput) summaryInput.value = n.summary || '';
+                if (analysisInput) analysisInput.value = n.analysis || '';
+                if (recommendationsInput) recommendationsInput.value = n.recommendations || '';
+            } else if (titleInput && !titleInput.value) {
+                titleInput.value = `Debt Profile Report - ${this.currentYear}`;
+            }
+
+            console.log('Opening modal overlay');
+            modal.classList.add('active');
+        } else {
+            console.error('Modal overlay "analyticalFormModalOverlay" not found');
+            Utils.showToast('Report configuration error', 'error');
+        }
+    },
+
+    /**
+     * Automatically generates insights based on current summary data
+     */
+    generateSmartNarrative() {
+        if (!this.summaryData) {
+            Utils.showToast('Loading data stats...', 'info');
+            return;
+        }
+
+        const res = this.summaryData;
+        const s = res.data?.summary || {};
+        const p = res.performance || {};
+        const cm = res.currentMonth || {};
+        const cats = res.categoryBreakdown || [];
+        const topCat = cats.length > 0 ? cats[0] : null;
+
+        const totalDebt = res.totalDebtProfile || s.totalDebt || 0;
+        const efficiency = p.efficiency || '0%';
+        const growth = p.growth || '0%';
+        const balanceBF = res.balanceBF || 0;
+        
+        const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        // SECTION 1: OVERVIEW
+        const summary = `This report provides a comprehensive financial overview of the Federal Medical Centre, Abeokuta, as of ${today}. It serves as a dual-purpose handover document and performance analysis, integrating carryover liabilities from 2025 (${Utils.formatCurrency(balanceBF)}) with new 2026 obligations. The report evaluates contract sums, payment efficiency, and debt growth rates to guide management decision-making.`;
+        
+        // SECTION 5: ANALYSIS
+        const analysis = `Financial evaluation for 2026 reveals a total contract sum commitment of ${Utils.formatCurrency(p.contractSum)}. Payment efficiency currently stands at ${efficiency}, indicating the ratio of vouchers settled against total obligations raised. A growth rate of ${growth} is observed relative to the 2025 starting balance. Sectoral analysis identifies "${topCat ? topCat.name : 'Operations'}" as the lead expenditure category. In the current month (${cm.name}), the hospital processed ${Utils.formatCurrency(cm.newObligations)} in new vouchers while effecting ${Utils.formatCurrency(cm.payments)} in payments.`;
+        
+        // SECTION 6: RECOMMENDATIONS
+        const recommendations = `1. Prioritize the settlement of 2025 Balance B/F (${Utils.formatCurrency(balanceBF)}) to reduce legacy interest/inflation risk.\n2. Implement stricter commitment controls in the "${topCat ? topCat.name : 'High-Expenditure'}" sector.\n3. Target a payment efficiency improvement of 15% in the next quarter via automated voucher processing.\n4. Revalidate all outstanding 2026 vouchers to ensure budgetary alignment before the next fiscal cycle.`;
+
+        document.getElementById('reportTitle').value = `DEBT PROFILE & FINANCIAL HANDOVER REPORT - ${this.currentYear}`;
+        document.getElementById('reportSummary').value = summary;
+        document.getElementById('reportAnalysis').value = analysis;
+        document.getElementById('reportRecommendations').value = recommendations;
+        
+        Utils.showToast('Comprehensive analytical insights generated!', 'success');
+    },
+
+    async submitDebtProfileRequest() {
+        const reportData = {
+            title: document.getElementById('reportTitle').value,
+            summary: document.getElementById('reportSummary').value,
+            analysis: document.getElementById('reportAnalysis').value,
+            recommendations: document.getElementById('reportRecommendations').value,
+            filters: { year: this.currentYear, requestedAt: new Date().toISOString() }
+        };
+
+        this.showLoading(true);
+        const result = await API.requestDebtProfile(reportData);
+        this.showLoading(false);
+
+        if (result.success) {
+            document.getElementById('analyticalFormModalOverlay')?.classList.remove('active');
+            Utils.showToast(result.message || 'Request processed successfully', 'success');
+            await this.checkDebtProfileStatus();
+            
+            // If it was already approved (re-generation), reload the report
+            if (this.debtRequestStatus?.status === 'APPROVED') {
+                await this.loadFullDebtReport();
+            }
+        } else {
+            Utils.showToast(result.error || 'Request failed', 'error');
+        }
+        return result;
+    },
+
+    async handleDebtProfileApproval(action) {
+        const comments = document.getElementById('approvalComments').value;
+        if (action === 'reject' && !comments) {
+            Utils.showToast('Comments are required for rejection', 'warning');
+            return;
+        }
+
+        const confirm = await Utils.confirm(`Are you sure you want to ${action} this request?`, `${action.toUpperCase()} Request`);
+        if (!confirm) return;
+
+        this.showLoading(true);
+        const result = action === 'approve' 
+            ? await API.approveDebtProfile(this.debtRequestStatus.requestId, comments)
+            : await API.rejectDebtProfile(this.debtRequestStatus.requestId, comments);
+        this.showLoading(false);
+
+        if (result.success) {
+            Utils.showToast(`Request ${action}d successfully`, 'success');
+            await this.checkDebtProfileStatus();
+        } else {
+            Utils.showToast(result.error || 'Action failed', 'error');
+        }
+    },
+
+    async loadFullDebtReport() {
+        this.showLoading(true);
+        const result = await API.getDebtProfileFullData(this.debtRequestStatus.requestId);
+        this.showLoading(false);
+
+        if (result.success) {
+            this.debtReportData = result.data;
+            this.renderFullDebtReport();
+            document.getElementById('fullDebtReportContainer').classList.remove('hidden');
+            document.getElementById('debtProfileWorkflowCard').classList.add('hidden');
+            Utils.showToast('Report loaded successfully', 'success');
+        } else {
+            Utils.showToast(result.error || 'Failed to load report data', 'error');
+        }
+    },
+
+    renderFullDebtReport() {
+        const data = this.debtReportData;
+        const narrative = this.debtRequestStatus?.narrative || {};
+        if (!data) return;
+
+        // Header & Narrative
+        document.getElementById('reportHeaderTitle').textContent = narrative.title || 'Official Debt Profile Report';
+        document.getElementById('reportGeneratedDate').textContent = Utils.formatDateTime(this.debtRequestStatus.timestamp);
+        document.getElementById('reportSummaryText').textContent = narrative.summary || 'No summary provided.';
+        document.getElementById('reportAnalysisText').textContent = narrative.analysis || 'No detailed analysis provided.';
+        document.getElementById('reportRecommendationsText').textContent = narrative.recommendations || 'No recommendations provided.';
+
+        // Stats
+        document.getElementById('reportTotalDebt').textContent = Utils.formatCurrency(data.summary.totalDebt);
+        document.getElementById('reportOverdueDebt').textContent = Utils.formatCurrency(data.summary.overdueAmount);
+        document.getElementById('reportOverdueCount').textContent = `${data.summary.overdueCount} vouchers`;
+
+        // Automated System Insights (Optional element)
+        const reportNarrative = document.getElementById('reportNarrative');
+        if (reportNarrative) {
+            const overduePct = (data.summary.overdueAmount / (data.summary.totalDebt || 1) * 100).toFixed(1);
+            reportNarrative.textContent = `Data analysis shows that ${overduePct}% of the outstanding debt is overdue by more than 90 days. The debt is distributed across ${Object.keys(data.byCategory || {}).length} categories.`;
+        }
+
+        // Charts
+        this.drawReportCharts(data);
+
+        // Details Table
+        const tableContainer = document.getElementById('reportDetailsTableContainer');
+        if (data.details && data.details.length > 0) {
+            tableContainer.innerHTML = `
+                <div class="table-container">
+                    <table class="table-hover">
+                        <thead>
+                            <tr>
+                                <th>Payee</th>
+                                <th>Particulars</th>
+                                <th>Category</th>
+                                <th>Dept</th>
+                                <th>Date</th>
+                                <th class="text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.details.map(d => `
+                                <tr>
+                                    <td>${d.payee}</td>
+                                    <td>${d.particular}</td>
+                                    <td><span class="badge badge-info">${d.category}</span></td>
+                                    <td>${d.department}</td>
+                                    <td>${d.date}</td>
+                                    <td class="text-right"><strong>${Utils.formatCurrency(d.amount)}</strong></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            tableContainer.innerHTML = '<p class="text-center text-muted">No detail records found.</p>';
+        }
+    },
+
+    drawReportCharts(data) {
+        // Aging Chart
+        const agingCtx = document.getElementById('reportAgingChart');
+        if (agingCtx) {
+            if (this.reportAgingChart) this.reportAgingChart.destroy();
+            this.reportAgingChart = new Chart(agingCtx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(data.byAge),
+                    datasets: [{
+                        data: Object.values(data.byAge),
+                        backgroundColor: ['#28a745', '#ffc107', '#dc3545']
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // Category Chart
+        const catCtx = document.getElementById('reportCategoryChart');
+        if (catCtx) {
+            if (this.reportCategoryChart) this.reportCategoryChart.destroy();
+            const topCats = Object.entries(data.byCategory)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8);
+            
+            this.reportCategoryChart = new Chart(catCtx, {
+                type: 'bar',
+                data: {
+                    labels: topCats.map(c => c[0]),
+                    datasets: [{
+                        label: 'Amount',
+                        data: topCats.map(c => c[1]),
+                        backgroundColor: 'rgba(0, 123, 255, 0.7)'
+                    }]
+                },
+                options: { 
+                    indexAxis: 'y', 
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { x: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } } }
+                }
+            });
+        }
+
+        // Department Chart
+        const deptCtx = document.getElementById('reportDepartmentChart');
+        if (deptCtx) {
+            if (this.reportDepartmentChart) this.reportDepartmentChart.destroy();
+            const depts = Object.entries(data.byDepartment).sort((a,b) => b[1] - a[1]);
+            this.reportDepartmentChart = new Chart(deptCtx, {
+                type: 'bar',
+                data: {
+                    labels: depts.map(d => d[0]),
+                    datasets: [{
+                        label: 'Amount',
+                        data: depts.map(d => d[1]),
+                        backgroundColor: 'rgba(108, 117, 125, 0.7)'
+                    }]
+                },
+                options: { 
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } } }
+                }
+            });
+        }
+    },
+
+    async downloadDebtReportGenerated(format) {
+        if (!this.debtRequestStatus?.requestId) return;
+
+        // Ensure current form details reflect in the report (Auto-save if edited)
+        const currentTitle = document.getElementById('reportTitle')?.value?.trim();
+        const currentSummary = document.getElementById('reportSummary')?.value?.trim();
+        const currentAnalysis = document.getElementById('reportAnalysis')?.value?.trim();
+        const currentRecs = document.getElementById('reportRecommendations')?.value?.trim();
+        
+        const dbNarrative = this.debtRequestStatus.narrative || {};
+        
+        const hasChanges = (currentTitle && currentTitle !== (dbNarrative.title || '').trim()) || 
+                          (currentSummary && currentSummary !== (dbNarrative.summary || '').trim()) ||
+                          (currentAnalysis && currentAnalysis !== (dbNarrative.analysis || '').trim()) ||
+                          (currentRecs && currentRecs !== (dbNarrative.recommendations || '').trim());
+        
+        let freshRequestId = this.debtRequestStatus?.requestId;
+        
+        if (hasChanges) {
+            console.log('Detected narrative changes. Current form vs DB:', {
+                current: { title: currentTitle, summary: currentSummary, analysis: currentAnalysis, recs: currentRecs },
+                db: dbNarrative
+            });
+            Utils.showToast('Saving latest narrative edits first...', 'info');
+            const syncRes = await this.submitDebtProfileRequest();
+            if (syncRes && syncRes.success && syncRes.requestId) {
+                freshRequestId = syncRes.requestId;
+                console.log('Sync successful. New requestId:', freshRequestId);
+            } else {
+                console.error('Narrative sync failed or no requestId returned:', syncRes);
+                Utils.showToast('Could not sync narrative. Exporting previous version.', 'warning');
+            }
+        }
+
+        if (!freshRequestId) {
+            Utils.showToast('No report request found. Generate a profile first.', 'error');
+            return;
+        }
+
+        Utils.showToast(`Generating high-quality ${format.toUpperCase()}...`, 'info');
+        this.showLoading(true);
+        
+        try {
+            if (format === 'pdf') {
+                const result = await API.getDebtProfilePDF(freshRequestId);
+                if (result && result.success && result.pdfBase64) {
+                    const blob = Utils.base64ToBlob(result.pdfBase64, 'application/pdf');
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = (currentTitle || 'Debt_Profile_Report').replace(/\s+/g, '_') + '.pdf';
+                    link.click();
+                    Utils.showToast('PDF downloaded successfully', 'success');
+                } else {
+                    throw new Error(result?.error || 'Failed to generate PDF');
+                }
+            } else if (format === 'excel') {
+                const result = await API.getDebtProfileExcel(freshRequestId);
+                if (result && result.success && result.downloadUrl) {
+                    window.open(result.downloadUrl, '_blank');
+                    Utils.showToast('Excel report opened in new tab', 'success');
+                } else {
+                    throw new Error(result?.error || 'Failed to generate Excel');
+                }
+            }
+        } catch (err) {
+            Utils.showToast(err.message, 'error');
+        } finally {
+            this.showLoading(false);
         }
     }
 };

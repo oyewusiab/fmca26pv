@@ -40,8 +40,9 @@ const Components = {
             </a>
         `;
 
-        // Reports (NOT for Payable Unit or Tax Unit)
-        if (!isPayableUnit && !isTaxUnit) {
+        // Reports (NOT for Payable Staff or Tax Unit)
+        const isPayableStaff = roleNorm === String(CONFIG.ROLES.PAYABLE_STAFF || '').trim().toLowerCase();
+        if (!isPayableStaff && !isTaxUnit) {
             navItems += `
                 <a href="reports.html" class="nav-item ${isActive('reports')}">
                     <i class="fas fa-chart-bar"></i> Reports
