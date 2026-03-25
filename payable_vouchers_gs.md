@@ -150,6 +150,18 @@ function doGet(e) {
                 result = getNotifications(params.token, params.onlyUnread === 'true');
                 break;
 
+            case 'getUsers':
+                result = getUsers(params.token);
+                break;
+            case 'getRolePermissions':
+                result = getRolePermissions(params.token);
+                break;
+
+            // ---- NOTIFICATIONS ----
+            case 'getNotifications':
+                result = getNotifications(params.token, params.onlyUnread === 'true');
+                break;
+
             // ---- AUDIT ----
             case 'getAuditTrail':
                 result = getAuditTrail(params.token, parseInt(params.limit) || 50, parseInt(params.offset) || 0);
@@ -169,6 +181,9 @@ function doGet(e) {
             // ---- CATEGORIES ----
             case 'getCategories':
                 result = getCategories(params.token);
+                break;
+            case 'getSystemConfig':
+                result = getSystemConfig(params.token);
                 break;
 
             // ---- DELETIONS ----
@@ -1823,8 +1838,48 @@ function testStatusUpdate() {
  * - Total Contract Sum: SUM(CONTRACT SUM)
  * - Total Debt: Total Contract Sum - (Paid + Cancelled)
  * - Average Payment Rate: Paid voucher COUNT / Total voucher COUNT * 100
- * - Revalidated Vouchers: COUNT if OLD VOUCHER NUMBER is not empty
+ * - Revalidated Vouchers: COUNT if OLD VOUCHER NUMBER is not empty OR
+ *   OLD VOUCHER NO AVAILABLE? = "YES"
  */
+function resolveVoucherSummaryColumns_(sheet) {
+  const cfg = CONFIG.VOUCHER_COLUMNS || {};
+  const header = getHeaderMap_(sheet);
+
+  function colFromHeaderOrConfig_(headerNames, fallbackCol1Based) {
+    for (let i = 0; i < headerNames.length; i++) {
+      const idx = header[String(headerNames[i] || '').toUpperCase().trim()];
+      if (idx) return idx - 1; // zero-based
+    }
+    return Math.max((fallbackCol1Based || 1) - 1, 0);
+  }
+
+  const out = {
+    STATUS_COL: colFromHeaderOrConfig_(['STATUS'], cfg.STATUS),
+    PMT_MONTH_COL: colFromHeaderOrConfig_(['PMT MONTH', 'PAYMENT MONTH'], cfg.PMT_MONTH),
+    PAYEE_COL: colFromHeaderOrConfig_(['PAYEE'], cfg.PAYEE),
+    ACCT_COL: colFromHeaderOrConfig_(['ACCOUNT OR MAIL', 'ACCOUNT OR EMAIL (VOUCHER NUMBER)', 'VOUCHER NUMBER', 'VOUCHER NO.', 'VOUCHER NO'], cfg.ACCOUNT_OR_MAIL),
+    CONTRACT_COL: colFromHeaderOrConfig_(['CONTRACT SUM'], cfg.CONTRACT_SUM),
+    GROSS_COL: colFromHeaderOrConfig_(['GROSS AMOUNT'], cfg.GROSS_AMOUNT),
+    VAT_COL: colFromHeaderOrConfig_(['VAT'], cfg.VAT),
+    WHT_COL: colFromHeaderOrConfig_(['WHT', 'WITHHOLDING TAX'], cfg.WHT),
+    STAMP_COL: colFromHeaderOrConfig_(['STAMP DUTY'], cfg.STAMP_DUTY),
+    CATEGORY_COL: colFromHeaderOrConfig_(['CATEGORIES', 'CATEGORY'], cfg.CATEGORIES),
+    OLD_VN_COL: colFromHeaderOrConfig_(['OLD VOUCHER NUMBER', 'OLD VOUCHER NO'], cfg.OLD_VOUCHER_NUMBER),
+    OLD_VN_AVAILABLE_COL: colFromHeaderOrConfig_(['OLD VOUCHER NO AVAILABLE?', 'OLD VOUCHER AVAILABLE'], cfg.OLD_VOUCHER_AVAILABLE),
+    ACCOUNT_TYPE_COL: colFromHeaderOrConfig_(['ACCOUNT TYPE'], cfg.ACCOUNT_TYPE),
+    SUB_ACCT_COL: colFromHeaderOrConfig_(['SUB ACCOUNT', 'SUB ACCOUNT TYPE'], cfg.SUB_ACCOUNT_TYPE)
+  };
+
+  out.LAST_COL = Math.max(
+    out.STATUS_COL, out.PMT_MONTH_COL, out.PAYEE_COL, out.ACCT_COL,
+    out.CONTRACT_COL, out.GROSS_COL, out.VAT_COL, out.WHT_COL,
+    out.STAMP_COL, out.CATEGORY_COL, out.OLD_VN_COL, out.OLD_VN_AVAILABLE_COL,
+    out.ACCOUNT_TYPE_COL, out.SUB_ACCT_COL
+  ) + 1;
+
+  return out;
+}
+
 function getSummary(token, year) {
   try {
     const session = getSession(token);
@@ -1873,6 +1928,7 @@ function getSummary(token, year) {
           unpaidVouchers: 0,
           cancelledVouchers: 0,
           revalidatedVouchers: 0,
+          revalidatedWithoutOldNumber: 0,
           totalProcessedContractSum: 0,
           totalPaidAmount: 0,
           totalUnpaidAmount: 0,
@@ -1898,24 +1954,23 @@ function getSummary(token, year) {
       };
     }
     
-    // Up to RELEASED AT (Column S = 19) to include all tax columns
-    const lastCol = 19;
-    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-    
-    // Column indices based on CONFIG
-    const cols = CONFIG.VOUCHER_COLUMNS;
-    const STATUS_COL   = cols.STATUS          - 1; // A
-    const PMT_MONTH_COL= cols.PMT_MONTH       - 1; // B
-    const PAYEE_COL    = cols.PAYEE           - 1; // C
-    const ACCT_COL     = cols.ACCOUNT_OR_MAIL - 1; // D
-    const CONTRACT_COL = cols.CONTRACT_SUM    - 1; // F
-    const GROSS_COL    = cols.GROSS_AMOUNT    - 1; // G
-    const VAT_COL      = cols.VAT             - 1; // I
-    const WHT_COL      = cols.WHT             - 1; // J
-    const STAMP_COL    = cols.STAMP_DUTY      - 1; // K
-    const CATEGORY_COL = cols.CATEGORIES      - 1; // L
-    const OLD_VN_COL   = cols.OLD_VOUCHER_NUMBER - 1; // O
-    const ACCOUNT_TYPE_COL = cols.ACCOUNT_TYPE - 1; // Q
+    // Column indices resolved by header first (supports actual Q/T layout), fallback to CONFIG.
+    const c = resolveVoucherSummaryColumns_(sheet);
+    const data = sheet.getRange(2, 1, lastRow - 1, c.LAST_COL).getValues();
+    const STATUS_COL   = c.STATUS_COL;
+    const PMT_MONTH_COL= c.PMT_MONTH_COL;
+    const PAYEE_COL    = c.PAYEE_COL;
+    const ACCT_COL     = c.ACCT_COL;
+    const CONTRACT_COL = c.CONTRACT_COL;
+    const GROSS_COL    = c.GROSS_COL;
+    const VAT_COL      = c.VAT_COL;
+    const WHT_COL      = c.WHT_COL;
+    const STAMP_COL    = c.STAMP_COL;
+    const CATEGORY_COL = c.CATEGORY_COL;
+    const OLD_VN_COL   = c.OLD_VN_COL;
+    const OLD_VN_AVAILABLE_COL = c.OLD_VN_AVAILABLE_COL;
+    const ACCOUNT_TYPE_COL = c.ACCOUNT_TYPE_COL;
+    const SUB_ACCT_COL = c.SUB_ACCT_COL;
     
     // ---------- INITIALISE COUNTERS ----------
     
@@ -1924,7 +1979,8 @@ function getSummary(token, year) {
     let paidVoucherCount      = 0;  // count where STATUS = Paid
     let unpaidVoucherCount    = 0;  // count where STATUS = Unpaid
     let cancelledVoucherCount = 0;  // count where STATUS = Cancelled
-    let revalidatedVouchers   = 0;  // count where OLD VOUCHER NUMBER not empty
+    let revalidatedVouchers   = 0;  // count where old number exists OR availability = YES
+    let revalidatedWithoutOldNumber = 0; // availability = YES and old number is empty
     
     // Amounts
     let totalContractSum      = 0;  // SUM(CONTRACT SUM)
@@ -1962,11 +2018,16 @@ function getSummary(token, year) {
       const payee     = String(row[PAYEE_COL]     || '').trim();
       const account   = String(row[ACCT_COL]      || '').trim();
       const category  = String(row[CATEGORY_COL]  || '').trim() || 'Uncategorized';
-      const accountType = String(row[ACCOUNT_TYPE_COL] || '').trim() || 'Unspecified';
+      const baseAccountType = String(row[ACCOUNT_TYPE_COL] || '').trim() || 'Unspecified';
+      const subAccountType = String(row[SUB_ACCT_COL] || '').trim();
+      const accountKey = subAccountType ? `${baseAccountType}::${subAccountType}` : `${baseAccountType}::`;
       
       const contractSum = parseAmount(row[CONTRACT_COL]);
       const grossAmount = parseAmount(row[GROSS_COL]);
       const oldVoucher  = String(row[OLD_VN_COL] || '').trim();
+      const oldVoucherAvailable = String(row[OLD_VN_AVAILABLE_COL] || '').trim().toLowerCase();
+      const hasOldVoucherNumber = !!oldVoucher;
+      const markedOldVoucherAvailable = oldVoucherAvailable === 'yes';
       
       // Tax amounts
       const vat = parseAmount(row[VAT_COL]);
@@ -1985,8 +2046,11 @@ function getSummary(token, year) {
       totalContractSum += contractSum;
       
       // Revalidated Vouchers
-      if (oldVoucher) {
+      if (hasOldVoucherNumber || markedOldVoucherAvailable) {
         revalidatedVouchers++;
+        if (!hasOldVoucherNumber && markedOldVoucherAvailable) {
+          revalidatedWithoutOldNumber++;
+        }
       }
       
       // Tax accumulation (exclude cancelled)
@@ -2016,8 +2080,8 @@ function getSummary(token, year) {
       // other statuses ignored for these sums
 
       // ----- Account type breakdown -----
-      if (!accountTypeStats[accountType]) {
-        accountTypeStats[accountType] = {
+      if (!accountTypeStats[accountKey]) {
+        accountTypeStats[accountKey] = {
           count: 0,
           totalAmount: 0,
           paidAmount: 0,
@@ -2028,7 +2092,7 @@ function getSummary(token, year) {
         };
       }
 
-      const at = accountTypeStats[accountType];
+      const at = accountTypeStats[accountKey];
       at.count++;
       at.totalAmount += grossAmount;
       at.totalTax += (vat + wht + stampDuty);
@@ -2120,12 +2184,15 @@ function getSummary(token, year) {
     }));
 
     const accountTypeBreakdown = Object.keys(accountTypeStats)
-      .map(typeName => {
-        const t = accountTypeStats[typeName];
+      .map(accountKey => {
+        const t = accountTypeStats[accountKey];
+        const [baseType, subType] = accountKey.split('::');
         const paymentRate = t.totalAmount > 0 ? ((t.paidAmount / t.totalAmount) * 100) : 0;
         const taxComplianceRate = t.totalTax > 0 ? ((t.paidTax / t.totalTax) * 100) : 0;
         return {
-          accountType: typeName,
+          accountType: baseType,
+          subAccountType: subType,
+          displayName: subType ? `${baseType} (${subType})` : baseType,
           count: t.count,
           totalAmount: t.totalAmount,
           paidAmount: t.paidAmount,
@@ -2150,6 +2217,7 @@ function getSummary(token, year) {
         unpaidVouchers:      unpaidVoucherCount,
         cancelledVouchers:   cancelledVoucherCount,
         revalidatedVouchers: revalidatedVouchers,
+        revalidatedWithoutOldNumber: revalidatedWithoutOldNumber,
         
         // AMOUNTS
         totalProcessedContractSum: totalContractSum,
@@ -3183,7 +3251,23 @@ function getAllYearsSummary(token) {
         }
         
         const has2026Format = yearInfo.label === '2026';
-        const numCols = has2026Format ? 18 : 17;
+        let statusCol = 0;
+        let accountCol = 3;
+        let grossCol = 6;
+        let oldVNCol = 14;
+        let oldAvailCol = 20;
+        let numCols = 17;
+
+        if (has2026Format) {
+          const c = resolveVoucherSummaryColumns_(sheet);
+          statusCol = c.STATUS_COL;
+          accountCol = c.ACCT_COL;
+          grossCol = c.GROSS_COL;
+          oldVNCol = c.OLD_VN_COL;
+          oldAvailCol = c.OLD_VN_AVAILABLE_COL;
+          numCols = c.LAST_COL;
+        }
+
         const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
         
         let totalVouchers = 0;
@@ -3195,10 +3279,11 @@ function getAllYearsSummary(token) {
         
         for (let i = 0; i < data.length; i++) {
           const row = data[i];
-          const status = String(row[0] || '').trim().toLowerCase();
-          const account = String(row[3] || '').trim();
-          const grossAmount = parseAmount(row[6]);
-          const oldVN = String(row[14] || '').trim();
+          const status = String(row[statusCol] || '').trim().toLowerCase();
+          const account = String(row[accountCol] || '').trim();
+          const grossAmount = parseAmount(row[grossCol]);
+          const oldVN = String(row[oldVNCol] || '').trim();
+          const oldVoucherAvailable = has2026Format ? String(row[oldAvailCol] || '').trim().toLowerCase() : '';
           
           if (!account && !grossAmount) continue;
           
@@ -3213,7 +3298,7 @@ function getAllYearsSummary(token) {
             unpaidAmount += grossAmount;
           }
           
-          if (oldVN) revalidatedCount++;
+          if (oldVN || oldVoucherAvailable === 'yes') revalidatedCount++;
         }
         
         const balanceBF = runningBalance;
@@ -4903,6 +4988,11 @@ function getDebtProfileFullData(token, requestId) {
     const vouchersSheet = ss.getSheetByName(CONFIG.SHEETS.VOUCHERS_2026);
     const data = vouchersSheet.getDataRange().getValues();
     const cols = CONFIG.VOUCHER_COLUMNS;
+    const header = getHeaderMap_(vouchersSheet);
+    const OLD_VN_COL = (header['OLD VOUCHER NUMBER'] || cols.OLD_VOUCHER_NUMBER) - 1;
+    const OLD_VN_AVAILABLE_COL = (header['OLD VOUCHER NO AVAILABLE?'] || header['OLD VOUCHER AVAILABLE'] || cols.OLD_VOUCHER_AVAILABLE) - 1;
+    const ACCOUNT_TYPE_COL = (header['ACCOUNT TYPE'] || cols.ACCOUNT_TYPE) - 1;
+    const SUB_ACCOUNT_COL = (header['SUB ACCOUNT'] || header['SUB ACCOUNT TYPE'] || cols.SUB_ACCOUNT_TYPE) - 1;
     
     // ----- FETCH 2025 DATA FOR BALANCE B/F -----
     let balanceBF = 0;
@@ -4945,6 +5035,7 @@ function getDebtProfileFullData(token, requestId) {
       taxSummary: { totalVAT: 0, totalWHT: 0, totalStampDuty: 0, totalTax: 0 },
       byCategory: {},
       byDepartment: {},
+      byAccountType: {},
       byAge: { '0-30 Days': 0, '31-90 Days': 0, '91+ Days': 0 },
       details: []
     };
@@ -4960,7 +5051,9 @@ function getDebtProfileFullData(token, requestId) {
       
       const grossAmount = parseAmount(row[cols.GROSS_AMOUNT - 1]);
       const contractSum = parseAmount(row[cols.CONTRACT_SUM - 1]);
-      const isRevalidated = !!String(row[cols.OLD_VOUCHER_NUMBER - 1] || '').trim();
+      const hasOldVoucherNumber = !!String(row[OLD_VN_COL] || '').trim();
+      const oldVoucherAvailable = String(row[OLD_VN_AVAILABLE_COL] || '').trim().toLowerCase();
+      const isRevalidated = hasOldVoucherNumber || oldVoucherAvailable === 'yes';
       
       // Multi-metric tracking (Performance Summary)
       result.summary.totalContractSum += contractSum;
@@ -4985,7 +5078,9 @@ function getDebtProfileFullData(token, requestId) {
       const stampDuty = parseAmount(row[cols.STAMP_DUTY - 1]);
       
       const category = String(row[cols.CATEGORIES - 1]).trim() || 'Uncategorized';
-      const department = String(row[cols.ACCOUNT_TYPE - 1]).trim() || 'General';
+      const baseDept = String(row[ACCOUNT_TYPE_COL]).trim() || 'General';
+      const subDept = String(row[SUB_ACCOUNT_COL]).trim();
+      const departmentKey = subDept ? `${baseDept}::${subDept}` : `${baseDept}::`;
       const createdAt = row[cols.CREATED_AT - 1] ? new Date(row[cols.CREATED_AT - 1]) : voucherDate;
       
       result.summary.totalDebt += amount;
@@ -5006,8 +5101,18 @@ function getDebtProfileFullData(token, requestId) {
       if (!result.byCategory[category]) result.byCategory[category] = 0;
       result.byCategory[category] += amount;
       
-      if (!result.byDepartment[department]) result.byDepartment[department] = 0;
-      result.byDepartment[department] += amount;
+      if (!result.byDepartment[departmentKey]) result.byDepartment[departmentKey] = 0;
+      result.byDepartment[departmentKey] += amount;
+
+      if (!result.byAccountType[baseDept]) {
+        result.byAccountType[baseDept] = { total: 0, subTypes: {} };
+      }
+      result.byAccountType[baseDept].total += amount;
+      const subTypeKey = subDept || 'Unspecified';
+      if (!result.byAccountType[baseDept].subTypes[subTypeKey]) {
+        result.byAccountType[baseDept].subTypes[subTypeKey] = 0;
+      }
+      result.byAccountType[baseDept].subTypes[subTypeKey] += amount;
       
       if (createdAt) {
         const ageDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
@@ -5029,7 +5134,7 @@ function getDebtProfileFullData(token, requestId) {
         amount: amount,
         date: voucherDate ? Utilities.formatDate(voucherDate, "GMT", "yyyy-MM-dd") : 'N/A',
         category: category,
-        department: department
+        department: subDept ? `${baseDept} - ${subDept}` : baseDept
       });
     }
     
@@ -5049,14 +5154,40 @@ function getDebtProfileFullData(token, requestId) {
       .sort((a, b) => b.amount - a.amount);
       
     const departmentBreakdown = Object.entries(result.byDepartment)
-      .map(([name, amount]) => ({ name, amount }))
+      .map(([nameKey, amount]) => {
+         const [baseType, subType] = nameKey.split('::');
+         return { 
+           name: baseType, 
+           subType: subType,
+           displayName: subType ? `${baseType} - ${subType}` : baseType,
+           amount 
+         };
+      })
       .sort((a, b) => b.amount - a.amount);
+
+    const byAccountType = {};
+    Object.keys(result.byAccountType)
+      .sort((a, b) => result.byAccountType[b].total - result.byAccountType[a].total)
+      .forEach((parentType) => {
+        const node = result.byAccountType[parentType];
+        const sortedSub = {};
+        Object.keys(node.subTypes)
+          .sort((a, b) => node.subTypes[b] - node.subTypes[a])
+          .forEach((subType) => {
+            sortedSub[subType] = node.subTypes[subType];
+          });
+        byAccountType[parentType] = {
+          total: node.total,
+          subTypes: sortedSub
+        };
+      });
 
     return { 
       success: true, 
       data: result, 
       categoryBreakdown: categoryBreakdown, // SHOW ALL CATEGORIES
       departmentBreakdown: departmentBreakdown, // SHOW ALL DEPARTMENTS
+      byAccountType: byAccountType,
       balanceBF: result.summary.balanceBF,
       total2026Unpaid: result.summary.currentUnpaid2026,
       revalidated: result.summary.revalidatedAmount,

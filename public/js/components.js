@@ -3,6 +3,16 @@
  */
 
 const Components = {
+    _loadingState: {
+        count: 0,
+        showTimer: null,
+        hideTimer: null,
+        tipTimer: null,
+        visibleSince: 0,
+        revealDelayMs: 180,
+        minVisibleMs: 260
+    },
+
     /**
      * Generates the sidebar HTML
      * @param {string} activePage - Current active page name
@@ -123,10 +133,109 @@ const Components = {
     getLoadingOverlay(message = 'Loading...') {
         return `
             <div id="loadingOverlay" class="loading-overlay hidden">
-                <div class="spinner"></div>
-                <p class="loading-text">${message}</p>
+                <div class="loading-shell">
+                    <div class="loading-logo-wrap">
+                        <span class="loading-ring"></span>
+                        <img src="images/fmc-logo.png" alt="FMC logo" class="loading-logo">
+                    </div>
+                    <p class="loading-text">${message}</p>
+                    <p class="loading-subtext">Optimizing your voucher workspace...</p>
+                    <div class="loading-dots"><span></span><span></span><span></span></div>
+                </div>
             </div>
         `;
+    },
+
+    upgradeLoadingOverlay() {
+        const overlay = document.getElementById('loadingOverlay');
+        if (!overlay || overlay.dataset.enhanced === '1') return overlay;
+
+        const oldText = overlay.querySelector('.loading-text')?.textContent || 'Loading workspace...';
+        overlay.innerHTML = `
+            <div class="loading-shell">
+                <div class="loading-logo-wrap">
+                    <span class="loading-ring"></span>
+                    <img src="images/fmc-logo.png" alt="FMC logo" class="loading-logo" onerror="this.style.display='none'">
+                </div>
+                <p class="loading-text">${oldText}</p>
+                <p class="loading-subtext">Syncing records and preparing your page...</p>
+                <div class="loading-dots"><span></span><span></span><span></span></div>
+            </div>
+        `;
+        overlay.dataset.enhanced = '1';
+        return overlay;
+    },
+
+    _startLoadingTips() {
+        const overlay = document.getElementById('loadingOverlay');
+        const sub = overlay?.querySelector('.loading-subtext');
+        if (!sub) return;
+
+        const tips = [
+            'Syncing records and preparing your page...',
+            'Checking latest voucher updates...',
+            'Optimized mode enabled for low-bandwidth networks...',
+            'Almost there. Making everything ready...'
+        ];
+        let idx = 0;
+        clearInterval(this._loadingState.tipTimer);
+        this._loadingState.tipTimer = setInterval(() => {
+            if (!overlay.classList.contains('is-visible')) return;
+            idx = (idx + 1) % tips.length;
+            sub.textContent = tips[idx];
+        }, 1800);
+    },
+
+    _stopLoadingTips() {
+        clearInterval(this._loadingState.tipTimer);
+        this._loadingState.tipTimer = null;
+    },
+
+    setLoading(show, message = '') {
+        const overlay = this.upgradeLoadingOverlay();
+        if (!overlay) return;
+        const state = this._loadingState;
+
+        const textEl = overlay.querySelector('.loading-text');
+        if (message && textEl) textEl.textContent = message;
+
+        if (show) {
+            state.count += 1;
+            clearTimeout(state.hideTimer);
+            if (overlay.classList.contains('is-visible') || state.showTimer) return;
+
+            state.showTimer = setTimeout(() => {
+                state.showTimer = null;
+                if (state.count <= 0) return;
+                overlay.classList.remove('hidden');
+                requestAnimationFrame(() => overlay.classList.add('is-visible'));
+                state.visibleSince = Date.now();
+                this._startLoadingTips();
+                document.body.classList.add('app-loading');
+            }, state.revealDelayMs);
+            return;
+        }
+
+        state.count = Math.max(state.count - 1, 0);
+        if (state.count > 0) return;
+
+        clearTimeout(state.showTimer);
+        state.showTimer = null;
+
+        if (!overlay.classList.contains('is-visible')) {
+            overlay.classList.add('hidden');
+            document.body.classList.remove('app-loading');
+            return;
+        }
+
+        const elapsed = Date.now() - state.visibleSince;
+        const wait = Math.max(state.minVisibleMs - elapsed, 0);
+        state.hideTimer = setTimeout(() => {
+            overlay.classList.remove('is-visible');
+            this._stopLoadingTips();
+            setTimeout(() => overlay.classList.add('hidden'), 180);
+            document.body.classList.remove('app-loading');
+        }, wait);
     },
 
     /**
@@ -231,3 +340,9 @@ const Components = {
 };
 
 console.log('Components loaded successfully');
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.Components && typeof Components.upgradeLoadingOverlay === 'function') {
+        Components.upgradeLoadingOverlay();
+    }
+});

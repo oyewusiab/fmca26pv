@@ -1,5 +1,9 @@
 const Profile = {
   showLoading(show) {
+    if (window.Components && typeof Components.setLoading === 'function') {
+      Components.setLoading(show, 'Loading profile...');
+      return;
+    }
     document.getElementById('loadingOverlay')?.classList.toggle('hidden', !show);
   },
 

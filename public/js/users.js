@@ -366,6 +366,10 @@ const Users = {
      * Show/hide loading
      */
     showLoading(show) {
+        if (window.Components && typeof Components.setLoading === 'function') {
+            Components.setLoading(show, 'Loading users...');
+            return;
+        }
         const loader = document.getElementById('loadingOverlay');
         if (loader) {
             if (show) {

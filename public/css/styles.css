@@ -678,30 +678,88 @@ textarea.form-control {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(255, 255, 255, 0.9);
+    background:
+        radial-gradient(circle at 20% 20%, rgba(26, 95, 42, 0.14), transparent 38%),
+        radial-gradient(circle at 80% 10%, rgba(212, 182, 106, 0.16), transparent 45%),
+        rgba(250, 252, 251, 0.92);
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     z-index: 3000;
-    opacity: 1;
-    pointer-events: all;
-    transition: opacity 0.4s;
-}
-
-.loading-overlay.fade-out {
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.4s;
+    transition: opacity 0.22s ease, backdrop-filter 0.22s ease;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
 }
 
-.spinner {
-    width: 50px;
-    height: 50px;
-    border: 4px solid var(--border-color);
+.loading-overlay.is-visible {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.loading-shell {
+    width: min(92vw, 420px);
+    border-radius: 20px;
+    padding: 24px 22px 18px;
+    background: linear-gradient(160deg, #ffffff, #f6faf7 58%, #eef7f0);
+    border: 1px solid rgba(26, 95, 42, 0.15);
+    box-shadow: 0 24px 60px rgba(12, 45, 28, 0.16);
+    text-align: center;
+}
+
+.loading-logo-wrap {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 10px;
+    position: relative;
+}
+
+.loading-logo {
+    width: 72px;
+    height: 72px;
+    object-fit: contain;
+    border-radius: 50%;
+    background: #fff;
+    padding: 6px;
+    position: absolute;
+    inset: 12px;
+    box-shadow: 0 8px 24px rgba(12, 45, 28, 0.18);
+    animation: loadingFloat 1.6s ease-in-out infinite;
+}
+
+.loading-ring {
+    position: absolute;
+    inset: 0;
+    border: 3px solid rgba(26, 95, 42, 0.16);
     border-top-color: var(--primary-color);
+    border-right-color: #d4b66a;
     border-radius: 50%;
     animation: spin 1s linear infinite;
+}
+
+.loading-dots {
+    display: flex;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 10px;
+}
+
+.loading-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    opacity: 0.35;
+    animation: loadingPulse 1s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(2) {
+    animation-delay: .16s;
+}
+
+.loading-dots span:nth-child(3) {
+    animation-delay: .32s;
 }
 
 @keyframes spin {
@@ -711,9 +769,35 @@ textarea.form-control {
 }
 
 .loading-text {
-    margin-top: 15px;
-    color: var(--text-light);
-    font-size: 14px;
+    margin: 6px 0 4px;
+    color: #114230;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.loading-subtext {
+    margin: 0;
+    color: #5f7468;
+    font-size: 13px;
+    min-height: 19px;
+}
+
+@keyframes loadingPulse {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.15); opacity: 0.95; }
+}
+
+@keyframes loadingFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .loading-ring,
+    .loading-logo,
+    .loading-dots span {
+        animation: none !important;
+    }
 }
 
 /* ==================== Utility Classes ==================== */

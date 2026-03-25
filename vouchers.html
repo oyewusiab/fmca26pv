@@ -219,7 +219,7 @@
                         <input type="text" class="form-control" id="searchInput"
                             placeholder="Search by payee, voucher no, control no, particular...">
                     </div>
-                    <button class="btn btn-primary" onclick="Vouchers.applyFilters()">
+                    <button class="btn btn-primary" onclick="Vouchers.runSearch()">
                         <i class="fas fa-search"></i> Search
                     </button>
                     <button class="btn btn-secondary" onclick="Vouchers.clearSearch()">
@@ -227,7 +227,7 @@
                     </button>
                 </div>
                 <div class="voucher-search-hint">
-                    Tip: Searches across years when text is provided.
+                    Tip: Type to filter 2026 instantly. Click Search to run full cross-year lookup.
                 </div>
             </div>
 
@@ -562,29 +562,29 @@
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="formCategories">Category</label>
-                                <select class="form-control category-select" id="formCategories">
+                                <label for="formCategories">Category <span class="required">*</span></label>
+                                <select class="form-control category-select" id="formCategories" required>
                                     <option value="">Select Category</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="formAccountType">Account Type</label>
-                                <select class="form-control" id="formAccountType">
+                                <label for="formAccountType">Account Type <span class="required">*</span></label>
+                                <select class="form-control" id="formAccountType" required>
                                     <option value="">Select Type</option>
-                                    <option value="Capital">Capital</option>
-                                    <option value="OHD">OHD</option>
-                                    <option value="Project">Project</option>
-                                    <option value="RFA">RFA</option>
-                                    <option value="TSA">TSA</option>
                                 </select>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
+                                <label for="formSubAccountType">Sub Account Type <span id="subAccountTypeAst" class="required" style="display:none;">*</span></label>
+                                <select class="form-control" id="formSubAccountType" disabled>
+                                    <option value="">Select Sub-Type</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
                                 <label for="formDate">Date</label>
                                 <input type="date" class="form-control" id="formDate">
                             </div>
-                            <div class="form-group"></div>
                         </div>
                     </div>
                 </form>

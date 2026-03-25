@@ -27,7 +27,7 @@ const CONFIG = {
     CONTRACT_SUM: 6, GROSS_AMOUNT: 7, NET: 8, VAT: 9, WHT: 10, STAMP_DUTY: 11,
     CATEGORIES: 12, TOTAL_GROSS: 13, CONTROL_NUMBER: 14, OLD_VOUCHER_NUMBER: 15,
     DATE: 16, ACCOUNT_TYPE: 17, CREATED_AT: 18, RELEASED_AT: 19, ATTACHMENT_URL: 20,
-    OLD_VOUCHER_AVAILABLE: 21
+    OLD_VOUCHER_AVAILABLE: 21, SUB_ACCOUNT_TYPE: 22
   },
   DEBT_REQUEST_COLUMNS: {
     REQUEST_ID: 1, TIMESTAMP: 2, REQUESTER_EMAIL: 3, REQUESTER_NAME: 4,
@@ -111,3 +111,61 @@ function diagnosticCheck() {
     }
   });
 }
+
+/**
+ * Gets the system configuration including Account Types and Sub Account Types.
+ * Reads from SYSTEM_CONFIG sheet rows 7+.
+ * B column: Account Type
+ * C column: Comma-separated Sub Account Types
+ */
+function getSystemConfig(token) {
+  try {
+    // Validate session if token is provided
+    if (typeof getSession === 'function' && token) {
+      const session = getSession(token);
+      if (!session) {
+        return { success: false, error: 'Session expired' };
+      }
+    }
+    
+    // Default config object
+    const config = {
+      accountTypes: {} // Format: { "RFA": ["TRF", "LRF"], "CAPITAL": [] }
+    };
+    
+    const sheet = getSheet(CONFIG.SHEETS.SYSTEM_CONFIG);
+    if (!sheet) {
+      return { success: false, error: 'SYSTEM_CONFIG sheet not found' };
+    }
+    
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 7) {
+      // No data yet, return empty
+      return { success: true, config: config };
+    }
+    
+    // Get rows 7 to lastRow, columns B (2) and C (3)
+    const values = sheet.getRange(7, 2, lastRow - 6, 2).getValues();
+    
+    values.forEach(row => {
+      const accountType = String(row[0] || '').trim();
+      if (!accountType) return; // Skip empty rows
+      
+      const subAccountsRaw = String(row[1] || '').trim();
+      let subAccountsArray = [];
+      
+      if (subAccountsRaw) {
+        // Split by comma and trim each element
+        subAccountsArray = subAccountsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      }
+      
+      config.accountTypes[accountType] = subAccountsArray;
+    });
+    
+    return { success: true, config: config };
+    
+  } catch (e) {
+    return { success: false, error: 'Failed to get system config: ' + e.message };
+  }
+}
+

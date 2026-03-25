@@ -459,6 +459,10 @@ const Dashboard = {
     },
 
     showLoading(show) {
+        if (window.Components && typeof Components.setLoading === 'function') {
+            Components.setLoading(show, 'Loading dashboard...');
+            return;
+        }
         const overlay = document.getElementById('loadingOverlay');
         if (overlay) {
             overlay.classList.toggle('hidden', !show);

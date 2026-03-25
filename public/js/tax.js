@@ -13,6 +13,7 @@ const Tax = {
     payeeData: null,
     payments: null,
     schedules: null,
+    systemConfig: null,
     categoryExpanded: false,
     categoryDefaultLimit: 10,
     monthlyChart: null,
@@ -37,6 +38,7 @@ const Tax = {
         const roleNorm = String(userRole || '').trim().toLowerCase();
         this.setupSidebar();
         this.setupEventListeners();
+        await this.loadSystemConfig();
         await this.loadAllData();
     },
 
@@ -162,6 +164,17 @@ const Tax = {
         this.showLoading(false);
     },
 
+    async loadSystemConfig() {
+        try {
+            const result = await API.getSystemConfig();
+            if (result.success) {
+                this.systemConfig = result.config || result;
+            }
+        } catch (e) {
+            console.warn('Tax module system config load failed:', e);
+        }
+    },
+
     /**
      * Load tax summary
      */
@@ -257,12 +270,65 @@ const Tax = {
         const container = document.getElementById('accountTypeTaxTable');
         if (!container) return;
 
-        if (!rows || rows.length === 0) {
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        const configured = this.systemConfig?.accountTypes || {};
+        if (!sourceRows.length && !Object.keys(configured).length) {
             container.innerHTML = '<p class="text-muted text-center">No account type tax data available</p>';
             return;
         }
 
-        const totals = rows.reduce((acc, r) => {
+        const grouped = {};
+        sourceRows.forEach((r) => {
+            const base = String(r.baseAccountType || r.accountType || 'Unspecified').trim() || 'Unspecified';
+            const sub = String(r.subAccountType || '').trim();
+            if (!grouped[base]) {
+                grouped[base] = {
+                    count: 0,
+                    totalTax: 0,
+                    paidTax: 0,
+                    outstanding: 0,
+                    children: {}
+                };
+            }
+
+            grouped[base].count += Number(r.count || 0);
+            grouped[base].totalTax += Number(r.totalTax || 0);
+            grouped[base].paidTax += Number(r.paidTax || 0);
+            grouped[base].outstanding += Number(r.outstanding || 0);
+
+            if (sub) {
+                if (!grouped[base].children[sub]) {
+                    grouped[base].children[sub] = {
+                        name: sub, count: 0, totalTax: 0, paidTax: 0, outstanding: 0
+                    };
+                }
+                grouped[base].children[sub].count += Number(r.count || 0);
+                grouped[base].children[sub].totalTax += Number(r.totalTax || 0);
+                grouped[base].children[sub].paidTax += Number(r.paidTax || 0);
+                grouped[base].children[sub].outstanding += Number(r.outstanding || 0);
+            }
+        });
+
+        Object.keys(configured).forEach((base) => {
+            if (!grouped[base]) {
+                grouped[base] = {
+                    count: 0,
+                    totalTax: 0,
+                    paidTax: 0,
+                    outstanding: 0,
+                    children: {}
+                };
+            }
+            (configured[base] || []).forEach((sub) => {
+                if (!grouped[base].children[sub]) {
+                    grouped[base].children[sub] = {
+                        name: sub, count: 0, totalTax: 0, paidTax: 0, outstanding: 0
+                    };
+                }
+            });
+        });
+
+        const totals = Object.values(grouped).reduce((acc, r) => {
             acc.count += Number(r.count || 0);
             acc.totalTax += Number(r.totalTax || 0);
             acc.paidTax += Number(r.paidTax || 0);
@@ -286,17 +352,54 @@ const Tax = {
                     <tbody>
         `;
 
-        rows.forEach(r => {
+        const baseOrder = Object.keys(configured);
+        const baseOrderIndex = {};
+        baseOrder.forEach((name, idx) => { baseOrderIndex[name] = idx; });
+
+        Object.keys(grouped)
+            .sort((a, b) => {
+                const ai = Object.prototype.hasOwnProperty.call(baseOrderIndex, a) ? baseOrderIndex[a] : Number.MAX_SAFE_INTEGER;
+                const bi = Object.prototype.hasOwnProperty.call(baseOrderIndex, b) ? baseOrderIndex[b] : Number.MAX_SAFE_INTEGER;
+                if (ai !== bi) return ai - bi;
+                return grouped[b].totalTax - grouped[a].totalTax;
+            })
+            .forEach((base) => {
+            const parent = grouped[base];
+            const parentCompliance = parent.totalTax > 0 ? (parent.paidTax / parent.totalTax) * 100 : 0;
             html += `
                 <tr>
-                    <td><strong>${r.accountType || 'Unspecified'}</strong></td>
-                    <td class="text-center">${Utils.formatNumber(r.count || 0)}</td>
-                    <td class="text-right">${Utils.formatCurrency(r.totalTax || 0)}</td>
-                    <td class="text-right text-success">${Utils.formatCurrency(r.paidTax || 0)}</td>
-                    <td class="text-right text-danger">${Utils.formatCurrency(r.outstanding || 0)}</td>
-                    <td class="text-center">${Number(r.complianceRate || 0).toFixed(1)}%</td>
+                    <td><strong>${base}</strong></td>
+                    <td class="text-center">${Utils.formatNumber(parent.count || 0)}</td>
+                    <td class="text-right">${Utils.formatCurrency(parent.totalTax || 0)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(parent.paidTax || 0)}</td>
+                    <td class="text-right text-danger">${Utils.formatCurrency(parent.outstanding || 0)}</td>
+                    <td class="text-center">${Number(parentCompliance || 0).toFixed(1)}%</td>
                 </tr>
             `;
+
+            const subOrder = Array.isArray(configured[base]) ? configured[base] : [];
+            const subOrderIndex = {};
+            subOrder.forEach((name, idx) => { subOrderIndex[name] = idx; });
+            Object.values(parent.children || {})
+                .sort((a, b) => {
+                    const ai = Object.prototype.hasOwnProperty.call(subOrderIndex, a.name) ? subOrderIndex[a.name] : Number.MAX_SAFE_INTEGER;
+                    const bi = Object.prototype.hasOwnProperty.call(subOrderIndex, b.name) ? subOrderIndex[b.name] : Number.MAX_SAFE_INTEGER;
+                    if (ai !== bi) return ai - bi;
+                    return b.totalTax - a.totalTax;
+                })
+                .forEach((child) => {
+                    const childCompliance = child.totalTax > 0 ? (child.paidTax / child.totalTax) * 100 : 0;
+                    html += `
+                        <tr class="sub-account-row">
+                            <td style="padding-left:42px;">${child.name}</td>
+                            <td class="text-center">${Utils.formatNumber(child.count || 0)}</td>
+                            <td class="text-right">${Utils.formatCurrency(child.totalTax || 0)}</td>
+                            <td class="text-right text-success">${Utils.formatCurrency(child.paidTax || 0)}</td>
+                            <td class="text-right text-danger">${Utils.formatCurrency(child.outstanding || 0)}</td>
+                            <td class="text-center">${Number(childCompliance || 0).toFixed(1)}%</td>
+                        </tr>
+                    `;
+                });
         });
 
         const compliance = totals.totalTax > 0 ? (totals.paidTax / totals.totalTax) * 100 : 0;
@@ -1115,6 +1218,10 @@ const Tax = {
      * Show/hide loading overlay
      */
     showLoading(show) {
+        if (window.Components && typeof Components.setLoading === 'function') {
+            Components.setLoading(show, 'Loading tax data...');
+            return;
+        }
         const overlay = document.getElementById('loadingOverlay');
         if (overlay) {
             if (show) overlay.classList.remove('hidden');

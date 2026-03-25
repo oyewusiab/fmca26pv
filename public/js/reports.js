@@ -35,6 +35,10 @@ const Reports = {
     reportAgingChart: null,
     reportCategoryChart: null,
     reportDepartmentChart: null,
+    systemConfig: null,
+    currentAccountTypeRows: [],
+    accountTypeFilters: { accountType: 'ALL', subAccountType: 'ALL' },
+    expandedAccountTypeGroups: new Set(),
 
     /**
      * Initialize reports page
@@ -54,6 +58,7 @@ const Reports = {
 
         this.setupSidebar();
         this.setupEventListeners();
+        await this.loadSystemConfig();
         await this.loadAllReports();
         await this.checkDebtProfileStatus();
     },
@@ -78,9 +83,22 @@ const Reports = {
             yearSelector.addEventListener('change', (e) => {
                 this.currentYear = e.target.value;
                 document.getElementById('currentYearLabel').textContent = this.currentYear;
+                this.expandedAccountTypeGroups.clear();
                 this.loadYearSummary();
             });
         }
+
+        document.getElementById('accountTypeFilter')?.addEventListener('change', () => {
+            this.accountTypeFilters.accountType = document.getElementById('accountTypeFilter')?.value || 'ALL';
+            this.accountTypeFilters.subAccountType = 'ALL';
+            this.populateSubAccountTypeFilter(this.currentAccountTypeRows);
+            this.renderAccountTypeTable(this.currentAccountTypeRows);
+        });
+
+        document.getElementById('subAccountTypeFilter')?.addEventListener('change', () => {
+            this.accountTypeFilters.subAccountType = document.getElementById('subAccountTypeFilter')?.value || 'ALL';
+            this.renderAccountTypeTable(this.currentAccountTypeRows);
+        });
 
         // Logout
         document.getElementById('logoutBtn')?.addEventListener('click', () => Auth.logout());
@@ -207,6 +225,17 @@ const Reports = {
         }
 
         this.showLoading(false);
+    },
+
+    async loadSystemConfig() {
+        try {
+            const result = await API.getSystemConfig();
+            if (result.success) {
+                this.systemConfig = result.config || result;
+            }
+        } catch (e) {
+            console.warn('System config load failed:', e);
+        }
     },
 
     /**
@@ -382,6 +411,32 @@ const Reports = {
         const val = voucher?.grossAmount ?? voucher?.amount ?? voucher?.totalAmount ?? voucher?.contractSum ?? 0;
         const num = Number(val);
         return Number.isFinite(num) ? num : 0;
+    },
+
+    isYesValue(value) {
+        const raw = String(value || '').trim().toLowerCase();
+        return raw === 'yes' || raw === 'y' || raw === 'true';
+    },
+
+    isRevalidatedVoucher(voucher) {
+        const hasOldNumber = !!String(voucher?.oldVoucherNumber || '').trim();
+        return hasOldNumber || this.isYesValue(voucher?.oldVoucherAvailable);
+    },
+
+    getRevalidationCounts(vouchers) {
+        let revalidatedVouchers = 0;
+        let revalidatedWithoutOldNumber = 0;
+
+        (vouchers || []).forEach((v) => {
+            const hasOldNumber = !!String(v?.oldVoucherNumber || '').trim();
+            const markedAvailable = this.isYesValue(v?.oldVoucherAvailable);
+            if (hasOldNumber || markedAvailable) {
+                revalidatedVouchers++;
+                if (!hasOldNumber && markedAvailable) revalidatedWithoutOldNumber++;
+            }
+        });
+
+        return { revalidatedVouchers, revalidatedWithoutOldNumber };
     },
 
     getTotalVoucherAmount(summary) {
@@ -1001,6 +1056,16 @@ const Reports = {
     applyVoucherAnalytics(vouchers) {
         const stats = this.computeVoucherStats(vouchers || []);
         this.voucherStats = stats;
+        if (this.summaryData?.summary) {
+            const rev = this.getRevalidationCounts(vouchers || []);
+            this.summaryData.summary.revalidatedVouchers = rev.revalidatedVouchers;
+            this.summaryData.summary.revalidatedWithoutOldNumber = rev.revalidatedWithoutOldNumber;
+            this.renderYearSummary(this.summaryData);
+        }
+        const fromVouchers = this.buildAccountTypeBreakdownFromVouchers(vouchers || []);
+        if (fromVouchers.length) {
+            this.renderAccountTypeTable(fromVouchers);
+        }
         this.renderFinancialInsights(this.summaryData?.summary);
         this.renderVoucherValueCards(stats);
         this.drawVoucherDistributionChart(stats);
@@ -1022,7 +1087,7 @@ const Reports = {
             return sorted[idx];
         };
 
-        const revalidated = vouchers.filter(v => (v.oldVoucherNumber && String(v.oldVoucherNumber).trim() !== '') || String(v.oldVoucherAvailable || '').toLowerCase() === 'yes');
+        const revalidated = vouchers.filter(v => this.isRevalidatedVoucher(v));
         const revalidatedAmount = revalidated.reduce((s, v) => s + this.getVoucherAmount(v), 0);
 
         const cancelled = vouchers.filter(v => String(v.status || '').toLowerCase() === 'cancelled');
@@ -1443,7 +1508,7 @@ const Reports = {
      * - Total Contract Sum: sum(CONTRACT SUM)
      * - Total Debt: Contract Sum - (Paid + Cancelled)
      * - Average Payment Rate: Paid count / Total Raised * 100
-     * - Revalidated: count(OLD VOUCHER NUMBER not empty)
+     * - Revalidated: count(OLD VOUCHER NUMBER not empty OR OLD VOUCHER NO AVAILABLE? = YES)
      */
     renderYearSummary(data) {
         const container = document.getElementById('yearSummaryCards');
@@ -1518,7 +1583,7 @@ const Reports = {
             <div class="stat-card">
                 <div class="stat-label">Revalidated Vouchers</div>
                 <div class="stat-value">${Utils.formatNumber(stats.revalidatedVouchers)}</div>
-                <div class="stat-subvalue">With Old Voucher Number</div>
+                <div class="stat-subvalue">Old number present or marked available</div>
             </div>
 
             <!-- Revalidated Without Old Voucher Number -->
@@ -1610,14 +1675,211 @@ const Reports = {
         container.innerHTML = html;
     },
 
+    getConfiguredAccountTypes() {
+        return Object.keys(this.systemConfig?.accountTypes || {});
+    },
+
+    getConfiguredSubTypes(baseType) {
+        const map = this.systemConfig?.accountTypes || {};
+        return Array.isArray(map[baseType]) ? map[baseType] : [];
+    },
+
+    buildAccountTypeBreakdownFromVouchers(vouchers) {
+        const stats = {};
+
+        (vouchers || []).forEach((v) => {
+            const baseType = String(v?.accountType || '').trim() || 'Unspecified';
+            const subType = String(v?.subAccountType || '').trim();
+            const key = `${baseType}::${subType}`;
+            if (!stats[key]) {
+                stats[key] = {
+                    accountType: baseType,
+                    subAccountType: subType,
+                    count: 0,
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    unpaidAmount: 0
+                };
+            }
+
+            const amount = this.getVoucherAmount(v);
+            const status = String(v?.status || '').trim().toLowerCase();
+            stats[key].count += 1;
+            stats[key].totalAmount += amount;
+            if (status === 'paid') stats[key].paidAmount += amount;
+            if (status === 'unpaid') stats[key].unpaidAmount += amount;
+        });
+
+        return Object.values(stats).map((row) => {
+            const paymentRate = row.totalAmount > 0 ? (row.paidAmount / row.totalAmount) * 100 : 0;
+            return {
+                ...row,
+                displayName: row.subAccountType ? `${row.accountType} (${row.subAccountType})` : row.accountType,
+                paymentRate: Number(paymentRate.toFixed(2))
+            };
+        });
+    },
+
+    parseAccountTypeRow(row) {
+        const rawBase = String(row?.accountType || '').trim();
+        const rawSub = String(row?.subAccountType || '').trim();
+
+        if (rawSub) {
+            return { baseType: rawBase || 'Unspecified', subType: rawSub };
+        }
+
+        const m = rawBase.match(/^(.*)\((.*)\)$/);
+        if (m) {
+            const base = String(m[1] || '').trim();
+            const sub = String(m[2] || '').trim();
+            return { baseType: base || 'Unspecified', subType: sub };
+        }
+
+        return { baseType: rawBase || 'Unspecified', subType: '' };
+    },
+
+    populateAccountTypeFilters(accountTypes) {
+        const parentSelect = document.getElementById('accountTypeFilter');
+        if (!parentSelect) return;
+
+        const previous = this.accountTypeFilters.accountType || 'ALL';
+        const baseTypes = Array.from(new Set([
+            ...(accountTypes || []).map((row) => this.parseAccountTypeRow(row).baseType),
+            ...this.getConfiguredAccountTypes()
+        ])).sort();
+        parentSelect.innerHTML = '<option value="ALL">All Account Types</option>';
+        baseTypes.forEach((base) => {
+            parentSelect.innerHTML += `<option value="${base}">${base}</option>`;
+        });
+
+        this.accountTypeFilters.accountType = baseTypes.includes(previous) ? previous : 'ALL';
+        parentSelect.value = this.accountTypeFilters.accountType;
+        this.populateSubAccountTypeFilter(accountTypes);
+    },
+
+    populateSubAccountTypeFilter(accountTypes) {
+        const subSelect = document.getElementById('subAccountTypeFilter');
+        if (!subSelect) return;
+
+        const selectedBase = this.accountTypeFilters.accountType || 'ALL';
+        const previousSub = this.accountTypeFilters.subAccountType || 'ALL';
+        const fromRows = (accountTypes || [])
+            .map((row) => this.parseAccountTypeRow(row))
+            .filter((x) => x.subType && (selectedBase === 'ALL' || x.baseType === selectedBase))
+            .map((x) => x.subType);
+        const fromConfig = selectedBase === 'ALL'
+            ? this.getConfiguredAccountTypes().flatMap((base) => this.getConfiguredSubTypes(base))
+            : this.getConfiguredSubTypes(selectedBase);
+        const subs = Array.from(new Set([...fromRows, ...fromConfig])).sort();
+
+        subSelect.innerHTML = '<option value="ALL">All Sub Account Types</option>';
+        subs.forEach((sub) => {
+            subSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
+        });
+
+        this.accountTypeFilters.subAccountType = subs.includes(previousSub) ? previousSub : 'ALL';
+        subSelect.value = this.accountTypeFilters.subAccountType;
+    },
+
+    getFilteredAccountTypeRows(accountTypes) {
+        const selectedBase = this.accountTypeFilters.accountType || 'ALL';
+        const selectedSub = this.accountTypeFilters.subAccountType || 'ALL';
+
+        return (accountTypes || []).filter((row) => {
+            const parsed = this.parseAccountTypeRow(row);
+            const baseMatches = selectedBase === 'ALL' || parsed.baseType === selectedBase;
+            const subMatches = selectedSub === 'ALL' || parsed.subType === selectedSub;
+            return baseMatches && subMatches;
+        });
+    },
+
+    toggleAccountTypeGroup(baseType) {
+        if (this.expandedAccountTypeGroups.has(baseType)) {
+            this.expandedAccountTypeGroups.delete(baseType);
+        } else {
+            this.expandedAccountTypeGroups.add(baseType);
+        }
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
     renderAccountTypeTable(accountTypes) {
         const container = document.getElementById('accountTypeTable');
         if (!container) return;
 
-        if (!accountTypes || accountTypes.length === 0) {
+        this.currentAccountTypeRows = Array.isArray(accountTypes) ? accountTypes : [];
+        this.populateAccountTypeFilters(this.currentAccountTypeRows);
+        const rows = this.getFilteredAccountTypeRows(this.currentAccountTypeRows);
+        const hasConfiguredTypes = this.getConfiguredAccountTypes().length > 0;
+
+        if (!rows.length && !hasConfiguredTypes) {
             container.innerHTML = '<p class="text-muted text-center">No account type data available</p>';
             return;
         }
+
+        const grouped = {};
+        rows.forEach((row) => {
+            const parsed = this.parseAccountTypeRow(row);
+            const baseType = parsed.baseType;
+            const subType = parsed.subType;
+            if (!grouped[baseType]) {
+                grouped[baseType] = {
+                    count: 0,
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    unpaidAmount: 0,
+                    children: {}
+                };
+            }
+
+            grouped[baseType].count += Number(row.count || 0);
+            grouped[baseType].totalAmount += Number(row.totalAmount || 0);
+            grouped[baseType].paidAmount += Number(row.paidAmount || 0);
+            grouped[baseType].unpaidAmount += Number(row.unpaidAmount || 0);
+
+            if (subType) {
+                if (!grouped[baseType].children[subType]) {
+                    grouped[baseType].children[subType] = {
+                        name: subType,
+                        count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0
+                    };
+                }
+                grouped[baseType].children[subType].count += Number(row.count || 0);
+                grouped[baseType].children[subType].totalAmount += Number(row.totalAmount || 0);
+                grouped[baseType].children[subType].paidAmount += Number(row.paidAmount || 0);
+                grouped[baseType].children[subType].unpaidAmount += Number(row.unpaidAmount || 0);
+            }
+        });
+
+        // Ensure configured account types/sub-accounts are represented even when no row exists yet.
+        this.getConfiguredAccountTypes().forEach((baseType) => {
+            if (!grouped[baseType]) {
+                grouped[baseType] = {
+                    count: 0,
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    unpaidAmount: 0,
+                    children: {}
+                };
+            }
+            this.getConfiguredSubTypes(baseType).forEach((subType) => {
+                if (!grouped[baseType].children[subType]) {
+                    grouped[baseType].children[subType] = {
+                        name: subType,
+                        count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0
+                    };
+                }
+            });
+        });
+
+        const configuredBaseOrder = this.getConfiguredAccountTypes();
+        const baseOrderIndex = {};
+        configuredBaseOrder.forEach((name, idx) => { baseOrderIndex[name] = idx; });
 
         let totalCount = 0;
         let totalAmount = 0;
@@ -1640,26 +1902,68 @@ const Reports = {
                     <tbody>
         `;
 
-        accountTypes.forEach(row => {
-            totalCount += Number(row.count || 0);
-            totalAmount += Number(row.totalAmount || 0);
-            totalPaid += Number(row.paidAmount || 0);
-            totalUnpaid += Number(row.unpaidAmount || 0);
+        Object.keys(grouped)
+            .sort((a, b) => {
+                const ai = Object.prototype.hasOwnProperty.call(baseOrderIndex, a) ? baseOrderIndex[a] : Number.MAX_SAFE_INTEGER;
+                const bi = Object.prototype.hasOwnProperty.call(baseOrderIndex, b) ? baseOrderIndex[b] : Number.MAX_SAFE_INTEGER;
+                if (ai !== bi) return ai - bi;
+                return grouped[b].totalAmount - grouped[a].totalAmount;
+            })
+            .forEach((baseType) => {
+                const parent = grouped[baseType];
+                const paymentRate = parent.totalAmount > 0 ? (parent.paidAmount / parent.totalAmount) * 100 : 0;
+                const children = Object.values(parent.children || {});
+                const hasChildren = children.length > 0;
+                const isExpanded = this.expandedAccountTypeGroups.has(baseType);
+                const subOrder = this.getConfiguredSubTypes(baseType);
+                const subOrderIndex = {};
+                subOrder.forEach((name, idx) => { subOrderIndex[name] = idx; });
 
-            html += `
-                <tr>
-                    <td><strong>${row.accountType || 'Unspecified'}</strong></td>
-                    <td class="text-center">${Utils.formatNumber(row.count || 0)}</td>
-                    <td class="text-right">${Utils.formatCurrency(row.totalAmount || 0)}</td>
-                    <td class="text-right text-success">${Utils.formatCurrency(row.paidAmount || 0)}</td>
-                    <td class="text-right text-danger">${Utils.formatCurrency(row.unpaidAmount || 0)}</td>
-                    <td class="text-center">${Number(row.paymentRate || 0).toFixed(2)}%</td>
-                </tr>
-            `;
-        });
+                totalCount += parent.count;
+                totalAmount += parent.totalAmount;
+                totalPaid += parent.paidAmount;
+                totalUnpaid += parent.unpaidAmount;
 
-        const paymentRate = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
+                const safeBase = baseType.replace(/'/g, "\\'");
+                html += `
+                    <tr class="parent-account-row">
+                        <td>
+                            ${hasChildren ? `<button class="btn btn-sm btn-secondary" style="margin-right:8px;padding:2px 8px;" onclick="Reports.toggleAccountTypeGroup('${safeBase}')">${isExpanded ? '-' : '+'}</button>` : ''}
+                            <strong>${baseType}</strong>
+                        </td>
+                        <td class="text-center">${Utils.formatNumber(parent.count)}</td>
+                        <td class="text-right">${Utils.formatCurrency(parent.totalAmount)}</td>
+                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidAmount)}</td>
+                        <td class="text-right text-danger">${Utils.formatCurrency(parent.unpaidAmount)}</td>
+                        <td class="text-center">${paymentRate.toFixed(2)}%</td>
+                    </tr>
+                `;
 
+                if (hasChildren && isExpanded) {
+                    children
+                        .sort((a, b) => {
+                            const ai = Object.prototype.hasOwnProperty.call(subOrderIndex, a.name) ? subOrderIndex[a.name] : Number.MAX_SAFE_INTEGER;
+                            const bi = Object.prototype.hasOwnProperty.call(subOrderIndex, b.name) ? subOrderIndex[b.name] : Number.MAX_SAFE_INTEGER;
+                            if (ai !== bi) return ai - bi;
+                            return b.totalAmount - a.totalAmount;
+                        })
+                        .forEach((child) => {
+                            const childRate = child.totalAmount > 0 ? (child.paidAmount / child.totalAmount) * 100 : 0;
+                            html += `
+                                <tr class="sub-account-row">
+                                    <td style="padding-left:42px;">${child.name}</td>
+                                    <td class="text-center">${Utils.formatNumber(child.count)}</td>
+                                    <td class="text-right">${Utils.formatCurrency(child.totalAmount)}</td>
+                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidAmount)}</td>
+                                    <td class="text-right text-danger">${Utils.formatCurrency(child.unpaidAmount)}</td>
+                                    <td class="text-center">${childRate.toFixed(2)}%</td>
+                                </tr>
+                            `;
+                        });
+                }
+            });
+
+        const grandRate = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
         html += `
             <tr class="totals-row">
                 <td><strong>TOTAL</strong></td>
@@ -1667,7 +1971,7 @@ const Reports = {
                 <td class="text-right"><strong>${Utils.formatCurrency(totalAmount)}</strong></td>
                 <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
                 <td class="text-right text-danger"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
-                <td class="text-center"><strong>${paymentRate.toFixed(2)}%</strong></td>
+                <td class="text-center"><strong>${grandRate.toFixed(2)}%</strong></td>
             </tr>
         `;
 
@@ -1928,7 +2232,8 @@ const Reports = {
         csv += `Total Contract Sum,${s.totalProcessedContractSum}\n`;
         csv += `Total Debt,${s.totalDebt}\n`;
         csv += `Average Payment Rate (%),${s.averagePaymentPercent}\n`;
-        csv += `Revalidated Vouchers (Count),${s.revalidatedVouchers}\n\n`;
+        csv += `Revalidated Vouchers (Count),${s.revalidatedVouchers}\n`;
+        csv += `Revalidated Criteria,OLD VOUCHER NUMBER present OR OLD VOUCHER NO AVAILABLE? = YES\n`;
         csv += `Revalidated (No Old Voucher No.),${s.revalidatedWithoutOldNumber || 0}\n\n`;
 
         // CATEGORY BREAKDOWN
@@ -1943,7 +2248,8 @@ const Reports = {
             csv += 'ACCOUNT TYPE BREAKDOWN\n';
             csv += 'Account Type,Vouchers,Total Amount,Paid Amount,Unpaid Amount,Payment Rate %\n';
             this.summaryData.accountTypeBreakdown.forEach(typeRow => {
-                csv += `${typeRow.accountType || 'Unspecified'},${typeRow.count || 0},${typeRow.totalAmount || 0},${typeRow.paidAmount || 0},${typeRow.unpaidAmount || 0},${typeRow.paymentRate || 0}\n`;
+                const label = typeRow.displayName || typeRow.accountType || 'Unspecified';
+                csv += `${label},${typeRow.count || 0},${typeRow.totalAmount || 0},${typeRow.paidAmount || 0},${typeRow.unpaidAmount || 0},${typeRow.paymentRate || 0}\n`;
             });
             csv += '\n';
         }
@@ -1969,6 +2275,10 @@ const Reports = {
      * Show/hide loading overlay
      */
     showLoading(show) {
+        if (window.Components && typeof Components.setLoading === 'function') {
+            Components.setLoading(show, 'Loading report data...');
+            return;
+        }
         const loader = document.getElementById('loadingOverlay');
         if (loader) {
             if (show) {
@@ -2276,7 +2586,7 @@ const Reports = {
             this.reportDepartmentChart = new Chart(deptCtx, {
                 type: 'bar',
                 data: {
-                    labels: depts.map(d => d[0]),
+                    labels: depts.map(d => String(d[0] || '').replace('::', ' - ').replace(/\s+-\s*$/, '')),
                     datasets: [{
                         label: 'Amount',
                         data: depts.map(d => d[1]),

@@ -22,8 +22,9 @@ const Vouchers = {
   selectedVoucher: null,
   selectedVouchers: [],
 
-  categories: [],
   categoriesLoaded: false,
+  systemConfig: null,
+  systemConfigLoaded: false,
   paymentTypeHandlersReady: false,
   amountFormattingReady: false,
 
@@ -59,6 +60,10 @@ const Vouchers = {
   isCPO: false,
   releaseSearchResults: [],
   selectedForRelease: [],
+  _loadSeq: 0,
+  _searchSeq: 0,
+  _releaseSearchSeq: 0,
+  _lastFiltersKey: '',
 
   // ===== Init =====
   async init() {
@@ -70,13 +75,22 @@ const Vouchers = {
 
     this.setupUI();
 
+    const preloadTasks = [];
     if (!this.categoriesLoaded) {
-      await this.loadCategories();
-      this.categoriesLoaded = true;
+      preloadTasks.push(
+        this.loadCategories().finally(() => { this.categoriesLoaded = true; })
+      );
     }
 
+    if (!this.systemConfigLoaded) {
+      preloadTasks.push(
+        this.loadSystemConfig().finally(() => { this.systemConfigLoaded = true; })
+      );
+    }
+
+    await Promise.all(preloadTasks);
     await this.loadVouchers();
-    await this.loadPendingDeletions();
+    this.loadPendingDeletions();
 
     this.setupEventListeners();
     this.handleUrlParams();
@@ -373,6 +387,78 @@ const Vouchers = {
     }
   },
 
+  async loadSystemConfig() {
+    const result = await API.getSystemConfig();
+    if (result.success) {
+      this.systemConfig = result.config;
+      this.populateAccountTypeDropdown();
+    }
+  },
+
+  populateAccountTypeDropdown() {
+    const formAccountType = document.getElementById('formAccountType');
+    if (!formAccountType || !this.systemConfig) return;
+    
+    // Check if event listener is already attached to prevent duplicates
+    if (!this._accountTypeListenerAdded) {
+      formAccountType.addEventListener('change', () => this.handleAccountTypeChange());
+      this._accountTypeListenerAdded = true;
+    }
+    
+    const cur = formAccountType.value;
+    formAccountType.innerHTML = '<option value="">Select Type</option>';
+    
+    const accountTypes = Object.keys(this.systemConfig.accountTypes || {}).sort();
+    accountTypes.forEach(type => {
+      formAccountType.innerHTML += `<option value="${type}">${type}</option>`;
+    });
+    
+    if (cur) {
+      formAccountType.value = cur;
+    }
+    this.handleAccountTypeChange();
+  },
+
+  handleAccountTypeChange() {
+    const formAccountType = document.getElementById('formAccountType');
+    const formSubAccountType = document.getElementById('formSubAccountType');
+    
+    if (!formAccountType || !formSubAccountType || !this.systemConfig) return;
+    
+    const selectedType = formAccountType.value;
+    const subTypes = (this.systemConfig.accountTypes && this.systemConfig.accountTypes[selectedType]) || [];
+    
+    const curSub = formSubAccountType.value;
+    formSubAccountType.innerHTML = '<option value="">Select Sub-Type</option>';
+    
+    if (subTypes.length > 0) {
+      subTypes.forEach(sub => {
+        formSubAccountType.innerHTML += `<option value="${sub}">${sub}</option>`;
+      });
+      formSubAccountType.disabled = false;
+      formSubAccountType.required = true;
+      const ast = document.getElementById('subAccountTypeAst');
+      if (ast) ast.style.display = 'inline';
+      
+      // Keep old selection if valid
+      if (subTypes.includes(curSub)) {
+        formSubAccountType.value = curSub;
+      }
+    } else {
+      formSubAccountType.disabled = true;
+      formSubAccountType.required = false;
+      formSubAccountType.value = '';
+      const ast = document.getElementById('subAccountTypeAst');
+      if (ast) ast.style.display = 'none';
+    }
+  },
+
+  accountTypeRequiresSubType(accountType) {
+    if (!this.systemConfig || !this.systemConfig.accountTypes) return false;
+    const subTypes = this.systemConfig.accountTypes[accountType] || [];
+    return Array.isArray(subTypes) && subTypes.length > 0;
+  },
+
   populateCategoryDropdowns() {
     // Dropdowns on forms
     const dropdowns = document.querySelectorAll('.category-select');
@@ -402,11 +488,13 @@ const Vouchers = {
   },
 
   // ===== Vouchers list =====
-  async loadVouchers() {
-    this.showLoading(true);
+  async loadVouchers(options = {}) {
+    const requestId = ++this._loadSeq;
+    if (!options.skipLoading) this.showLoading(true);
 
     try {
       const result = await API.getVouchers('2026', this.filters, this.currentPage, this.pageSize);
+      if (requestId !== this._loadSeq) return;
 
       if (!result.success) {
         Utils.showToast(result.error || 'Failed to load vouchers', 'error');
@@ -431,7 +519,7 @@ const Vouchers = {
       console.error('loadVouchers error:', e);
       Utils.showToast('Error loading vouchers', 'error');
     } finally {
-      this.showLoading(false);
+      if (!options.skipLoading) this.showLoading(false);
     }
   },
 
@@ -476,6 +564,7 @@ const Vouchers = {
             <th>Particular</th>
             <th>Gross Amount</th>
             <th>Category</th>
+            <th>Account Type</th>
             <th>Control No.</th>
             <th>Status</th>
             <th>Pmt Month</th>
@@ -500,6 +589,7 @@ const Vouchers = {
           <td title="${v.particular || ''}"><div class="particular-cell">${v.particular || '-'}</div></td>
           <td>${Utils.formatCurrency(v.grossAmount || 0)}</td>
           <td>${v.categories || '-'}</td>
+          <td title="${v.subAccountType ? `${v.accountType} - ${v.subAccountType}` : v.accountType || ''}">${v.subAccountType ? `${v.accountType} (${v.subAccountType})` : (v.accountType || '-')}</td>
           <td>${v.controlNumber || '<span class="text-muted">-</span>'}</td>
           <td>${Utils.getStatusBadge(v.status || '')}</td>
           <td>${v.pmtMonth || '-'}</td>
@@ -661,7 +751,7 @@ const Vouchers = {
     this.loadVouchers();
   },
 
-  applyFilters() {
+  applyFilters(options = {}) {
     this.filters.status = document.getElementById('statusFilter')?.value || 'All';
     this.filters.category = document.getElementById('categoryFilter')?.value || 'All';
     this.filters.searchTerm = document.getElementById('searchInput')?.value.trim() || '';
@@ -672,17 +762,29 @@ const Vouchers = {
     this.filters.amountMax = document.getElementById('amountMaxFilter')?.value || '';
     this.filters.release = document.getElementById('releaseFilter')?.value || 'All';
 
+    const filtersKey = JSON.stringify(this.filters);
+    if (!options.force && this._lastFiltersKey === filtersKey) return;
+    this._lastFiltersKey = filtersKey;
     this.currentPage = 1;
 
     this.updateActiveFiltersText();
 
-    if (this.filters.searchTerm) {
+    if (this.filters.searchTerm && options.forceGlobal) {
       this.globalSearch();
       return;
     }
 
     this.isGlobalSearchMode = false;
-    this.loadVouchers();
+    this.loadVouchers({ skipLoading: !!options.skipLoading });
+  },
+
+  runSearch() {
+    const term = document.getElementById('searchInput')?.value.trim() || '';
+    if (!term) {
+      this.applyFilters();
+      return;
+    }
+    this.applyFilters({ forceGlobal: true, force: true });
   },
 
   // ===== View voucher (with payee unpaid total) =====
@@ -806,7 +908,7 @@ const Vouchers = {
             </div>
             <div class="detail-group">
               <label>Account Type</label>
-              <div>${voucher.accountType || '-'}</div>
+              <div>${voucher.accountType || '-'} ${voucher.subAccountType ? `(${voucher.subAccountType})` : ''}</div>
             </div>
             <div class="detail-group">
               <label>Old Voucher No.</label>
@@ -909,6 +1011,8 @@ const Vouchers = {
       document.getElementById('formNetDisplay').textContent = Utils.formatNumber(voucher.net || 0);
       document.getElementById('formCategories').value = voucher.categories || '';
       document.getElementById('formAccountType').value = voucher.accountType || '';
+      this.handleAccountTypeChange();
+      document.getElementById('formSubAccountType').value = voucher.subAccountType || '';
       document.getElementById('formDate').value = formatDateForInput(voucher.date);
 
       this.detectPaymentType(voucher.particular || '');
@@ -1076,6 +1180,19 @@ const Vouchers = {
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
     if (!gross) return Utils.showToast('Gross amount is required', 'error');
+    
+    // Validate Account Type and Category
+    const categories = String(document.getElementById('formCategories').value || '').trim();
+    const accountType = String(document.getElementById('formAccountType').value || '').trim();
+    const subAccountType = String(document.getElementById('formSubAccountType').value || '').trim();
+    const subTypeRequiredByConfig = this.accountTypeRequiresSubType(accountType);
+
+    if (!categories) return Utils.showToast('Category is required', 'error');
+    if (!accountType) return Utils.showToast('Account Type is required', 'error');
+    if (subTypeRequiredByConfig && !subAccountType) {
+      return Utils.showToast('Sub Account Type is required for the selected Account Type', 'error');
+    }
+
     if (oldVoucherChoice === 'yes' && !oldVoucherNumber) {
       return Utils.showToast('Old voucher number is required when "Yes" is selected', 'error');
     }
@@ -1095,6 +1212,7 @@ const Vouchers = {
       net,
       categories: document.getElementById('formCategories').value,
       accountType: document.getElementById('formAccountType').value,
+      subAccountType: document.getElementById('formSubAccountType').value || '',
       date: document.getElementById('formDate').value,
       totalGross: gross,
       oldVoucherNumber: oldVoucherNumber,
@@ -1846,6 +1964,7 @@ const Vouchers = {
   },
 
   async searchForRelease() {
+    const requestId = ++this._releaseSearchSeq;
     const searchTerm = document.getElementById('releaseSearchInput').value.trim();
     const statusFilter = document.getElementById('releaseStatusFilter').value;
     const categoryFilter = document.getElementById('releaseCategoryFilter').value;
@@ -1874,52 +1993,7 @@ const Vouchers = {
       });
 
       const results = await Promise.all(promises);
-
-      results.forEach(({ year, res }) => {
-        if (res.success && res.vouchers) {
-          res.vouchers.forEach(v => all.push({ ...v, sourceYear: year }));
-        }
-      });
-
-      // Only 2026 is selectable
-      this.releaseSearchResults = all;
-      this.renderReleaseSearchResults();
-
-    } catch (e) {
-      console.error('searchForRelease error:', e);
-      container.innerHTML = '<p class="text-danger text-center">Search failed.</p>';
-    } finally {
-      this.showLoading(false);
-    }
-  },
-
-  async searchForRelease() {
-    const searchTerm = document.getElementById('releaseSearchInput').value.trim();
-    const statusFilter = document.getElementById('releaseStatusFilter').value;
-    const categoryFilter = document.getElementById('releaseCategoryFilter').value;
-
-    if (!searchTerm && statusFilter === 'All' && categoryFilter === 'All') {
-      Utils.showToast('Please enter search criteria', 'warning');
-      return;
-    }
-
-    const container = document.getElementById('releaseSearchResults');
-    container.innerHTML = '<p class="text-muted text-center">Searching...</p>';
-
-    this.showLoading(true);
-
-    try {
-      const years = ['2026', '2025', '2024', '2023', '<2023'];
-      let all = [];
-
-      const promises = years.map(year => {
-        const filters = { searchTerm, status: statusFilter, category: categoryFilter };
-        return API.getVouchers(year, filters, 1, 100)
-          .then(res => ({ year, res }))
-          .catch(e => ({ year, res: { success: false } }));
-      });
-
-      const results = await Promise.all(promises);
+      if (requestId !== this._releaseSearchSeq) return;
 
       results.forEach(({ year, res }) => {
         if (res.success && res.vouchers) {
@@ -1929,8 +2003,6 @@ const Vouchers = {
 
       this.releaseSearchResults = all;
       this.renderReleaseSearchResults();
-
-      // ADD THIS LINE - Persist and show selected vouchers after search
       this.updateReleaseSelectedDisplay();
 
     } catch (e) {
@@ -1942,6 +2014,7 @@ const Vouchers = {
   },
 
   async globalSearch() {
+    const requestId = ++this._searchSeq;
     const term = (this.filters.searchTerm || '').trim();
     if (!term) {
       this.isGlobalSearchMode = false;
@@ -1967,17 +2040,26 @@ const Vouchers = {
         release: this.filters.release
       };
 
-      const promises = years.map(year =>
-        API.getVouchers(year, filters, 1, 200)
-          .then(res => res.success && Array.isArray(res.vouchers)
-            ? res.vouchers.map(v => ({ ...v, sourceYear: year }))
-            : []
-          )
-          .catch(() => [])
-      );
+      // Fetch current-year first for fast first paint, then append archives.
+      const [firstYear, ...archiveYears] = years;
+      const firstRes = await API.getVouchers(firstYear, filters, 1, 200);
+      if (requestId !== this._searchSeq) return;
+      if (firstRes.success && Array.isArray(firstRes.vouchers)) {
+        allResults.push(...firstRes.vouchers.map(v => ({ ...v, sourceYear: firstYear })));
+      }
 
-      const results = await Promise.all(promises);
-      results.forEach(batch => allResults.push(...batch));
+      const archiveResults = await Promise.all(
+        archiveYears.map(year =>
+          API.getVouchers(year, filters, 1, 200)
+            .then(res => res.success && Array.isArray(res.vouchers)
+              ? res.vouchers.map(v => ({ ...v, sourceYear: year }))
+              : []
+            )
+            .catch(() => [])
+        )
+      );
+      if (requestId !== this._searchSeq) return;
+      archiveResults.forEach(batch => allResults.push(...batch));
 
       this.vouchers = allResults;
       this.totalCount = allResults.length;
@@ -2528,7 +2610,11 @@ const Vouchers = {
 
   // ===== Utilities =====
   setupEventListeners() {
-    const debouncedFilter = Utils.debounce(() => this.applyFilters(), 400);
+    const debouncedFilter = Utils.debounce(() => this.applyFilters({ skipLoading: true }), 320);
+    const debouncedLocalSearch = Utils.debounce(
+      () => this.applyFilters({ skipGlobal: true, skipLoading: true }),
+      450
+    );
 
     document.getElementById('statusFilter')?.addEventListener('change', () => this.applyFilters());
     document.getElementById('categoryFilter')?.addEventListener('change', () => this.applyFilters());
@@ -2542,9 +2628,9 @@ const Vouchers = {
 
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-      searchInput.addEventListener('input', debouncedFilter);
+      searchInput.addEventListener('input', debouncedLocalSearch);
       searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') this.applyFilters();
+        if (e.key === 'Enter') this.runSearch();
       });
     }
 
@@ -2893,6 +2979,10 @@ const Vouchers = {
   },
 
   showLoading(show) {
+    if (window.Components && typeof Components.setLoading === 'function') {
+      Components.setLoading(show, this.isGlobalSearchMode ? 'Searching all years...' : 'Loading vouchers...');
+      return;
+    }
     const loader = document.getElementById('loadingOverlay');
     if (loader) loader.classList.toggle('hidden', !show);
   }

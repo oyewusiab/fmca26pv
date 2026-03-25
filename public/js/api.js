@@ -72,6 +72,32 @@
       });
     },
 
+    async _fetchJson(url, options = {}, retries = 1, timeoutMs = 18000) {
+      let lastError = null;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(url, { ...options, signal: controller.signal });
+          const text = await response.text();
+          try {
+            return JSON.parse(text);
+          } catch (_) {
+            return { success: false, error: "Invalid response from server" };
+          }
+        } catch (err) {
+          lastError = err;
+          if (attempt < retries) {
+            await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+            continue;
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+      throw lastError || new Error("Network error");
+    },
+
     // ==================== CORE REQUESTS ====================
 
     /**
@@ -110,27 +136,17 @@
             return await this._inflightRequests.get(cacheKey);
           }
 
-          const requestPromise = fetch(url, { method: "GET", redirect: "follow" });
+          const requestPromise = this._fetchJson(
+            url,
+            { method: "GET", redirect: "follow" },
+            1,
+            18000
+          );
 
-          this._inflightRequests.set(cacheKey, requestPromise.then(async r => {
-            try {
-              const text = await r.clone().text();
-              return JSON.parse(text);
-            } catch {
-              return {};
-            }
-          }));
+          this._inflightRequests.set(cacheKey, requestPromise);
 
           try {
-            const response = await requestPromise;
-            const text = await response.text();
-            let result;
-            try {
-              result = JSON.parse(text);
-            } catch (e) {
-              console.error(`API GET non-JSON response (${action}):`, text);
-              return { success: false, error: "Invalid response from server" };
-            }
+            const result = await requestPromise;
 
             if (result?.error && String(result.error).includes("Session expired")) {
               Auth.clearSession?.();
@@ -187,21 +203,17 @@
           ...data,
         };
 
-        const response = await fetch(CONFIG.API_URL, {
-          method: "POST",
-          redirect: "follow",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload),
-        });
-
-        const text = await response.text();
-        let result;
-        try {
-          result = JSON.parse(text);
-        } catch (e) {
-          console.error(`API POST non-JSON response (${action}):`, text);
-          return { success: false, error: "Invalid response from server" };
-        }
+        const result = await this._fetchJson(
+          CONFIG.API_URL,
+          {
+            method: "POST",
+            redirect: "follow",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify(payload),
+          },
+          0,
+          25000
+        );
 
         if (result?.error && String(result.error).includes("Session expired")) {
           Auth.clearSession?.();
@@ -511,6 +523,10 @@
 
     async getCategories() {
       return await this.get("getCategories");
+    },
+
+    async getSystemConfig() {
+      return await this.get("getSystemConfig", {}, 60); // short cache to reflect config updates quickly
     },
 
     async getRolePermissions() {

@@ -115,65 +115,104 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
     const releaseFilter = String(filters.release || 'All').trim();
 
     const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-    const filtered = [];
+    const cols = CONFIG.VOUCHER_COLUMNS;
+    const start = (page - 1) * pageSize;
+    const endExclusive = start + pageSize;
+    let totalCount = 0;
+    const vouchers = [];
+
+    let dateFromObj = null;
+    let dateToObj = null;
+    if (filters.dateFrom) {
+      const d = new Date(filters.dateFrom);
+      if (!isNaN(d.getTime())) dateFromObj = d;
+    }
+    if (filters.dateTo) {
+      const d = new Date(filters.dateTo);
+      if (!isNaN(d.getTime())) {
+        d.setHours(23, 59, 59, 999);
+        dateToObj = d;
+      }
+    }
 
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
 
-      if (!row[2] && !row[13] && !row[14]) continue;
-
-      const rowIndex = i + 2;
-      const voucher = rowToVoucher(row, rowIndex, has2026Format);
+      if (!row[cols.PAYEE - 1] && !row[cols.CONTROL_NUMBER - 1] && !row[cols.OLD_VOUCHER_NUMBER - 1]) continue;
 
       let include = true;
+      const status = String(row[cols.STATUS - 1] || '').trim();
+      const category = String(row[cols.CATEGORIES - 1] || '').trim();
+      const pmtMonth = String(row[cols.PMT_MONTH - 1] || '').trim();
+      const controlNumber = String(row[cols.CONTROL_NUMBER - 1] || '').trim();
+      const payee = String(row[cols.PAYEE - 1] || '');
+      const accountOrMail = String(row[cols.ACCOUNT_OR_MAIL - 1] || '');
+      const particular = String(row[cols.PARTICULAR - 1] || '');
+      const oldVoucherNumber = String(row[cols.OLD_VOUCHER_NUMBER - 1] || '');
+      const grossAmount = parseAmount(row[cols.GROSS_AMOUNT - 1]);
+      const rawDate = row[cols.DATE - 1];
+      const rowDate = rawDate ? new Date(rawDate) : null;
 
       if (filters.status && filters.status !== 'All') {
-        if (String(voucher.status || '').trim() !== filters.status) include = false;
+        if (status !== filters.status) include = false;
       }
 
       if (include && filters.category && filters.category !== 'All') {
-        if (String(voucher.categories || '').trim() !== filters.category) include = false;
+        if (category !== filters.category) include = false;
+      }
+
+      if (include && filters.pmtMonth && filters.pmtMonth !== 'All') {
+        if (pmtMonth !== filters.pmtMonth) include = false;
+      }
+
+      if (include && dateFromObj) {
+        if (!rowDate || isNaN(rowDate.getTime()) || rowDate < dateFromObj) include = false;
+      }
+
+      if (include && dateToObj) {
+        if (!rowDate || isNaN(rowDate.getTime()) || rowDate > dateToObj) include = false;
       }
 
       if (include && releaseFilter !== 'All') {
-        const hasCN = voucher.controlNumber && String(voucher.controlNumber).trim() !== '';
+        const hasCN = controlNumber !== '';
         if (releaseFilter === 'Released' && !hasCN) include = false;
         if (releaseFilter === 'Not Released' && hasCN) include = false;
       }
 
       if (include && minA !== null && !isNaN(minA)) {
-        if (Number(voucher.grossAmount || 0) < minA) include = false;
+        if (grossAmount < minA) include = false;
       }
 
       if (include && maxA !== null && !isNaN(maxA)) {
-        if (Number(voucher.grossAmount || 0) > maxA) include = false;
+        if (grossAmount > maxA) include = false;
       }
 
       if (include && term) {
         const searchFields = [
-          voucher.payee,
-          voucher.accountOrMail,
-          voucher.particular,
-          voucher.controlNumber,
-          voucher.oldVoucherNumber,
-          String(voucher.grossAmount || '')
+          payee,
+          accountOrMail,
+          particular,
+          controlNumber,
+          oldVoucherNumber,
+          String(grossAmount || '')
         ].join(' ').toLowerCase();
 
         const numericMatch = !isNaN(termNumeric) &&
-          Math.abs(Number(voucher.grossAmount || 0) - termNumeric) < 0.01;
+          Math.abs(grossAmount - termNumeric) < 0.01;
 
         if (!searchFields.includes(term) && !numericMatch) include = false;
       }
 
-      if (include) filtered.push(voucher);
+      if (!include) continue;
+
+      if (totalCount >= start && totalCount < endExclusive) {
+        const rowIndex = i + 2;
+        vouchers.push(rowToVoucher(row, rowIndex, has2026Format));
+      }
+      totalCount++;
     }
 
-    const totalCount = filtered.length;
     const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
-
-    const start = (page - 1) * pageSize;
-    const end = Math.min(start + pageSize, totalCount);
-    const vouchers = filtered.slice(start, end);
 
     return {
       success: true,
@@ -510,6 +549,7 @@ function rowToVoucher(row, rowIndex, has2026Format = true) {
     oldVoucherAvailable: row[cols.OLD_VOUCHER_AVAILABLE - 1],
     date: row[cols.DATE - 1] ? Utilities.formatDate(new Date(row[cols.DATE - 1]), "GMT", "yyyy-MM-dd") : '',
     accountType: row[cols.ACCOUNT_TYPE - 1],
+    subAccountType: row[cols.SUB_ACCOUNT_TYPE - 1],
     createdAt: row[cols.CREATED_AT - 1] ? new Date(row[cols.CREATED_AT - 1]).toISOString() : '',
     releasedAt: row[cols.RELEASED_AT - 1] ? new Date(row[cols.RELEASED_AT - 1]).toISOString() : '',
     attachmentUrl: has2026Format ? row[cols.ATTACHMENT_URL - 1] : ''
@@ -551,6 +591,7 @@ function voucherToRow(voucher, targetColumnCount) {
   setCol(cols.OLD_VOUCHER_AVAILABLE, voucher.oldVoucherAvailable || '');
   setCol(cols.DATE, voucher.date ? new Date(voucher.date) : new Date());
   setCol(cols.ACCOUNT_TYPE, voucher.accountType || '');
+  setCol(cols.SUB_ACCOUNT_TYPE, voucher.subAccountType || '');
   setCol(cols.CREATED_AT, voucher.createdAt ? new Date(voucher.createdAt) : new Date());
   setCol(cols.RELEASED_AT, voucher.releasedAt ? new Date(voucher.releasedAt) : '');
   setCol(cols.ATTACHMENT_URL, voucher.attachmentUrl || '');

@@ -120,19 +120,29 @@ function getTaxSummary(token, year) {
             };
         }
 
-        const data = sheet.getRange(2, 1, lastRow - 1, 19).getValues();
+        const header = getHeaderMap_(sheet);
         const cols = CONFIG.VOUCHER_COLUMNS;
+        const statusCol = (header['STATUS'] || cols.STATUS) - 1;
+        const vatCol = (header['VAT'] || cols.VAT) - 1;
+        const whtCol = (header['WHT'] || header['WITHHOLDING TAX'] || cols.WHT) - 1;
+        const stampCol = (header['STAMP DUTY'] || cols.STAMP_DUTY) - 1;
+        const accountTypeCol = (header['ACCOUNT TYPE'] || cols.ACCOUNT_TYPE) - 1;
+        const subAccountCol = (header['SUB ACCOUNT'] || header['SUB ACCOUNT TYPE'] || cols.SUB_ACCOUNT_TYPE) - 1;
+        const numCols = Math.max(statusCol, vatCol, whtCol, stampCol, accountTypeCol, subAccountCol) + 1;
+        const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
 
         let totalVAT = 0, totalWHT = 0, totalStampDuty = 0;
         const accountTypeStats = {};
 
         for (let i = 0; i < data.length; i++) {
             const row = data[i];
-            const status = String(row[cols.STATUS - 1] || '').trim().toLowerCase();
-            const vat = parseAmount(row[cols.VAT - 1]);
-            const wht = parseAmount(row[cols.WHT - 1]);
-            const stampDuty = parseAmount(row[cols.STAMP_DUTY - 1]);
-            const accountType = String(row[cols.ACCOUNT_TYPE - 1] || '').trim() || 'Unspecified';
+            const status = String(row[statusCol] || '').trim().toLowerCase();
+            const vat = parseAmount(row[vatCol]);
+            const wht = parseAmount(row[whtCol]);
+            const stampDuty = parseAmount(row[stampCol]);
+            const baseAccountType = String(row[accountTypeCol] || '').trim() || 'Unspecified';
+            const subAccountType = String(row[subAccountCol] || '').trim();
+            const accountKey = subAccountType ? `${baseAccountType}::${subAccountType}` : `${baseAccountType}::`;
 
             // Skip cancelled vouchers
             if (status === 'cancelled') continue;
@@ -141,8 +151,8 @@ function getTaxSummary(token, year) {
             totalWHT += wht;
             totalStampDuty += stampDuty;
 
-            if (!accountTypeStats[accountType]) {
-                accountTypeStats[accountType] = {
+            if (!accountTypeStats[accountKey]) {
+                accountTypeStats[accountKey] = {
                     count: 0,
                     totalVAT: 0,
                     totalWHT: 0,
@@ -150,7 +160,7 @@ function getTaxSummary(token, year) {
                 };
             }
 
-            const at = accountTypeStats[accountType];
+            const at = accountTypeStats[accountKey];
             at.count++;
             at.totalVAT += vat;
             at.totalWHT += wht;
@@ -168,11 +178,17 @@ function getTaxSummary(token, year) {
         const totalPaid = paymentBreakdown.totalPaid;
         const totalOutstanding = Math.max(totalTaxLiability - totalPaid, 0);
         const accountTypeBreakdown = Object.keys(accountTypeStats)
-            .map(typeName => {
-                const x = accountTypeStats[typeName];
+            .map(accountKey => {
+                const x = accountTypeStats[accountKey];
+                const parts = accountKey.split('::');
+                const baseType = String(parts[0] || '').trim() || 'Unspecified';
+                const subType = String(parts[1] || '').trim();
+                const formattedType = subType ? `${baseType} (${subType})` : baseType;
                 const totalTax = x.totalVAT + x.totalWHT + x.totalStampDuty;
                 return {
-                    accountType: typeName,
+                    accountType: formattedType,
+                    baseAccountType: baseType,
+                    subAccountType: subType,
                     count: x.count,
                     totalVAT: x.totalVAT,
                     totalWHT: x.totalWHT,

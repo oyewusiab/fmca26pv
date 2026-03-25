@@ -161,6 +161,10 @@ const AuditTrailPage = {
   },
 
   showLoading(show) {
+    if (window.Components && typeof Components.setLoading === 'function') {
+      Components.setLoading(show, 'Loading audit trail...');
+      return;
+    }
     document.getElementById('loadingOverlay')?.classList.toggle('hidden', !show);
   }
 };

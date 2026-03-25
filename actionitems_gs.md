@@ -5,12 +5,15 @@
 const ACTION_ITEM_RULES = {
   PAID_NO_CN: "PAID_NO_CN",
   UNPAID_NO_CN_30D: "UNPAID_NO_CN_30D",
-  RELEASED_UNPAID_15D: "RELEASED_UNPAID_15D"
+  RELEASED_UNPAID_15D: "RELEASED_UNPAID_15D",
+  MISSING_DATA: "MISSING_DATA",
+  DUPLICATE_VOUCHER: "DUPLICATE_VOUCHER"
 };
 
 const ACTION_ITEM_UNITS = {
   PAYABLE: "PAYABLE",
-  CPO: "CPO"
+  CPO: "CPO",
+  ADMIN: "ADMIN"
 };
 
 const ACTION_ITEM_2026_COLUMNS = {
@@ -23,6 +26,7 @@ const ACTION_ITEM_2026_COLUMNS = {
   CONTROL_NUMBER: "CONTROL NUMBER",
   DATE: "DATE",
   ACCOUNT_TYPE: "ACCOUNT TYPE",
+  SUB_ACCOUNT_TYPE: "SUB ACCOUNT TYPE",
   CREATED_AT: "CREATED AT",
   RELEASED_AT: "RELEASED AT"
 };
@@ -51,7 +55,8 @@ function getDefaultActionItemSettings_() {
   return {
     unit: {
       PAYABLE: {},
-      CPO: {}
+      CPO: {},
+      ADMIN: {}
     }
   };
 }
@@ -162,6 +167,7 @@ function map2026ActionItemColumns_(canonicalMap) {
     ]),
     grossAmount: resolveCanonicalCol_(canonicalMap, [ACTION_ITEM_2026_COLUMNS.GROSS_AMOUNT, "GROSS AMOUNT"]),
     category: resolveCanonicalCol_(canonicalMap, [ACTION_ITEM_2026_COLUMNS.CATEGORIES, "CATEGORIES"]),
+    subAccountType: resolveCanonicalCol_(canonicalMap, [ACTION_ITEM_2026_COLUMNS.SUB_ACCOUNT_TYPE, "SUB ACCOUNT TYPE", "SUB-ACCOUNT TYPE"]),
     controlNumber: resolveCanonicalCol_(canonicalMap, [
       ACTION_ITEM_2026_COLUMNS.CONTROL_NUMBER,
       "CONTROL NO.",
@@ -174,6 +180,28 @@ function map2026ActionItemColumns_(canonicalMap) {
     releasedAt: resolveCanonicalCol_(canonicalMap, [ACTION_ITEM_2026_COLUMNS.RELEASED_AT, "RELEASED AT"])
   };
 
+  return out;
+}
+
+function getAccountTypeSubRequirementMap_() {
+  const out = {};
+  try {
+    const sheet = getSheet(CONFIG.SHEETS.SYSTEM_CONFIG);
+    if (!sheet) return out;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 7) return out;
+
+    const values = sheet.getRange(7, 2, lastRow - 6, 2).getValues();
+    values.forEach((row) => {
+      const accountType = String(row[0] || "").trim();
+      if (!accountType) return;
+      const rawSubs = String(row[1] || "").trim();
+      const subs = rawSubs
+        ? rawSubs.split(",").map((x) => String(x || "").trim()).filter((x) => x)
+        : [];
+      out[accountType] = subs;
+    });
+  } catch (_) {}
   return out;
 }
 
@@ -215,6 +243,7 @@ function getActionItemCurrentVoucherMeta_(year, rowIndex, locale) {
       cols.voucherNo || 1,
       cols.grossAmount || 1,
       cols.category || 1,
+      cols.subAccountType || 1,
       cols.controlNumber || 1,
       cols.date || 1,
       cols.accountType || 1,
@@ -233,6 +262,8 @@ function getActionItemCurrentVoucherMeta_(year, rowIndex, locale) {
 
   const amountRaw = row[(cols.grossAmount || 1) - 1] || 0;
   const amount = typeof parseAmount === "function" ? parseAmount(amountRaw) : Number(amountRaw || 0);
+  const baseAccountType = String(row[(cols.accountType || 1) - 1] || "").trim();
+  const subAccountType = String(row[(cols.subAccountType || 1) - 1] || "").trim();
 
   return {
     status,
@@ -242,7 +273,8 @@ function getActionItemCurrentVoucherMeta_(year, rowIndex, locale) {
     amount,
     controlNumber,
     category: String(row[(cols.category || 1) - 1] || "").trim(),
-    accountType: String(row[(cols.accountType || 1) - 1] || "").trim(),
+    accountType: subAccountType ? `${baseAccountType} (${subAccountType})` : baseAccountType,
+    subAccountType,
     createdAt,
     releasedAt
   };
@@ -310,6 +342,13 @@ function buildActionItemText_(ruleKey, unit, meta) {
         severity: "warning"
       };
     }
+    if (unit === ACTION_ITEM_UNITS.ADMIN) {
+      return {
+        title: "Paid Voucher Missing Control Number",
+        message: "Voucher is marked PAID but has no control number. Review release routing and correct the record.",
+        severity: "warning"
+      };
+    }
     return {
       title: "Paid Voucher Awaiting Release from Payable",
       message: "Voucher is marked PAID but has not reached CPO. Please request release from Payable Unit.",
@@ -333,6 +372,22 @@ function buildActionItemText_(ruleKey, unit, meta) {
     };
   }
 
+  if (ruleKey === ACTION_ITEM_RULES.MISSING_DATA) {
+    return {
+      title: "Voucher Missing Required Fields",
+      message: "Voucher record is missing required classification fields (Category, Account Type, or required Sub Account Type).",
+      severity: "warning"
+    };
+  }
+
+  if (ruleKey === ACTION_ITEM_RULES.DUPLICATE_VOUCHER) {
+    return {
+      title: "Duplicate Voucher Number Detected",
+      message: "Voucher number appears more than once in 2026 VOUCHERS. Verify and resolve duplicates.",
+      severity: "danger"
+    };
+  }
+
   return { title: "Action Required", message: "", severity: "info" };
 }
 
@@ -352,6 +407,8 @@ function syncActionItems_() {
 
   const currentItems = [];
   const activeIds = new Set();
+  const accountTypeRequirements = getAccountTypeSubRequirementMap_();
+  const duplicateTracker = {};
 
   sources.forEach(src => {
     if (!src.sheetName) return;
@@ -386,6 +443,7 @@ function syncActionItems_() {
         cols.voucherNo || 1,
         cols.grossAmount || 1,
         cols.category || 1,
+        cols.subAccountType || 1,
         cols.controlNumber || 1,
         cols.date || 1,
         cols.accountType || 1,
@@ -403,9 +461,13 @@ function syncActionItems_() {
       const hasControlNumber = cn !== "";
 
       const voucherNo = row[(cols.voucherNo || 1) - 1];
+      const voucherNoClean = String(voucherNo || "").trim();
+      const voucherNoKey = voucherNoClean.toUpperCase();
       const payee = row[(cols.payee || 1) - 1];
       const category = String(row[(cols.category || 1) - 1] || "").trim();
       const accountType = String(row[(cols.accountType || 1) - 1] || "").trim();
+      const subAccountType = String(row[(cols.subAccountType || 1) - 1] || "").trim();
+      const accountTypeLabel = subAccountType ? `${accountType} (${subAccountType})` : accountType;
       const amountRaw = row[(cols.grossAmount || 1) - 1] || 0;
       const amount = typeof parseAmount === "function" ? parseAmount(amountRaw) : Number(amountRaw || 0);
 
@@ -416,6 +478,51 @@ function syncActionItems_() {
 
       if (!String(voucherNo || "").trim() && !String(payee || "").trim() && amount <= 0) {
         return;
+      }
+
+      if (voucherNoKey) {
+        if (!duplicateTracker[voucherNoKey]) duplicateTracker[voucherNoKey] = [];
+        duplicateTracker[voucherNoKey].push({
+          rowIndex,
+          voucherNo,
+          payee,
+          amount,
+          cn,
+          category,
+          accountType: accountTypeLabel,
+          pmtMonth,
+          voucherStatus: status
+        });
+      }
+
+      const requiredSubs = accountTypeRequirements[accountType] || [];
+      const subRequired = requiredSubs.length > 0;
+      const missingFields = [];
+      if (!category) missingFields.push("CATEGORIES");
+      if (!accountType) missingFields.push("ACCOUNT_TYPE");
+      if (subRequired && !subAccountType) missingFields.push("SUB_ACCOUNT_TYPE");
+      if (missingFields.length > 0) {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.MISSING_DATA)) return;
+          const id = `${ACTION_ITEM_RULES.MISSING_DATA}:${unit}:${src.year}:${rowIndex}`;
+          currentItems.push({
+            id,
+            year: src.year,
+            unit,
+            rule: ACTION_ITEM_RULES.MISSING_DATA,
+            rowIndex,
+            voucherNo,
+            payee,
+            amount,
+            cn,
+            category,
+            accountType: accountTypeLabel,
+            pmtMonth,
+            voucherStatus: status,
+            missingFields: missingFields.join(", ")
+          });
+          activeIds.add(id);
+        });
       }
 
       // RULE 1: Paid with no control number
@@ -434,7 +541,7 @@ function syncActionItems_() {
             amount,
             cn,
             category,
-            accountType,
+            accountType: accountTypeLabel,
             pmtMonth,
             voucherStatus: status
           });
@@ -462,7 +569,7 @@ function syncActionItems_() {
             cn,
             ageDays,
             category,
-            accountType,
+            accountType: accountTypeLabel,
             pmtMonth,
             voucherStatus: status
           });
@@ -490,13 +597,41 @@ function syncActionItems_() {
             cn,
             ageDays,
             category,
-            accountType,
+            accountType: accountTypeLabel,
             pmtMonth,
             voucherStatus: status
           });
           activeIds.add(id);
         }
       }
+    });
+  });
+
+  Object.keys(duplicateTracker).forEach(voucherNoKey => {
+    const entries = duplicateTracker[voucherNoKey];
+    if (!entries || entries.length <= 1) return;
+
+    entries.forEach(entry => {
+      [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+        if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.DUPLICATE_VOUCHER)) return;
+        const id = `${ACTION_ITEM_RULES.DUPLICATE_VOUCHER}:${unit}:2026:${entry.rowIndex}`;
+        currentItems.push({
+          id,
+          year: "2026",
+          unit,
+          rule: ACTION_ITEM_RULES.DUPLICATE_VOUCHER,
+          rowIndex: entry.rowIndex,
+          voucherNo: entry.voucherNo,
+          payee: entry.payee,
+          amount: entry.amount,
+          cn: entry.cn,
+          category: entry.category,
+          accountType: entry.accountType,
+          pmtMonth: entry.pmtMonth,
+          voucherStatus: entry.voucherStatus
+        });
+        activeIds.add(id);
+      });
     });
   });
 
@@ -686,7 +821,7 @@ function saveActionItemSettings(token, settingsObj) {
     const sheet = getSheet(CONFIG.SHEETS.ACTION_ITEMS_SETTINGS);
     const rows = [];
     const unitObj = settingsObj?.unit || {};
-    const units = [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.CPO];
+    const units = [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_UNITS.ADMIN];
 
     units.forEach(u => {
       const rules = unitObj[u] || {};
