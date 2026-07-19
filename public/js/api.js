@@ -525,6 +525,10 @@
       return await this.get("getActionItemCount", params);
     },
 
+    async syncActionItemsOnly() {
+      return await this.post("syncActionItemsOnly", {});
+    },
+
     async getActionItemSettings() {
       return await this.get("getActionItemSettings");
     },

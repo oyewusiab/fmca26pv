@@ -2771,7 +2771,10 @@ const Vouchers = {
 
     document.querySelectorAll('.modal-overlay').forEach(m => {
       m.addEventListener('click', (e) => {
-        if (e.target === m) m.classList.remove('active');
+        // Do not auto-close the create/edit voucher form when clicking outside
+        if (e.target === m && m.id !== 'voucherFormModal') {
+          m.classList.remove('active');
+        }
       });
     });
 

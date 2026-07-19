@@ -739,10 +739,16 @@ function getActionItems(token, paramsOrUnit, statusArg) {
     const session = getSession(token);
     if (!session) return { success: false, error: "Session expired" };
 
+    const fromObject = paramsOrUnit && typeof paramsOrUnit === "object" && !Array.isArray(paramsOrUnit);
+    // skipSync=true means: read the log as-is, don't run the full spreadsheet scan.
+    // Used for Phase-1 instant rendering on the notifications page.
+    const skipSync = fromObject ? !!paramsOrUnit.skipSync : false;
     const filters = parseActionItemFilters_(paramsOrUnit, statusArg);
 
-    // Run sync (guarded by LockService internally)
-    syncActionItems_();
+    // Run sync only when the caller needs fresh data (guarded by LockService internally)
+    if (!skipSync) {
+      syncActionItems_();
+    }
 
     const sheet = getSheet(CONFIG.SHEETS.ACTION_ITEMS_LOG);
     const data = sheet.getDataRange().getValues();
@@ -862,6 +868,21 @@ function getActionItemCount(token, paramsOrUnit, statusArg) {
     return { success: true, count };
   } catch (e) {
     return { success: false, error: "getActionItemCount failed: " + e.message };
+  }
+}
+
+/**
+ * Runs syncActionItems_() without returning item data.
+ * Called from the frontend as a dedicated background sync step.
+ */
+function syncActionItemsOnly(token) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: "Session expired" };
+    syncActionItems_();
+    return { success: true, synced: true };
+  } catch (e) {
+    return { success: false, error: "Sync failed: " + e.message };
   }
 }
 

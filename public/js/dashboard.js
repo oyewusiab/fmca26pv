@@ -159,7 +159,7 @@ const Dashboard = {
         if (cached) {
             this.stats = JSON.parse(cached);
             this.applyMasking();
-            this.loadApprovalsQueue();
+            this.loadPendingActions();
         }
 
         this.showLoading(true);
@@ -177,7 +177,7 @@ const Dashboard = {
             sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(result));
             this.applyMasking();
 
-            await this.loadApprovalsQueue();
+            await this.loadPendingActions();
 
         } catch (error) {
             console.error('Dashboard load error:', error);
@@ -450,210 +450,123 @@ const Dashboard = {
         `;
     },
 
-    async loadCriticalComplianceActions() {
-        const card = document.getElementById('criticalComplianceActionsCard');
-        const list = document.getElementById('criticalComplianceActionsList');
-        if (!card || !list) return;
-
-        try {
-            // Fetch PENDING action items
-            const res = await API.getActionItems({ status: 'PENDING' });
-            if (res.success && res.items && res.items.length > 0) {
-                // Filter and sort by severity (critical first)
-                const sorted = res.items.sort((a, b) => {
-                    const sevA = String(a.severity || '').toLowerCase();
-                    const sevB = String(b.severity || '').toLowerCase();
-                    if (sevA === 'danger' && sevB !== 'danger') return -1;
-                    if (sevA !== 'danger' && sevB === 'danger') return 1;
-                    if (sevA === 'warning' && sevB !== 'warning' && sevB !== 'danger') return -1;
-                    if (sevA !== 'warning' && sevB === 'warning' && sevA !== 'danger') return 1;
-                    return 0;
-                });
-
-                // Pick top 3
-                const top3 = sorted.slice(0, 3);
-                
-                let html = '';
-                top3.forEach(item => {
-                    const isDanger = String(item.severity || '').toLowerCase() === 'danger';
-                    const iconClass = isDanger ? 'fa-exclamation-circle text-danger' : 'fa-exclamation-triangle text-warning';
-                    const bgStyle = isDanger ? 'background: #fff8f8; border-color: #fbd5d5;' : 'background: #fffdf5; border-color: #fef3c7;';
-                    
-                    html += `
-                        <div class="mini-compliance-item" style="${bgStyle}">
-                            <div class="mini-compliance-text">
-                                <i class="fas ${iconClass}" style="margin-right: 8px;"></i>
-                                <strong>[${item.voucherNumber || 'General'}]</strong> ${item.message || item.title}
-                            </div>
-                            <a href="vouchers.html?lookup=true&voucher=${encodeURIComponent(item.voucherNumber)}" class="btn btn-sm btn-secondary" style="margin-left: 10px;">
-                                <i class="fas fa-arrow-right"></i> Fix
-                            </a>
-                        </div>
-                    `;
-                });
-                
-                list.innerHTML = html;
-                card.style.display = 'block';
-            } else {
-                card.style.display = 'none';
-            }
-        } catch (e) {
-            console.error('Error loading critical compliance actions:', e);
-            card.style.display = 'none';
-        }
-    },
-
-    async loadApprovalsQueue() {
-        const card = document.getElementById('myApprovalsQueueCard');
-        const container = document.getElementById('myApprovalsQueue');
+    /**
+     * Pending Actions — unified widget pulling from 3 lightweight sources in parallel:
+     *   1. Action Items count (unit-filtered, no sync triggered)
+     *   2. Unread notifications count
+     *   3. Pending deletions list (approver roles only)
+     *
+     * The card auto-hides when all counts reach zero.
+     */
+    async loadPendingActions() {
+        const card = document.getElementById('pendingActionsCard');
+        const container = document.getElementById('pendingActionsList');
         const middleRow = document.getElementById('middleRowGrid');
         if (!card || !container) return;
 
-        // Check if user is an authorized approver
         const user = Auth.getUser();
         const perms = this.permissions || {};
-        
-        // Approver roles: Payable Head, CPO, Admin
-        const approverRoles = [CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO, CONFIG.ROLES.ADMIN];
-        const isApprover = user && (approverRoles.includes(user.role) || perms.canApproveDelete);
+        const role = String(user?.role || '').toUpperCase();
 
-        if (!isApprover) {
-            // Hide approvals queue and make Aged Payables span 100% full-width
+        const isApprover = user &&
+            ([CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO, CONFIG.ROLES.ADMIN].includes(user.role) || perms.canApproveDelete);
+        const isPayable = [CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.PAYABLE_STAFF].includes(user?.role);
+        const isCPO = user?.role === CONFIG.ROLES.CPO;
+        const isManager = ['ADMIN', 'DDFA', 'DFA'].includes(role);
+
+        // Fetch all 3 sources concurrently — none triggers a spreadsheet scan
+        const [actionRes, notifRes, deletionRes] = await Promise.allSettled([
+            API.getActionItemCount({ status: 'PENDING' }),
+            API.getNotifications(true),
+            isApprover ? API.getPendingDeletions() : Promise.resolve({ success: true, vouchers: [] })
+        ]);
+
+        const actionCount = actionRes.status === 'fulfilled' && actionRes.value?.success
+            ? (actionRes.value.count || 0) : 0;
+        const unreadCount = notifRes.status === 'fulfilled' && notifRes.value?.success
+            ? (notifRes.value.unreadCount || 0) : 0;
+        const deletionCount = deletionRes.status === 'fulfilled' && deletionRes.value?.success
+            ? (deletionRes.value.vouchers?.length || 0) : 0;
+
+        const totalCount = actionCount + unreadCount + deletionCount;
+
+        // Update badge
+        const badge = document.getElementById('pendingActionsTotalBadge');
+        if (badge) badge.textContent = totalCount > 99 ? '99+' : String(totalCount);
+
+        if (totalCount === 0) {
             card.style.display = 'none';
             if (middleRow) middleRow.style.gridTemplateColumns = '1fr';
             return;
         }
 
-        // Show approvals queue card and restore 2-column grid
+        // Show card and restore 2-column grid
         card.style.display = 'block';
         if (middleRow) middleRow.style.gridTemplateColumns = '1fr 1fr';
 
-        try {
-            const res = await API.getPendingDeletions();
-            if (res.success && res.vouchers && res.vouchers.length > 0) {
-                // Show top 5 recent pending deletions
-                const top5 = res.vouchers.slice(0, 5);
-                
-                let html = '';
-                top5.forEach(v => {
-                    const rowIdx = v.rowIndex;
-                    html += `
-                        <div class="approvals-queue-item">
-                            <div class="approvals-queue-details">
-                                <strong>Voucher:</strong> ${v.accountOrMail || v.voucherNo || '-'}<br>
-                                <span class="text-muted" style="font-size: 13px;">
-                                    <strong>Payee:</strong> ${Utils.truncate(v.payee, 22)} | 
-                                    <strong>Category:</strong> ${v.categories || '-'}
-                                </span>
-                                <div class="approvals-queue-amount">${Utils.formatCurrency(v.grossAmount || 0)}</div>
-                            </div>
-                            <div class="approvals-queue-actions">
-                                <button class="btn btn-sm btn-success" onclick="Dashboard.approveVoucherDelete(${rowIdx}, '${v.accountOrMail || v.voucherNo || ''}')" title="Approve Deletion" style="background-color: #2ecc71; border-color: #2ecc71; color: white;">
-                                    <i class="fas fa-check"></i>
-                                </button>
-                                <button class="btn btn-sm btn-danger" onclick="Dashboard.rejectVoucherDelete(${rowIdx}, '${v.accountOrMail || v.voucherNo || ''}')" title="Reject Deletion" style="background-color: #e74c3c; border-color: #e74c3c; color: white;">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                container.innerHTML = html;
+        let html = '<div class="pending-actions-list">';
+
+        // ── Action Items row ──
+        if (actionCount > 0) {
+            let label, desc, link;
+            if (isPayable) {
+                label = 'Payable unit action items';
+                desc = `${actionCount} voucher${actionCount !== 1 ? 's' : ''} need attention from Payable unit. Consider reviewing and releasing or correcting records.`;
+            } else if (isCPO) {
+                label = 'CPO unit action items';
+                desc = `${actionCount} voucher${actionCount !== 1 ? 's' : ''} need attention from CPO unit. Consider requesting or updating payment status.`;
+            } else if (isManager) {
+                label = 'Action items requiring attention';
+                desc = `${actionCount} pending item${actionCount !== 1 ? 's' : ''} across units require review.`;
             } else {
-                container.innerHTML = `
-                    <div class="text-center py-4 text-muted">
-                        <i class="fas fa-check-double fa-2x mb-2 text-success"></i>
-                        <p class="mb-0">No deletion requests awaiting your approval.</p>
-                    </div>
-                `;
+                label = 'Pending action items';
+                desc = `${actionCount} item${actionCount !== 1 ? 's' : ''} need your attention.`;
             }
-        } catch (e) {
-            console.error('Error loading approvals queue:', e);
-            container.innerHTML = '<p class="text-danger text-center">Failed to load approvals queue.</p>';
+            link = 'notifications.html?tab=actionitems';
+            html += `
+              <div class="pending-action-row warning">
+                <div class="pending-action-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                <div class="pending-action-content">
+                  <div class="pending-action-title">${label}</div>
+                  <div class="pending-action-desc">${desc}</div>
+                </div>
+                <div class="pending-action-count warning">${actionCount > 99 ? '99+' : actionCount}</div>
+                <a href="${link}" class="pending-action-link">Take Action <i class="fas fa-arrow-right"></i></a>
+              </div>`;
         }
-    },
 
-    async approveVoucherDelete(rowIndex, voucherNo) {
-        const confirmed = await Utils.confirm(`Approve permanent deletion of voucher ${voucherNo}? This cannot be undone.`, 'Approve Deletion');
-        if (!confirmed) return;
-
-        this.showLoading(true);
-        try {
-            const res = await API.approveDelete(rowIndex);
-            if (res.success) {
-                Utils.showToast('Voucher successfully deleted', 'success');
-                // Reload dashboard data
-                await this.loadDashboardData();
-            } else {
-                Utils.showToast(res.error || 'Failed to approve deletion', 'error');
-            }
-        } catch (e) {
-            console.error('approveVoucherDelete error:', e);
-            Utils.showToast('Error approving deletion', 'error');
+        // ── Unread Notifications row ──
+        if (unreadCount > 0) {
+            html += `
+              <div class="pending-action-row info">
+                <div class="pending-action-icon"><i class="fas fa-bell"></i></div>
+                <div class="pending-action-content">
+                  <div class="pending-action-title">Unread notifications</div>
+                  <div class="pending-action-desc">${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''} await your review.</div>
+                </div>
+                <div class="pending-action-count info">${unreadCount > 99 ? '99+' : unreadCount}</div>
+                <a href="notifications.html" class="pending-action-link">View <i class="fas fa-arrow-right"></i></a>
+              </div>`;
         }
-        this.showLoading(false);
-    },
 
-    async rejectVoucherDelete(rowIndex, voucherNo) {
-        const reason = prompt('Reason for rejecting deletion request:', 'Rejected from Dashboard');
-        if (reason === null) return; // Cancelled prompt
-
-        this.showLoading(true);
-        try {
-            const res = await API.rejectDelete(rowIndex, reason || 'Rejected from Dashboard');
-            if (res.success) {
-                Utils.showToast('Deletion request rejected. Voucher restored.', 'success');
-                // Reload dashboard data
-                await this.loadDashboardData();
-            } else {
-                Utils.showToast(res.error || 'Failed to reject deletion request', 'error');
-            }
-        } catch (e) {
-            console.error('rejectVoucherDelete error:', e);
-            Utils.showToast('Error rejecting deletion request', 'error');
+        // ── Pending Deletions row (approvers only) ──
+        if (deletionCount > 0 && isApprover) {
+            html += `
+              <div class="pending-action-row danger">
+                <div class="pending-action-icon"><i class="fas fa-trash-alt"></i></div>
+                <div class="pending-action-content">
+                  <div class="pending-action-title">Voucher deletion requests</div>
+                  <div class="pending-action-desc">${deletionCount} voucher${deletionCount !== 1 ? 's' : ''} awaiting deletion approval.</div>
+                </div>
+                <div class="pending-action-count danger">${deletionCount > 99 ? '99+' : deletionCount}</div>
+                <a href="vouchers.html?filter=pending_delete" class="pending-action-link">Review <i class="fas fa-arrow-right"></i></a>
+              </div>`;
         }
-        this.showLoading(false);
+
+        html += '</div>';
+        container.innerHTML = html;
     }
 };
-
-async function loadDashboardActionItems() {
-    try {
-        const card = document.getElementById("actionItemsMiniCard");
-        const text = document.getElementById("actionItemsMiniText");
-        const countBubble = document.getElementById("widgetCount");
-        const link = document.getElementById("actionItemsMiniLink");
-
-        if (!card || !text) return;
-
-        const res = await API.getActionItemCount();
-
-        if (!res.success) {
-            card.style.display = "none";
-            return;
-        }
-
-        const count = res.count || 0;
-
-        if (count > 0) {
-            text.textContent = `${count} pending action item${count === 1 ? '' : 's'} — Click to review`;
-            if (countBubble) {
-                countBubble.textContent = count > 99 ? '99+' : String(count);
-            }
-            if (link) {
-                link.href = 'notifications.html?tab=actionitems';
-            }
-            card.style.display = "flex";
-        } else {
-            card.style.display = "none";
-        }
-
-    } catch (e) {
-        console.error("Failed to load action item count", e);
-    }
-}
-
-document.addEventListener("DOMContentLoaded", loadDashboardActionItems);
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -671,3 +584,4 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+        const card = document.getElementById('criticalComplianceActionsCard');
