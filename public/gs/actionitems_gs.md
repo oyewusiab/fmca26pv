@@ -395,327 +395,330 @@ function buildActionItemText_(ruleKey, unit, meta) {
  * MAIN SYNC ENGINE (AUTO RESOLVE + UPSERT)
  ***************************************************************/
 function syncActionItems_() {
+  // Use LockService so concurrent requests queue instead of racing.
+  const lock = LockService.getScriptLock();
   try {
-    const cache = CacheService.getScriptCache();
-    const lockKey = "action_items_sync_cooldown";
-    if (cache && cache.get(lockKey)) {
-      console.log("Skipping syncActionItems_ due to active cooldown lock (run recently).");
-      return;
-    }
-    if (cache) cache.put(lockKey, "active", 30); // 30 seconds cooldown
-  } catch (cacheErr) {
-    console.log("CacheService warning: " + cacheErr.message);
+    // Wait up to 25 seconds for the lock.
+    lock.waitLock(25000);
+  } catch (lockErr) {
+    // Another execution is still holding the lock — skip this sync safely.
+    console.log("syncActionItems_ skipped: lock not acquired – " + lockErr.message);
+    return;
   }
 
-  const now = new Date();
-  const settings = loadActionItemSettings_();
-  const locale = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSpreadsheetLocale();
-  const sheets = ensureActionItemSheets_();
-  const logSheet = sheets.logSheet;
+  try {
+    const now = new Date();
+    const settings = loadActionItemSettings_();
+    const locale = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSpreadsheetLocale();
+    const sheets = ensureActionItemSheets_();
+    const logSheet = sheets.logSheet;
 
-  const sources = [
-    { year: "2026", sheetName: CONFIG.SHEETS.VOUCHERS_2026 }
-  ];
+    const sources = [
+      { year: "2026", sheetName: CONFIG.SHEETS.VOUCHERS_2026 }
+    ];
 
-  const currentItems = [];
-  const activeIds = new Set();
-  const accountTypeRequirements = getAccountTypeSubRequirementMap_();
-  const duplicateTracker = {};
+    const currentItems = [];
+    const activeIds = new Set();
+    const accountTypeRequirements = getAccountTypeSubRequirementMap_();
+    const duplicateTracker = {};
 
-  sources.forEach(src => {
-    if (!src.sheetName) return;
+    sources.forEach(src => {
+      if (!src.sheetName) return;
 
-    let voucherSheet = null;
-    try {
-      voucherSheet = getSheet(src.sheetName);
-    } catch (_) {
-      return;
-    }
-
-    const lastRow = voucherSheet.getLastRow();
-    if (lastRow < 2) return;
-
-    const canonicalHeader = getCanonicalHeaderMap_(voucherSheet);
-    const cols = map2026ActionItemColumns_(canonicalHeader);
-
-    if (!cols.status || !cols.voucherNo || !cols.payee || !cols.grossAmount || !cols.controlNumber) {
-      throw new Error(
-        '2026 VOUCHERS header does not match required Action Item columns. ' +
-        'Expected at least: STATUS, PAYEE, ACCOUNT OR MAIL, GROSS AMOUNT, CONTROL NUMBER.'
-      );
-    }
-
-    const readWidth = Math.min(
-      voucherSheet.getMaxColumns(),
-      Math.max(
-        voucherSheet.getLastColumn(),
-        cols.status || 1,
-        cols.pmtMonth || 1,
-        cols.payee || 1,
-        cols.voucherNo || 1,
-        cols.grossAmount || 1,
-        cols.category || 1,
-        cols.subAccountType || 1,
-        cols.controlNumber || 1,
-        cols.date || 1,
-        cols.accountType || 1,
-        cols.createdAt || 1,
-        cols.releasedAt || 1
-      )
-    );
-    const data = voucherSheet.getRange(2, 1, lastRow - 1, readWidth).getValues();
-
-    data.forEach((row, i) => {
-      const rowIndex = i + 2;
-      const status = normalizeActionItemStatus_(row[(cols.status || 1) - 1]);
-      const pmtMonth = String(row[(cols.pmtMonth || 1) - 1] || "").trim();
-      const cn = String(row[(cols.controlNumber || 1) - 1] || "").trim();
-      const hasControlNumber = cn !== "";
-
-      const voucherNo = row[(cols.voucherNo || 1) - 1];
-      const voucherNoClean = String(voucherNo || "").trim();
-      const voucherNoKey = voucherNoClean.toUpperCase();
-      const payee = row[(cols.payee || 1) - 1];
-      const category = String(row[(cols.category || 1) - 1] || "").trim();
-      const accountType = String(row[(cols.accountType || 1) - 1] || "").trim();
-      const subAccountType = String(row[(cols.subAccountType || 1) - 1] || "").trim();
-      const accountTypeLabel = subAccountType ? `${accountType} (${subAccountType})` : accountType;
-      const amountRaw = row[(cols.grossAmount || 1) - 1] || 0;
-      const amount = typeof parseAmount === "function" ? parseAmount(amountRaw) : Number(amountRaw || 0);
-
-      const createdAt = parseActionItemDate_(row[(cols.createdAt || 1) - 1], locale)
-        || parseActionItemDate_(row[(cols.date || 1) - 1], locale);
-      let releasedAt = parseActionItemDate_(row[(cols.releasedAt || 1) - 1], locale);
-      if (!releasedAt && hasControlNumber) releasedAt = createdAt;
-
-      if (!String(voucherNo || "").trim() && !String(payee || "").trim() && amount <= 0) {
+      let voucherSheet = null;
+      try {
+        voucherSheet = getSheet(src.sheetName);
+      } catch (_) {
         return;
       }
 
-      if (voucherNoKey) {
-        if (!duplicateTracker[voucherNoKey]) duplicateTracker[voucherNoKey] = [];
-        duplicateTracker[voucherNoKey].push({
-          rowIndex,
-          voucherNo,
-          payee,
-          amount,
-          cn,
-          category,
-          accountType: accountTypeLabel,
-          pmtMonth,
-          voucherStatus: status
-        });
+      const lastRow = voucherSheet.getLastRow();
+      if (lastRow < 2) return;
+
+      const canonicalHeader = getCanonicalHeaderMap_(voucherSheet);
+      const cols = map2026ActionItemColumns_(canonicalHeader);
+
+      if (!cols.status || !cols.voucherNo || !cols.payee || !cols.grossAmount || !cols.controlNumber) {
+        throw new Error(
+          '2026 VOUCHERS header does not match required Action Item columns. ' +
+          'Expected at least: STATUS, PAYEE, ACCOUNT OR MAIL, GROSS AMOUNT, CONTROL NUMBER.'
+        );
       }
 
-      const requiredSubs = accountTypeRequirements[accountType] || [];
-      const subRequired = requiredSubs.length > 0;
-      const missingFields = [];
-      if (!category) missingFields.push("CATEGORIES");
-      if (!accountType) missingFields.push("ACCOUNT_TYPE");
-      if (subRequired && !subAccountType) missingFields.push("SUB_ACCOUNT_TYPE");
-      if (missingFields.length > 0) {
-        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
-          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.MISSING_DATA)) return;
-          const id = `${ACTION_ITEM_RULES.MISSING_DATA}:${unit}:${src.year}:${rowIndex}`;
-          currentItems.push({
-            id,
-            year: src.year,
-            unit,
-            rule: ACTION_ITEM_RULES.MISSING_DATA,
-            rowIndex,
-            voucherNo,
-            payee,
-            amount,
-            cn,
-            category,
-            accountType: accountTypeLabel,
-            pmtMonth,
-            voucherStatus: status,
-            missingFields: missingFields.join(", ")
-          });
-          activeIds.add(id);
-        });
-      }
+      const readWidth = Math.min(
+        voucherSheet.getMaxColumns(),
+        Math.max(
+          voucherSheet.getLastColumn(),
+          cols.status || 1,
+          cols.pmtMonth || 1,
+          cols.payee || 1,
+          cols.voucherNo || 1,
+          cols.grossAmount || 1,
+          cols.category || 1,
+          cols.subAccountType || 1,
+          cols.controlNumber || 1,
+          cols.date || 1,
+          cols.accountType || 1,
+          cols.createdAt || 1,
+          cols.releasedAt || 1
+        )
+      );
+      const data = voucherSheet.getRange(2, 1, lastRow - 1, readWidth).getValues();
 
-      // RULE 1: Paid with no control number
-      if (status === "PAID" && !hasControlNumber) {
-        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.CPO].forEach(unit => {
-          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.PAID_NO_CN)) return;
-          const id = `${ACTION_ITEM_RULES.PAID_NO_CN}:${unit}:${src.year}:${rowIndex}`;
-          currentItems.push({
-            id,
-            year: src.year,
-            unit,
-            rule: ACTION_ITEM_RULES.PAID_NO_CN,
-            rowIndex,
-            voucherNo,
-            payee,
-            amount,
-            cn,
-            category,
-            accountType: accountTypeLabel,
-            pmtMonth,
-            voucherStatus: status
-          });
-          activeIds.add(id);
-        });
-      }
+      data.forEach((row, i) => {
+        const rowIndex = i + 2;
+        const status = normalizeActionItemStatus_(row[(cols.status || 1) - 1]);
+        const pmtMonth = String(row[(cols.pmtMonth || 1) - 1] || "").trim();
+        const cn = String(row[(cols.controlNumber || 1) - 1] || "").trim();
+        const hasControlNumber = cn !== "";
 
-      // RULE 2: Unpaid, no control number, older than 30 days
-      if (status === "UNPAID" && !hasControlNumber && createdAt) {
-        const ageDays = Math.floor((now - createdAt) / 86400000);
-        if (
-          ageDays > 30 &&
-          isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.UNPAID_NO_CN_30D)
-        ) {
-          const id = `${ACTION_ITEM_RULES.UNPAID_NO_CN_30D}:CPO:${src.year}:${rowIndex}`;
-          currentItems.push({
-            id,
-            year: src.year,
-            unit: "CPO",
-            rule: ACTION_ITEM_RULES.UNPAID_NO_CN_30D,
-            rowIndex,
-            voucherNo,
-            payee,
-            amount,
-            cn,
-            ageDays,
-            category,
-            accountType: accountTypeLabel,
-            pmtMonth,
-            voucherStatus: status
-          });
-          activeIds.add(id);
+        const voucherNo = row[(cols.voucherNo || 1) - 1];
+        const voucherNoClean = String(voucherNo || "").trim();
+        const voucherNoKey = voucherNoClean.toUpperCase();
+        const payee = row[(cols.payee || 1) - 1];
+        const category = String(row[(cols.category || 1) - 1] || "").trim();
+        const accountType = String(row[(cols.accountType || 1) - 1] || "").trim();
+        const subAccountType = String(row[(cols.subAccountType || 1) - 1] || "").trim();
+        const accountTypeLabel = subAccountType ? `${accountType} (${subAccountType})` : accountType;
+        const amountRaw = row[(cols.grossAmount || 1) - 1] || 0;
+        const amount = typeof parseAmount === "function" ? parseAmount(amountRaw) : Number(amountRaw || 0);
+
+        const createdAt = parseActionItemDate_(row[(cols.createdAt || 1) - 1], locale)
+          || parseActionItemDate_(row[(cols.date || 1) - 1], locale);
+        let releasedAt = parseActionItemDate_(row[(cols.releasedAt || 1) - 1], locale);
+        if (!releasedAt && hasControlNumber) releasedAt = createdAt;
+
+        if (!String(voucherNo || "").trim() && !String(payee || "").trim() && amount <= 0) {
+          return;
         }
-      }
 
-      // RULE 3: Released, still unpaid, older than 15 days
-      if (status === "UNPAID" && hasControlNumber && releasedAt) {
-        const ageDays = Math.floor((now - releasedAt) / 86400000);
-        if (
-          ageDays > 15 &&
-          isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.RELEASED_UNPAID_15D)
-        ) {
-          const id = `${ACTION_ITEM_RULES.RELEASED_UNPAID_15D}:CPO:${src.year}:${rowIndex}`;
-          currentItems.push({
-            id,
-            year: src.year,
-            unit: "CPO",
-            rule: ACTION_ITEM_RULES.RELEASED_UNPAID_15D,
+        if (voucherNoKey) {
+          if (!duplicateTracker[voucherNoKey]) duplicateTracker[voucherNoKey] = [];
+          duplicateTracker[voucherNoKey].push({
             rowIndex,
             voucherNo,
             payee,
             amount,
             cn,
-            ageDays,
             category,
             accountType: accountTypeLabel,
             pmtMonth,
             voucherStatus: status
           });
-          activeIds.add(id);
         }
-      }
-    });
-  });
 
-  Object.keys(duplicateTracker).forEach(voucherNoKey => {
-    const entries = duplicateTracker[voucherNoKey];
-    if (!entries || entries.length <= 1) return;
+        const requiredSubs = accountTypeRequirements[accountType] || [];
+        const subRequired = requiredSubs.length > 0;
+        const missingFields = [];
+        if (!category) missingFields.push("CATEGORIES");
+        if (!accountType) missingFields.push("ACCOUNT_TYPE");
+        if (subRequired && !subAccountType) missingFields.push("SUB_ACCOUNT_TYPE");
+        if (missingFields.length > 0) {
+          [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+            if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.MISSING_DATA)) return;
+            const id = `${ACTION_ITEM_RULES.MISSING_DATA}:${unit}:${src.year}:${rowIndex}`;
+            currentItems.push({
+              id,
+              year: src.year,
+              unit,
+              rule: ACTION_ITEM_RULES.MISSING_DATA,
+              rowIndex,
+              voucherNo,
+              payee,
+              amount,
+              cn,
+              category,
+              accountType: accountTypeLabel,
+              pmtMonth,
+              voucherStatus: status,
+              missingFields: missingFields.join(", ")
+            });
+            activeIds.add(id);
+          });
+        }
 
-    entries.forEach(entry => {
-      [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
-        if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.DUPLICATE_VOUCHER)) return;
-        const id = `${ACTION_ITEM_RULES.DUPLICATE_VOUCHER}:${unit}:2026:${entry.rowIndex}`;
-        currentItems.push({
-          id,
-          year: "2026",
-          unit,
-          rule: ACTION_ITEM_RULES.DUPLICATE_VOUCHER,
-          rowIndex: entry.rowIndex,
-          voucherNo: entry.voucherNo,
-          payee: entry.payee,
-          amount: entry.amount,
-          cn: entry.cn,
-          category: entry.category,
-          accountType: entry.accountType,
-          pmtMonth: entry.pmtMonth,
-          voucherStatus: entry.voucherStatus
-        });
-        activeIds.add(id);
+        // RULE 1: Paid with no control number — Payable should release, CPO should request
+        if (status === "PAID" && !hasControlNumber) {
+          [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.CPO].forEach(unit => {
+            if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.PAID_NO_CN)) return;
+            const id = `${ACTION_ITEM_RULES.PAID_NO_CN}:${unit}:${src.year}:${rowIndex}`;
+            currentItems.push({
+              id,
+              year: src.year,
+              unit,
+              rule: ACTION_ITEM_RULES.PAID_NO_CN,
+              rowIndex,
+              voucherNo,
+              payee,
+              amount,
+              cn,
+              category,
+              accountType: accountTypeLabel,
+              pmtMonth,
+              voucherStatus: status
+            });
+            activeIds.add(id);
+          });
+        }
+
+        // RULE 2: Unpaid, no control number, older than 30 days — CPO should request
+        if (status === "UNPAID" && !hasControlNumber && createdAt) {
+          const ageDays = Math.floor((now - createdAt) / 86400000);
+          if (
+            ageDays > 30 &&
+            isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.UNPAID_NO_CN_30D)
+          ) {
+            const id = `${ACTION_ITEM_RULES.UNPAID_NO_CN_30D}:CPO:${src.year}:${rowIndex}`;
+            currentItems.push({
+              id,
+              year: src.year,
+              unit: "CPO",
+              rule: ACTION_ITEM_RULES.UNPAID_NO_CN_30D,
+              rowIndex,
+              voucherNo,
+              payee,
+              amount,
+              cn,
+              ageDays,
+              category,
+              accountType: accountTypeLabel,
+              pmtMonth,
+              voucherStatus: status
+            });
+            activeIds.add(id);
+          }
+        }
+
+        // RULE 3: Released, still unpaid after 15 days — CPO should update status
+        if (status === "UNPAID" && hasControlNumber && releasedAt) {
+          const ageDays = Math.floor((now - releasedAt) / 86400000);
+          if (
+            ageDays > 15 &&
+            isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.RELEASED_UNPAID_15D)
+          ) {
+            const id = `${ACTION_ITEM_RULES.RELEASED_UNPAID_15D}:CPO:${src.year}:${rowIndex}`;
+            currentItems.push({
+              id,
+              year: src.year,
+              unit: "CPO",
+              rule: ACTION_ITEM_RULES.RELEASED_UNPAID_15D,
+              rowIndex,
+              voucherNo,
+              payee,
+              amount,
+              cn,
+              ageDays,
+              category,
+              accountType: accountTypeLabel,
+              pmtMonth,
+              voucherStatus: status
+            });
+            activeIds.add(id);
+          }
+        }
       });
     });
-  });
 
-  const logData = logSheet.getDataRange().getValues();
-  const logHeader = getCanonicalHeaderMap_(logSheet);
-  const idCol = resolveCanonicalCol_(logHeader, ["ITEM_ID", "ITEM ID"]);
-  const ruleCol = resolveCanonicalCol_(logHeader, ["RULE_KEY", "RULE KEY"]);
-  const yearCol = resolveCanonicalCol_(logHeader, ["YEAR"]);
-  const rowIndexCol = resolveCanonicalCol_(logHeader, ["ROW_INDEX", "ROW INDEX"]);
-  const unitCol = resolveCanonicalCol_(logHeader, ["UNIT"]);
-  const statusCol = resolveCanonicalCol_(logHeader, ["STATUS"]);
-  const firstSeenCol = resolveCanonicalCol_(logHeader, ["FIRST_SEEN_AT", "FIRST SEEN AT"]);
-  const lastSeenCol = resolveCanonicalCol_(logHeader, ["LAST_SEEN_AT", "LAST SEEN AT"]);
-  const resolvedCol = resolveCanonicalCol_(logHeader, ["RESOLVED_AT", "RESOLVED AT"]);
-  const resolvedByCol = resolveCanonicalCol_(logHeader, ["RESOLVED_BY", "RESOLVED BY"]);
+    Object.keys(duplicateTracker).forEach(voucherNoKey => {
+      const entries = duplicateTracker[voucherNoKey];
+      if (!entries || entries.length <= 1) return;
 
-  if (!idCol || !ruleCol || !yearCol || !rowIndexCol || !unitCol || !statusCol || !firstSeenCol || !lastSeenCol || !resolvedCol) {
-    throw new Error("ACTION_ITEMS_LOG sheet header is invalid.");
-  }
+      entries.forEach(entry => {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.DUPLICATE_VOUCHER)) return;
+          const id = `${ACTION_ITEM_RULES.DUPLICATE_VOUCHER}:${unit}:2026:${entry.rowIndex}`;
+          currentItems.push({
+            id,
+            year: "2026",
+            unit,
+            rule: ACTION_ITEM_RULES.DUPLICATE_VOUCHER,
+            rowIndex: entry.rowIndex,
+            voucherNo: entry.voucherNo,
+            payee: entry.payee,
+            amount: entry.amount,
+            cn: entry.cn,
+            category: entry.category,
+            accountType: entry.accountType,
+            pmtMonth: entry.pmtMonth,
+            voucherStatus: entry.voucherStatus
+          });
+          activeIds.add(id);
+        });
+      });
+    });
 
-  const existingMap = new Map();
-  for (let r = 1; r < logData.length; r++) {
-    const id = logData[r][idCol - 1];
-    if (id) existingMap.set(id, r);
-  }
+    const logData = logSheet.getDataRange().getValues();
+    const logHeader = getCanonicalHeaderMap_(logSheet);
+    const idCol = resolveCanonicalCol_(logHeader, ["ITEM_ID", "ITEM ID"]);
+    const ruleCol = resolveCanonicalCol_(logHeader, ["RULE_KEY", "RULE KEY"]);
+    const yearCol = resolveCanonicalCol_(logHeader, ["YEAR"]);
+    const rowIndexCol = resolveCanonicalCol_(logHeader, ["ROW_INDEX", "ROW INDEX"]);
+    const unitCol = resolveCanonicalCol_(logHeader, ["UNIT"]);
+    const statusCol = resolveCanonicalCol_(logHeader, ["STATUS"]);
+    const firstSeenCol = resolveCanonicalCol_(logHeader, ["FIRST_SEEN_AT", "FIRST SEEN AT"]);
+    const lastSeenCol = resolveCanonicalCol_(logHeader, ["LAST_SEEN_AT", "LAST SEEN AT"]);
+    const resolvedCol = resolveCanonicalCol_(logHeader, ["RESOLVED_AT", "RESOLVED AT"]);
+    const resolvedByCol = resolveCanonicalCol_(logHeader, ["RESOLVED_BY", "RESOLVED BY"]);
 
-  const toAppend = [];
-  const logLastCol = logSheet.getLastColumn();
-  
-  currentItems.forEach(it => {
-    if (!existingMap.has(it.id)) {
-      const rowArr = new Array(logLastCol).fill("");
-      rowArr[idCol - 1] = it.id;
-      rowArr[ruleCol - 1] = it.rule;
-      rowArr[yearCol - 1] = it.year;
-      rowArr[rowIndexCol - 1] = it.rowIndex;
-      rowArr[unitCol - 1] = it.unit;
-      rowArr[statusCol - 1] = "PENDING";
-      rowArr[firstSeenCol - 1] = now;
-      rowArr[lastSeenCol - 1] = now;
-      rowArr[resolvedCol - 1] = "";
-      if (resolvedByCol) rowArr[resolvedByCol - 1] = "";
-      toAppend.push(rowArr);
-    } else {
-      const idx = existingMap.get(it.id);
-      logData[idx][ruleCol - 1] = it.rule;
-      logData[idx][yearCol - 1] = it.year;
-      logData[idx][rowIndexCol - 1] = it.rowIndex;
-      logData[idx][unitCol - 1] = it.unit;
-      logData[idx][statusCol - 1] = "PENDING";
-      logData[idx][lastSeenCol - 1] = now;
-      logData[idx][resolvedCol - 1] = "";
-      if (resolvedByCol) logData[idx][resolvedByCol - 1] = "";
+    if (!idCol || !ruleCol || !yearCol || !rowIndexCol || !unitCol || !statusCol || !firstSeenCol || !lastSeenCol || !resolvedCol) {
+      throw new Error("ACTION_ITEMS_LOG sheet header is invalid.");
     }
-  });
 
-  existingMap.forEach((idx, id) => {
-    if (activeIds.has(id)) return;
-    logData[idx][statusCol - 1] = "RESOLVED";
-    logData[idx][resolvedCol - 1] = now;
-    logData[idx][lastSeenCol - 1] = now;
-    if (resolvedByCol) logData[idx][resolvedByCol - 1] = "SYSTEM";
-  });
+    const existingMap = new Map();
+    for (let r = 1; r < logData.length; r++) {
+      const id = logData[r][idCol - 1];
+      if (id) existingMap.set(id, r);
+    }
 
-  // Write updated logData back in a single batch setValues call
-  if (logData.length > 1) {
-    logSheet.getRange(2, 1, logData.length - 1, logLastCol).setValues(logData.slice(1));
-  }
+    const toAppend = [];
+    const logLastCol = logSheet.getLastColumn();
 
-  // Append new records in batch
-  if (toAppend.length > 0) {
-    logSheet.getRange(logSheet.getLastRow() + 1, 1, toAppend.length, logLastCol).setValues(toAppend);
+    currentItems.forEach(it => {
+      if (!existingMap.has(it.id)) {
+        const rowArr = new Array(logLastCol).fill("");
+        rowArr[idCol - 1] = it.id;
+        rowArr[ruleCol - 1] = it.rule;
+        rowArr[yearCol - 1] = it.year;
+        rowArr[rowIndexCol - 1] = it.rowIndex;
+        rowArr[unitCol - 1] = it.unit;
+        rowArr[statusCol - 1] = "PENDING";
+        rowArr[firstSeenCol - 1] = now;
+        rowArr[lastSeenCol - 1] = now;
+        rowArr[resolvedCol - 1] = "";
+        if (resolvedByCol) rowArr[resolvedByCol - 1] = "";
+        toAppend.push(rowArr);
+      } else {
+        const idx = existingMap.get(it.id);
+        logData[idx][ruleCol - 1] = it.rule;
+        logData[idx][yearCol - 1] = it.year;
+        logData[idx][rowIndexCol - 1] = it.rowIndex;
+        logData[idx][unitCol - 1] = it.unit;
+        logData[idx][statusCol - 1] = "PENDING";
+        logData[idx][lastSeenCol - 1] = now;
+        logData[idx][resolvedCol - 1] = "";
+        if (resolvedByCol) logData[idx][resolvedByCol - 1] = "";
+      }
+    });
+
+    existingMap.forEach((idx, id) => {
+      if (activeIds.has(id)) return;
+      logData[idx][statusCol - 1] = "RESOLVED";
+      logData[idx][resolvedCol - 1] = now;
+      logData[idx][lastSeenCol - 1] = now;
+      if (resolvedByCol) logData[idx][resolvedByCol - 1] = "SYSTEM";
+    });
+
+    // Single batch write back
+    if (logData.length > 1) {
+      logSheet.getRange(2, 1, logData.length - 1, logLastCol).setValues(logData.slice(1));
+    }
+    if (toAppend.length > 0) {
+      logSheet.getRange(logSheet.getLastRow() + 1, 1, toAppend.length, logLastCol).setValues(toAppend);
+    }
+
+  } finally {
+    // Always release the lock
+    try { lock.releaseLock(); } catch (_) {}
   }
 }
 
@@ -737,6 +740,8 @@ function getActionItems(token, paramsOrUnit, statusArg) {
     if (!session) return { success: false, error: "Session expired" };
 
     const filters = parseActionItemFilters_(paramsOrUnit, statusArg);
+
+    // Run sync (guarded by LockService internally)
     syncActionItems_();
 
     const sheet = getSheet(CONFIG.SHEETS.ACTION_ITEMS_LOG);
@@ -813,10 +818,51 @@ function getActionItems(token, paramsOrUnit, statusArg) {
   }
 }
 
+/**
+ * Lightweight count — reads the log sheet directly WITHOUT triggering syncActionItems_().
+ * This is safe to call frequently (e.g. from dashboard badge refresh).
+ */
 function getActionItemCount(token, paramsOrUnit, statusArg) {
-  const res = getActionItems(token, paramsOrUnit, statusArg);
-  if (!res.success) return res;
-  return { success: true, count: res.count };
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: "Session expired" };
+
+    const filters = parseActionItemFilters_(paramsOrUnit, statusArg);
+    const userUnit = roleToUnit_(session.role);
+    const canAll = canViewAllUnits_(session.role);
+
+    let sheet;
+    try {
+      sheet = getSheet(CONFIG.SHEETS.ACTION_ITEMS_LOG);
+    } catch (_) {
+      return { success: true, count: 0 };
+    }
+
+    if (sheet.getLastRow() < 2) return { success: true, count: 0 };
+
+    const data = sheet.getDataRange().getValues();
+    const header = getCanonicalHeaderMap_(sheet);
+    const unitCol = resolveCanonicalCol_(header, ["UNIT"]);
+    const statusCol = resolveCanonicalCol_(header, ["STATUS"]);
+
+    if (!unitCol || !statusCol) return { success: true, count: 0 };
+
+    let count = 0;
+    for (let i = 1; i < data.length; i++) {
+      const rowUnit = String(data[i][unitCol - 1] || "").toUpperCase();
+      const rowStatus = String(data[i][statusCol - 1] || "").toUpperCase();
+
+      if (!canAll && rowUnit !== userUnit) continue;
+      if (filters.status && filters.status !== "ALL" && rowStatus !== filters.status) continue;
+      if (filters.unit && filters.unit !== "ALL" && rowUnit !== filters.unit) continue;
+
+      count++;
+    }
+
+    return { success: true, count };
+  } catch (e) {
+    return { success: false, error: "getActionItemCount failed: " + e.message };
+  }
 }
 
 function getActionItemSettings(token) {

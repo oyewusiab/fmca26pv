@@ -159,7 +159,6 @@ const Dashboard = {
         if (cached) {
             this.stats = JSON.parse(cached);
             this.applyMasking();
-            this.loadCriticalComplianceActions();
             this.loadApprovalsQueue();
         }
 
@@ -178,7 +177,6 @@ const Dashboard = {
             sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(result));
             this.applyMasking();
 
-            await this.loadCriticalComplianceActions();
             await this.loadApprovalsQueue();
 
         } catch (error) {
@@ -624,6 +622,7 @@ async function loadDashboardActionItems() {
         const card = document.getElementById("actionItemsMiniCard");
         const text = document.getElementById("actionItemsMiniText");
         const countBubble = document.getElementById("widgetCount");
+        const link = document.getElementById("actionItemsMiniLink");
 
         if (!card || !text) return;
 
@@ -637,9 +636,12 @@ async function loadDashboardActionItems() {
         const count = res.count || 0;
 
         if (count > 0) {
-            text.textContent = `${count} action item${count === 1 ? '' : 's'}`;
+            text.textContent = `${count} pending action item${count === 1 ? '' : 's'} — Click to review`;
             if (countBubble) {
                 countBubble.textContent = count > 99 ? '99+' : String(count);
+            }
+            if (link) {
+                link.href = 'notifications.html?tab=actionitems';
             }
             card.style.display = "flex";
         } else {

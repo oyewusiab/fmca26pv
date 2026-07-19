@@ -272,21 +272,40 @@ const ActionItems = {
   },
 
   renderSettingsForm(settings) {
-    const units = ['PAYABLE', 'CPO'];
+    const unitDefs = [
+      {
+        key: 'PAYABLE',
+        label: 'Payable Unit',
+        rules: ['PAID_NO_CN', 'MISSING_DATA', 'DUPLICATE_VOUCHER']
+      },
+      {
+        key: 'CPO',
+        label: 'CPO Unit',
+        rules: ['PAID_NO_CN', 'UNPAID_NO_CN_30D', 'RELEASED_UNPAID_15D']
+      },
+      {
+        key: 'ADMIN',
+        label: 'Admin / DDFA / DFA',
+        rules: ['MISSING_DATA', 'DUPLICATE_VOUCHER']
+      }
+    ];
+
     let html = '<div class="action-settings-grid">';
 
-    units.forEach((unit) => {
-      html += `<div class="card"><div class="card-header"><h4 class="card-title">${unit} Unit</h4></div><div class="card-body">`;
-      this.RULE_DEFS.forEach((rule) => {
-        const enabled = settings?.unit?.[unit]?.[rule.key] !== false;
+    unitDefs.forEach(({ key: unit, label, rules: unitRules }) => {
+      html += `<div class="card"><div class="card-header"><h4 class="card-title">${label}</h4></div><div class="card-body">`;
+      unitRules.forEach(ruleKey => {
+        const ruleDef = this.RULE_DEFS.find(r => r.key === ruleKey);
+        if (!ruleDef) return;
+        const enabled = settings?.unit?.[unit]?.[ruleKey] !== false;
         html += `
           <div class="rule-toggle-row">
             <div>
-              <div class="rule-title">${rule.label}</div>
-              <div class="rule-desc">${rule.description}</div>
+              <div class="rule-title">${ruleDef.label}</div>
+              <div class="rule-desc">${ruleDef.description}</div>
             </div>
             <label class="switch-toggle">
-              <input type="checkbox" data-unit="${unit}" data-rule="${rule.key}" ${enabled ? 'checked' : ''}>
+              <input type="checkbox" data-unit="${unit}" data-rule="${ruleKey}" ${enabled ? 'checked' : ''}>
               <span class="switch-slider"></span>
             </label>
           </div>
@@ -300,7 +319,7 @@ const ActionItems = {
   },
 
   buildSettingsPayloadFromForm() {
-    const payload = { unit: { PAYABLE: {}, CPO: {} } };
+    const payload = { unit: { PAYABLE: {}, CPO: {}, ADMIN: {} } };
     const toggles = document.querySelectorAll('#actionItemsSettingsBody input[type="checkbox"][data-unit][data-rule]');
 
     toggles.forEach((checkbox) => {

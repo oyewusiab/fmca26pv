@@ -120,8 +120,18 @@ const Notifications = {
     await this.loadNotifications();
     await this.updateBellCount();
 
-    if (window.ActionItems && typeof ActionItems.refreshFull === 'function') {
-      ActionItems.refreshFull();
+    // Check for ?tab= URL param and activate the correct tab
+    const urlTab = new URLSearchParams(window.location.search).get('tab');
+    if (urlTab) {
+      this.activateTab('tab-' + urlTab);
+    } else {
+      // Default: load action items (first visible tab) only if on that tab
+      const activeTabContent = document.querySelector('.hub-tab-content.active');
+      if (activeTabContent && activeTabContent.id === 'tab-actionitems') {
+        if (window.ActionItems && typeof ActionItems.refreshFull === 'function') {
+          ActionItems.refreshFull();
+        }
+      }
     }
 
     const isAdmin = this.normalize(Auth.getUser()?.role) === this.normalize(CONFIG.ROLES.ADMIN);
