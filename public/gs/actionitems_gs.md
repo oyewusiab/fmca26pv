@@ -395,6 +395,18 @@ function buildActionItemText_(ruleKey, unit, meta) {
  * MAIN SYNC ENGINE (AUTO RESOLVE + UPSERT)
  ***************************************************************/
 function syncActionItems_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const lockKey = "action_items_sync_cooldown";
+    if (cache && cache.get(lockKey)) {
+      console.log("Skipping syncActionItems_ due to active cooldown lock (run recently).");
+      return;
+    }
+    if (cache) cache.put(lockKey, "active", 30); // 30 seconds cooldown
+  } catch (cacheErr) {
+    console.log("CacheService warning: " + cacheErr.message);
+  }
+
   const now = new Date();
   const settings = loadActionItemSettings_();
   const locale = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSpreadsheetLocale();
