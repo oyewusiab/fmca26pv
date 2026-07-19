@@ -89,62 +89,18 @@ const ActionItems = {
       return;
     }
 
-    // ── Phase 1: Instant render from existing log (no spreadsheet scan) ──
     list.innerHTML = `
-      <div class="text-center p-3">
+      <div class="text-center p-4">
         <div class="spinner"></div>
-        <p class="text-muted mt-2" style="font-size:13px;">Loading…</p>
+        <p class="text-muted mt-2">Loading action items…</p>
       </div>
     `;
 
-    let hasPhase1Data = false;
     try {
-      const quickRes = await API.getActionItems({ ...this.buildFilters(), skipSync: true });
-      if (quickRes.success && Array.isArray(quickRes.items)) {
-        this.items = quickRes.items;
-        this.renderList();
-        this.updateCounters();
-        card.style.display = 'block';
-        hasPhase1Data = true;
-        // Append a "Syncing…" banner below the list
-        const banner = document.createElement('div');
-        banner.id = 'actionItemsSyncBanner';
-        banner.style.cssText = [
-          'display:flex', 'align-items:center', 'gap:8px',
-          'padding:9px 16px', 'background:#fffde7',
-          'border-top:1px solid #ffe082',
-          'font-size:12.5px', 'color:#795548',
-          'border-radius:0 0 var(--radius-sm,6px) var(--radius-sm,6px)'
-        ].join(';');
-        banner.innerHTML = `
-          <span style="width:13px;height:13px;border:2px solid #ffe082;border-top-color:#f9a825;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;flex-shrink:0;"></span>
-          <span>Syncing latest data from spreadsheet — results will refresh automatically…</span>
-        `;
-        list.parentElement?.appendChild(banner);
-      }
-    } catch (_) { /* ignore phase-1 failure — phase 2 will handle it */ }
-
-    if (!hasPhase1Data) {
-      list.innerHTML = `
-        <div class="text-center p-5">
-          <div class="spinner"></div>
-          <p class="text-muted mt-3">Syncing action items — this may take up to 30 seconds on first load.</p>
-        </div>
-      `;
-    }
-
-    // ── Phase 2: Background sync → then refresh with fresh data ──
-    try {
-      await API.syncActionItemsOnly();
-      const res = await API.getActionItems({ ...this.buildFilters(), skipSync: true }, 0);
-
-      // Remove sync banner
-      document.getElementById('actionItemsSyncBanner')?.remove();
-
+      const res = await API.getActionItems(this.buildFilters());
       if (!res.success) {
-        if (!hasPhase1Data) {
-          list.innerHTML = `<div class="alert alert-danger">${res.error || 'Failed to load action items.'}</div>`;
-        }
+        list.innerHTML = `<div class="alert alert-danger">${res.error || 'Failed to load action items.'}</div>`;
+        this.items = [];
         this.updateCounters();
         return;
       }
@@ -154,14 +110,10 @@ const ActionItems = {
       this.updateCounters();
       card.style.display = 'block';
     } catch (error) {
-      console.error('Action items sync error:', error);
-      document.getElementById('actionItemsSyncBanner')?.remove();
-      if (!hasPhase1Data) {
-        list.innerHTML = `<div class="alert alert-danger">Failed to sync action items. Please try refreshing.</div>`;
-        this.items = [];
-        this.updateCounters();
-      }
-      // If phase-1 data exists, keep it displayed — just silently fail the background sync
+      console.error('Action items load error:', error);
+      list.innerHTML = `<div class="alert alert-danger">Failed to load action items. Please try refreshing.</div>`;
+      this.items = [];
+      this.updateCounters();
     } finally {
       this.isLoading = false;
     }

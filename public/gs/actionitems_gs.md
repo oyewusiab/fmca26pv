@@ -734,89 +734,169 @@ function parseActionItemFilters_(paramsOrUnit, statusArg) {
   };
 }
 
+/**
+ * Compute action items DIRECTLY from the 2026 vouchers sheet in a single bulk read.
+ * No sync, no log sheet, no per-row getRange() calls.
+ * This function replaces the old sync-then-read approach which was causing 30-45s timeouts.
+ */
 function getActionItems(token, paramsOrUnit, statusArg) {
   try {
     const session = getSession(token);
     if (!session) return { success: false, error: "Session expired" };
 
-    const fromObject = paramsOrUnit && typeof paramsOrUnit === "object" && !Array.isArray(paramsOrUnit);
-    // skipSync=true means: read the log as-is, don't run the full spreadsheet scan.
-    // Used for Phase-1 instant rendering on the notifications page.
-    const skipSync = fromObject ? !!paramsOrUnit.skipSync : false;
     const filters = parseActionItemFilters_(paramsOrUnit, statusArg);
-
-    // Run sync only when the caller needs fresh data (guarded by LockService internally)
-    if (!skipSync) {
-      syncActionItems_();
-    }
-
-    const sheet = getSheet(CONFIG.SHEETS.ACTION_ITEMS_LOG);
-    const data = sheet.getDataRange().getValues();
-    const header = getCanonicalHeaderMap_(sheet);
-    const locale = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSpreadsheetLocale();
-    const unitCol = resolveCanonicalCol_(header, ["UNIT"]);
-    const statusCol = resolveCanonicalCol_(header, ["STATUS"]);
-    const ruleCol = resolveCanonicalCol_(header, ["RULE_KEY", "RULE KEY"]);
-    const yearCol = resolveCanonicalCol_(header, ["YEAR"]);
-    const rowIndexCol = resolveCanonicalCol_(header, ["ROW_INDEX", "ROW INDEX"]);
-    const firstSeenCol = resolveCanonicalCol_(header, ["FIRST_SEEN_AT", "FIRST SEEN AT"]);
-    const lastSeenCol = resolveCanonicalCol_(header, ["LAST_SEEN_AT", "LAST SEEN AT"]);
-
-    if (!unitCol || !statusCol || !ruleCol || !yearCol || !rowIndexCol || !firstSeenCol || !lastSeenCol) {
-      return { success: false, error: "ACTION_ITEMS_LOG header is invalid." };
-    }
-
     const userUnit = roleToUnit_(session.role);
     const canAll = canViewAllUnits_(session.role);
 
-    const items = [];
-    const snapshotCache = {};
+    const settings = loadActionItemSettings_();
+    const now = new Date();
+    const locale = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSpreadsheetLocale();
 
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const rowUnit = String(row[unitCol - 1] || "").toUpperCase();
-      const rowStatus = String(row[statusCol - 1] || "").toUpperCase();
-
-      if (!canAll && rowUnit !== userUnit) continue;
-      if (filters.status && filters.status !== "ALL" && rowStatus !== filters.status) continue;
-      if (filters.unit && filters.unit !== "ALL" && rowUnit !== filters.unit) continue;
-
-      const text = buildActionItemText_(row[ruleCol - 1], rowUnit, {});
-      const rowYear = row[yearCol - 1];
-      const rowIndex = row[rowIndexCol - 1];
-      const cacheKey = `${rowYear}:${rowIndex}`;
-      if (!snapshotCache[cacheKey]) {
-        snapshotCache[cacheKey] = getActionItemCurrentVoucherMeta_(rowYear, rowIndex, locale) || null;
-      }
-      const snap = snapshotCache[cacheKey];
-
-      items.push({
-        unit: rowUnit,
-        year: rowYear,
-        itemStatus: rowStatus,
-        status: snap ? snap.status : rowStatus,
-        voucherNumber: snap ? snap.voucherNumber : "",
-        payee: snap ? snap.payee : "",
-        amount: snap ? snap.amount : 0,
-        controlNumber: snap ? snap.controlNumber : "",
-        pmtMonth: snap ? snap.pmtMonth : "",
-        category: snap ? snap.category : "",
-        accountType: snap ? snap.accountType : "",
-        rowIndex: rowIndex,
-        title: text.title,
-        message: text.message,
-        severity: text.severity,
-        firstSeenAt: row[firstSeenCol - 1],
-        lastSeenAt: row[lastSeenCol - 1]
-      });
+    // ── Single read from the 2026 vouchers sheet ──
+    let voucherSheet;
+    try {
+      voucherSheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    } catch (_) {
+      return { success: true, items: [], count: 0 };
     }
 
-    const severityRank = { danger: 1, warning: 2, info: 3 };
-    items.sort((a, b) => {
-      const rankA = severityRank[String(a.severity || "info")] || 9;
-      const rankB = severityRank[String(b.severity || "info")] || 9;
-      return rankA - rankB;
+    const lastRow = voucherSheet.getLastRow();
+    if (lastRow < 2) return { success: true, items: [], count: 0 };
+
+    const canonicalHeader = getCanonicalHeaderMap_(voucherSheet);
+    const cols = map2026ActionItemColumns_(canonicalHeader);
+
+    if (!cols.status || !cols.voucherNo || !cols.payee || !cols.grossAmount || !cols.controlNumber) {
+      return { success: false, error: "2026 VOUCHERS sheet is missing required columns (STATUS, PAYEE, ACCOUNT OR MAIL, GROSS AMOUNT, CONTROL NUMBER)." };
+    }
+
+    const readWidth = Math.min(
+      voucherSheet.getMaxColumns(),
+      Math.max(
+        cols.status || 1, cols.pmtMonth || 1, cols.payee || 1,
+        cols.voucherNo || 1, cols.grossAmount || 1, cols.category || 1,
+        cols.subAccountType || 1, cols.controlNumber || 1, cols.date || 1,
+        cols.accountType || 1, cols.createdAt || 1, cols.releasedAt || 1
+      )
+    );
+
+    // ONE bulk read for all rows
+    const data = voucherSheet.getRange(2, 1, lastRow - 1, readWidth).getValues();
+    const accountTypeRequirements = getAccountTypeSubRequirementMap_();
+
+    const items = [];
+    const duplicateTracker = {};
+
+    // ── Pass 1: build duplicate tracker and generate non-duplicate items ──
+    data.forEach((row, i) => {
+      const rowIndex = i + 2;
+      const status = normalizeActionItemStatus_(row[(cols.status || 1) - 1]);
+      const cn = String(row[(cols.controlNumber || 1) - 1] || "").trim();
+      const hasControlNumber = cn !== "";
+      const voucherNo = row[(cols.voucherNo || 1) - 1];
+      const voucherNoClean = String(voucherNo || "").trim();
+      const voucherNoKey = voucherNoClean.toUpperCase();
+      const payee = row[(cols.payee || 1) - 1];
+      const pmtMonth = String(row[(cols.pmtMonth || 1) - 1] || "").trim();
+      const category = String(row[(cols.category || 1) - 1] || "").trim();
+      const accountType = String(row[(cols.accountType || 1) - 1] || "").trim();
+      const subAccountType = String(row[(cols.subAccountType || 1) - 1] || "").trim();
+      const accountTypeLabel = subAccountType ? `${accountType} (${subAccountType})` : accountType;
+      const amountRaw = row[(cols.grossAmount || 1) - 1] || 0;
+      const amount = typeof parseAmount === "function" ? parseAmount(amountRaw) : Number(amountRaw || 0);
+      const createdAt = parseActionItemDate_(row[(cols.createdAt || 1) - 1], locale)
+        || parseActionItemDate_(row[(cols.date || 1) - 1], locale);
+      let releasedAt = parseActionItemDate_(row[(cols.releasedAt || 1) - 1], locale);
+      if (!releasedAt && hasControlNumber) releasedAt = createdAt;
+
+      // Skip fully empty rows
+      if (!voucherNoClean && !String(payee || "").trim() && amount <= 0) return;
+
+      // Track duplicates
+      if (voucherNoKey) {
+        if (!duplicateTracker[voucherNoKey]) duplicateTracker[voucherNoKey] = [];
+        duplicateTracker[voucherNoKey].push({ rowIndex, voucherNo, payee, amount, cn, category, accountType: accountTypeLabel, pmtMonth, status });
+      }
+
+      const base = { year: "2026", rowIndex, voucherNo, payee, amount, cn, pmtMonth, category, accountType: accountTypeLabel, voucherStatus: status };
+
+      // RULE: MISSING_DATA
+      const requiredSubs = accountTypeRequirements[accountType] || [];
+      const missingFields = [];
+      if (!category) missingFields.push("CATEGORIES");
+      if (!accountType) missingFields.push("ACCOUNT_TYPE");
+      if (requiredSubs.length > 0 && !subAccountType) missingFields.push("SUB_ACCOUNT_TYPE");
+      if (missingFields.length > 0) {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.MISSING_DATA)) return;
+          if (!canAll && userUnit !== unit) return;
+          if (filters.unit && filters.unit !== "ALL" && unit !== filters.unit) return;
+          const text = buildActionItemText_(ACTION_ITEM_RULES.MISSING_DATA, unit, {});
+          items.push({ ...base, id: `MISSING_DATA:${unit}:2026:${rowIndex}`, unit, rule: ACTION_ITEM_RULES.MISSING_DATA, itemStatus: "PENDING", missingFields: missingFields.join(", "), ...text });
+        });
+      }
+
+      // RULE 1: PAID with no control number — Payable release, CPO request
+      if (status === "PAID" && !hasControlNumber) {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.CPO].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.PAID_NO_CN)) return;
+          if (!canAll && userUnit !== unit) return;
+          if (filters.unit && filters.unit !== "ALL" && unit !== filters.unit) return;
+          const text = buildActionItemText_(ACTION_ITEM_RULES.PAID_NO_CN, unit, {});
+          items.push({ ...base, id: `PAID_NO_CN:${unit}:2026:${rowIndex}`, unit, rule: ACTION_ITEM_RULES.PAID_NO_CN, itemStatus: "PENDING", ...text });
+        });
+      }
+
+      // RULE 2: UNPAID, no control number, older than 30 days — CPO should request
+      if (status === "UNPAID" && !hasControlNumber && createdAt) {
+        const ageDays = Math.floor((now - createdAt) / 86400000);
+        if (ageDays > 30 && isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.UNPAID_NO_CN_30D)) {
+          if (canAll || userUnit === ACTION_ITEM_UNITS.CPO) {
+            if (!filters.unit || filters.unit === "ALL" || filters.unit === "CPO") {
+              const text = buildActionItemText_(ACTION_ITEM_RULES.UNPAID_NO_CN_30D, ACTION_ITEM_UNITS.CPO, {});
+              items.push({ ...base, id: `UNPAID_NO_CN_30D:CPO:2026:${rowIndex}`, unit: "CPO", rule: ACTION_ITEM_RULES.UNPAID_NO_CN_30D, ageDays, itemStatus: "PENDING", ...text });
+            }
+          }
+        }
+      }
+
+      // RULE 3: Released, still UNPAID after 15 days — CPO should update
+      if (status === "UNPAID" && hasControlNumber && releasedAt) {
+        const ageDays = Math.floor((now - releasedAt) / 86400000);
+        if (ageDays > 15 && isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.RELEASED_UNPAID_15D)) {
+          if (canAll || userUnit === ACTION_ITEM_UNITS.CPO) {
+            if (!filters.unit || filters.unit === "ALL" || filters.unit === "CPO") {
+              const text = buildActionItemText_(ACTION_ITEM_RULES.RELEASED_UNPAID_15D, ACTION_ITEM_UNITS.CPO, {});
+              items.push({ ...base, id: `RELEASED_UNPAID_15D:CPO:2026:${rowIndex}`, unit: "CPO", rule: ACTION_ITEM_RULES.RELEASED_UNPAID_15D, ageDays, itemStatus: "PENDING", ...text });
+            }
+          }
+        }
+      }
     });
+
+    // ── Pass 2: add duplicate items ──
+    Object.keys(duplicateTracker).forEach(key => {
+      const entries = duplicateTracker[key];
+      if (!entries || entries.length <= 1) return;
+      entries.forEach(entry => {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.DUPLICATE_VOUCHER)) return;
+          if (!canAll && userUnit !== unit) return;
+          if (filters.unit && filters.unit !== "ALL" && unit !== filters.unit) return;
+          const text = buildActionItemText_(ACTION_ITEM_RULES.DUPLICATE_VOUCHER, unit, {});
+          items.push({
+            id: `DUPLICATE_VOUCHER:${unit}:2026:${entry.rowIndex}`,
+            year: "2026", unit, rule: ACTION_ITEM_RULES.DUPLICATE_VOUCHER, rowIndex: entry.rowIndex,
+            voucherNo: entry.voucherNo, payee: entry.payee, amount: entry.amount, cn: entry.cn,
+            pmtMonth: entry.pmtMonth, category: entry.category, accountType: entry.accountType,
+            voucherStatus: entry.status, itemStatus: "PENDING", ...text
+          });
+        });
+      });
+    });
+
+    const severityRank = { danger: 1, warning: 2, info: 3 };
+    items.sort((a, b) => (severityRank[a.severity] || 9) - (severityRank[b.severity] || 9));
 
     return { success: true, items, count: items.length };
   } catch (e) {
@@ -825,8 +905,8 @@ function getActionItems(token, paramsOrUnit, statusArg) {
 }
 
 /**
- * Lightweight count — reads the log sheet directly WITHOUT triggering syncActionItems_().
- * This is safe to call frequently (e.g. from dashboard badge refresh).
+ * Count action items directly from the 2026 vouchers sheet.
+ * Mirrors the logic in getActionItems but returns only a count (fast, no item details).
  */
 function getActionItemCount(token, paramsOrUnit, statusArg) {
   try {
@@ -836,36 +916,110 @@ function getActionItemCount(token, paramsOrUnit, statusArg) {
     const filters = parseActionItemFilters_(paramsOrUnit, statusArg);
     const userUnit = roleToUnit_(session.role);
     const canAll = canViewAllUnits_(session.role);
+    const settings = loadActionItemSettings_();
+    const now = new Date();
+    const locale = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID).getSpreadsheetLocale();
 
-    let sheet;
+    let voucherSheet;
     try {
-      sheet = getSheet(CONFIG.SHEETS.ACTION_ITEMS_LOG);
+      voucherSheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
     } catch (_) {
       return { success: true, count: 0 };
     }
 
-    if (sheet.getLastRow() < 2) return { success: true, count: 0 };
+    const lastRow = voucherSheet.getLastRow();
+    if (lastRow < 2) return { success: true, count: 0 };
 
-    const data = sheet.getDataRange().getValues();
-    const header = getCanonicalHeaderMap_(sheet);
-    const unitCol = resolveCanonicalCol_(header, ["UNIT"]);
-    const statusCol = resolveCanonicalCol_(header, ["STATUS"]);
+    const canonicalHeader = getCanonicalHeaderMap_(voucherSheet);
+    const cols = map2026ActionItemColumns_(canonicalHeader);
+    if (!cols.status || !cols.voucherNo || !cols.controlNumber) return { success: true, count: 0 };
 
-    if (!unitCol || !statusCol) return { success: true, count: 0 };
+    const readWidth = Math.min(
+      voucherSheet.getMaxColumns(),
+      Math.max(cols.status || 1, cols.voucherNo || 1, cols.controlNumber || 1,
+        cols.category || 1, cols.accountType || 1, cols.subAccountType || 1,
+        cols.createdAt || 1, cols.date || 1, cols.releasedAt || 1, cols.grossAmount || 1, cols.payee || 1)
+    );
 
-    let count = 0;
-    for (let i = 1; i < data.length; i++) {
-      const rowUnit = String(data[i][unitCol - 1] || "").toUpperCase();
-      const rowStatus = String(data[i][statusCol - 1] || "").toUpperCase();
+    const data = voucherSheet.getRange(2, 1, lastRow - 1, readWidth).getValues();
+    const accountTypeRequirements = getAccountTypeSubRequirementMap_();
+    const seenIds = new Set();
 
-      if (!canAll && rowUnit !== userUnit) continue;
-      if (filters.status && filters.status !== "ALL" && rowStatus !== filters.status) continue;
-      if (filters.unit && filters.unit !== "ALL" && rowUnit !== filters.unit) continue;
+    const countItem = (id, unit) => {
+      if (!canAll && userUnit !== unit) return;
+      if (filters.unit && filters.unit !== "ALL" && unit !== filters.unit) return;
+      seenIds.add(id);
+    };
 
-      count++;
-    }
+    const duplicateTracker = {};
 
-    return { success: true, count };
+    data.forEach((row, i) => {
+      const rowIndex = i + 2;
+      const status = normalizeActionItemStatus_(row[(cols.status || 1) - 1]);
+      const cn = String(row[(cols.controlNumber || 1) - 1] || "").trim();
+      const hasControlNumber = cn !== "";
+      const voucherNo = String(row[(cols.voucherNo || 1) - 1] || "").trim();
+      const voucherNoKey = voucherNo.toUpperCase();
+      const payee = String(row[(cols.payee || 1) - 1] || "").trim();
+      const amount = Number(row[(cols.grossAmount || 1) - 1] || 0);
+      const category = String(row[(cols.category || 1) - 1] || "").trim();
+      const accountType = String(row[(cols.accountType || 1) - 1] || "").trim();
+      const subAccountType = String(row[(cols.subAccountType || 1) - 1] || "").trim();
+
+      if (!voucherNo && !payee && amount <= 0) return;
+
+      if (voucherNoKey) {
+        if (!duplicateTracker[voucherNoKey]) duplicateTracker[voucherNoKey] = [];
+        duplicateTracker[voucherNoKey].push(rowIndex);
+      }
+
+      const requiredSubs = accountTypeRequirements[accountType] || [];
+      const isMissingData = !category || !accountType || (requiredSubs.length > 0 && !subAccountType);
+      if (isMissingData) {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.MISSING_DATA)) return;
+          countItem(`MISSING_DATA:${unit}:${rowIndex}`, unit);
+        });
+      }
+
+      if (status === "PAID" && !hasControlNumber) {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.CPO].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.PAID_NO_CN)) return;
+          countItem(`PAID_NO_CN:${unit}:${rowIndex}`, unit);
+        });
+      }
+
+      const createdAt = parseActionItemDate_(row[(cols.createdAt || 1) - 1], locale)
+        || parseActionItemDate_(row[(cols.date || 1) - 1], locale);
+      if (status === "UNPAID" && !hasControlNumber && createdAt) {
+        const ageDays = Math.floor((now - createdAt) / 86400000);
+        if (ageDays > 30 && isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.UNPAID_NO_CN_30D)) {
+          countItem(`UNPAID_NO_CN_30D:CPO:${rowIndex}`, ACTION_ITEM_UNITS.CPO);
+        }
+      }
+
+      let releasedAt = parseActionItemDate_(row[(cols.releasedAt || 1) - 1], locale);
+      if (!releasedAt && hasControlNumber) releasedAt = createdAt;
+      if (status === "UNPAID" && hasControlNumber && releasedAt) {
+        const ageDays = Math.floor((now - releasedAt) / 86400000);
+        if (ageDays > 15 && isRuleEnabled_(settings, ACTION_ITEM_UNITS.CPO, ACTION_ITEM_RULES.RELEASED_UNPAID_15D)) {
+          countItem(`RELEASED_UNPAID_15D:CPO:${rowIndex}`, ACTION_ITEM_UNITS.CPO);
+        }
+      }
+    });
+
+    Object.keys(duplicateTracker).forEach(key => {
+      const entries = duplicateTracker[key];
+      if (!entries || entries.length <= 1) return;
+      entries.forEach(rowIndex => {
+        [ACTION_ITEM_UNITS.PAYABLE, ACTION_ITEM_UNITS.ADMIN].forEach(unit => {
+          if (!isRuleEnabled_(settings, unit, ACTION_ITEM_RULES.DUPLICATE_VOUCHER)) return;
+          countItem(`DUPLICATE_VOUCHER:${unit}:${rowIndex}`, unit);
+        });
+      });
+    });
+
+    return { success: true, count: seenIds.size };
   } catch (e) {
     return { success: false, error: "getActionItemCount failed: " + e.message };
   }
