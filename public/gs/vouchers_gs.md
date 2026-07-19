@@ -72,6 +72,26 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
     let page = query.page;
     let pageSize = query.pageSize;
 
+    // Cache Service check
+    const cache = CacheService.getScriptCache();
+    let version = 1;
+    try {
+      const v = cache.get('v_cache_version_' + year);
+      if (v) version = parseInt(v, 10);
+    } catch (e) {}
+
+    const cleanFilters = JSON.stringify(filters || {}).replace(/[^a-zA-Z0-9]/g, '');
+    const cacheKey = 'v_cache_' + year + '_v' + version + '_' + page + '_' + pageSize + '_' + cleanFilters;
+
+    try {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      Logger.log('Cache read error: ' + e.message);
+    }
+
     let sheetName;
     let has2026Format = false;
 
@@ -86,7 +106,7 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
 
     const sheet = getSheet(sheetName);
     const lastRow = sheet.getLastRow();
-    const lastCol = has2026Format ? 18 : 17;
+    const lastCol = sheet.getLastColumn();
 
     if (lastRow <= 1) {
       return {
@@ -114,8 +134,8 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
 
     const releaseFilter = String(filters.release || 'All').trim();
 
+    const cols = resolveVoucherColumns_(sheet);
     const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-    const cols = CONFIG.VOUCHER_COLUMNS;
     const start = (page - 1) * pageSize;
     const endExclusive = start + pageSize;
     let totalCount = 0;
@@ -207,14 +227,14 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
 
       if (totalCount >= start && totalCount < endExclusive) {
         const rowIndex = i + 2;
-        vouchers.push(rowToVoucher(row, rowIndex, has2026Format));
+        vouchers.push(rowToVoucher(row, rowIndex, cols));
       }
       totalCount++;
     }
 
     const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
 
-    return {
+    const resultObj = {
       success: true,
       vouchers,
       totalCount,
@@ -223,6 +243,17 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
       totalPages,
       year
     };
+
+    try {
+      const str = JSON.stringify(resultObj);
+      if (str.length < 100000) {
+        cache.put(cacheKey, str, 1800); // Cache for 30 minutes
+      }
+    } catch (e) {
+      Logger.log('Cache write error: ' + e.message);
+    }
+
+    return resultObj;
 
   } catch (error) {
     return { success: false, error: 'Failed to get vouchers: ' + error.message };
@@ -264,9 +295,9 @@ function getVoucherByRow(token, rowIndex, year) {
       return { success: false, error: 'Voucher not found' };
     }
     
-    const numCols = has2026Format ? 18 : 17;
-    const row = sheet.getRange(rowIndex, 1, 1, numCols).getValues()[0];
-    const voucher = rowToVoucher(row, rowIndex, has2026Format);
+    const cols = resolveVoucherColumns_(sheet);
+    const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const voucher = rowToVoucher(row, rowIndex, cols);
     
     return { success: true, voucher: voucher };
     
@@ -521,14 +552,67 @@ function generateControlNumber(targetUnit) {
 }
 
 /**
+ * Resolves the 1-based column indices dynamically from sheet headers.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @returns {object}
+ */
+function resolveVoucherColumns_(sheet) {
+  const cfg = CONFIG.VOUCHER_COLUMNS || {};
+  let headers = [];
+  try {
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  } catch (e) {
+    return cfg;
+  }
+  const header = {};
+  headers.forEach((h, i) => {
+    if (h) header[String(h).toUpperCase().trim()] = i + 1;
+  });
+
+  function colFromHeaderOrConfig_(headerNames, fallbackCol1Based) {
+    for (let i = 0; i < headerNames.length; i++) {
+      const idx = header[String(headerNames[i] || '').toUpperCase().trim()];
+      if (idx) return idx;
+    }
+    return fallbackCol1Based || 1;
+  }
+
+  return {
+    STATUS: colFromHeaderOrConfig_(['STATUS'], cfg.STATUS),
+    PMT_MONTH: colFromHeaderOrConfig_(['PMT MONTH', 'PAYMENT MONTH'], cfg.PMT_MONTH),
+    PAYEE: colFromHeaderOrConfig_(['PAYEE'], cfg.PAYEE),
+    ACCOUNT_OR_MAIL: colFromHeaderOrConfig_(['ACCOUNT OR MAIL', 'ACCOUNT OR EMAIL (VOUCHER NUMBER)', 'VOUCHER NUMBER', 'VOUCHER NO.', 'VOUCHER NO'], cfg.ACCOUNT_OR_MAIL),
+    PARTICULAR: colFromHeaderOrConfig_(['PARTICULAR', 'PARTICULARS'], cfg.PARTICULAR),
+    CONTRACT_SUM: colFromHeaderOrConfig_(['CONTRACT SUM'], cfg.CONTRACT_SUM),
+    GROSS_AMOUNT: colFromHeaderOrConfig_(['GROSS AMOUNT'], cfg.GROSS_AMOUNT),
+    NET: colFromHeaderOrConfig_(['NET', 'NET AMOUNT'], cfg.NET),
+    VAT: colFromHeaderOrConfig_(['VAT'], cfg.VAT),
+    WHT: colFromHeaderOrConfig_(['WHT', 'WITHHOLDING TAX'], cfg.WHT),
+    STAMP_DUTY: colFromHeaderOrConfig_(['STAMP DUTY'], cfg.STAMP_DUTY),
+    CATEGORIES: colFromHeaderOrConfig_(['CATEGORIES', 'CATEGORY'], cfg.CATEGORIES),
+    TOTAL_GROSS: colFromHeaderOrConfig_(['TOTAL GROSS', 'TOTAL GROSS AMOUNT'], cfg.TOTAL_GROSS),
+    CONTROL_NUMBER: colFromHeaderOrConfig_(['CONTROL NUMBER', 'CONTROL NO.', 'CONTROL NO'], cfg.CONTROL_NUMBER),
+    OLD_VOUCHER_NUMBER: colFromHeaderOrConfig_(['OLD VOUCHER NUMBER', 'OLD VOUCHER NO'], cfg.OLD_VOUCHER_NUMBER),
+    OLD_VOUCHER_AVAILABLE: colFromHeaderOrConfig_(['OLD VOUCHER NO AVAILABLE?', 'OLD VOUCHER AVAILABLE'], cfg.OLD_VOUCHER_AVAILABLE),
+    DATE: colFromHeaderOrConfig_(['DATE'], cfg.DATE),
+    ACCOUNT_TYPE: colFromHeaderOrConfig_(['ACCOUNT TYPE'], cfg.ACCOUNT_TYPE),
+    SUB_ACCOUNT_TYPE: colFromHeaderOrConfig_(['SUB ACCOUNT', 'SUB ACCOUNT TYPE'], cfg.SUB_ACCOUNT_TYPE),
+    CREATED_AT: colFromHeaderOrConfig_(['CREATED AT', 'CREATED_AT'], cfg.CREATED_AT),
+    RELEASED_AT: colFromHeaderOrConfig_(['RELEASED AT', 'RELEASED_AT'], cfg.RELEASED_AT),
+    ATTACHMENT_URL: colFromHeaderOrConfig_(['ATTACHMENT URL', 'ATTACHMENT_URL'], cfg.ATTACHMENT_URL)
+  };
+}
+
+/**
  * Converts a spreadsheet row to a voucher object.
  * @param {any[]} row
  * @param {number} rowIndex
- * @param {boolean} has2026Format
+ * @param {boolean|object} colsOrHas2026Format
  * @returns {object}
  */
-function rowToVoucher(row, rowIndex, has2026Format = true) {
-  const cols = CONFIG.VOUCHER_COLUMNS;
+function rowToVoucher(row, rowIndex, colsOrHas2026Format = true) {
+  const cols = (colsOrHas2026Format && typeof colsOrHas2026Format === 'object') ? colsOrHas2026Format : CONFIG.VOUCHER_COLUMNS;
+  const has2026Format = typeof colsOrHas2026Format === 'boolean' ? colsOrHas2026Format : true;
   const voucher = {
     rowIndex: rowIndex,
     status: row[cols.STATUS - 1],
@@ -547,12 +631,12 @@ function rowToVoucher(row, rowIndex, has2026Format = true) {
     controlNumber: row[cols.CONTROL_NUMBER - 1],
     oldVoucherNumber: row[cols.OLD_VOUCHER_NUMBER - 1],
     oldVoucherAvailable: row[cols.OLD_VOUCHER_AVAILABLE - 1],
-    date: row[cols.DATE - 1] ? Utilities.formatDate(new Date(row[cols.DATE - 1]), "GMT", "yyyy-MM-dd") : '',
+    date: row[cols.DATE - 1] ? (row[cols.DATE - 1] instanceof Date ? Utilities.formatDate(row[cols.DATE - 1], "GMT", "yyyy-MM-dd") : String(row[cols.DATE - 1])) : '',
     accountType: row[cols.ACCOUNT_TYPE - 1],
-    subAccountType: row[cols.SUB_ACCOUNT_TYPE - 1],
-    createdAt: row[cols.CREATED_AT - 1] ? new Date(row[cols.CREATED_AT - 1]).toISOString() : '',
-    releasedAt: row[cols.RELEASED_AT - 1] ? new Date(row[cols.RELEASED_AT - 1]).toISOString() : '',
-    attachmentUrl: has2026Format ? row[cols.ATTACHMENT_URL - 1] : ''
+    subAccountType: cols.SUB_ACCOUNT_TYPE && row[cols.SUB_ACCOUNT_TYPE - 1] !== undefined ? row[cols.SUB_ACCOUNT_TYPE - 1] : '',
+    createdAt: cols.CREATED_AT && row[cols.CREATED_AT - 1] ? (row[cols.CREATED_AT - 1] instanceof Date ? row[cols.CREATED_AT - 1].toISOString() : String(row[cols.CREATED_AT - 1])) : '',
+    releasedAt: cols.RELEASED_AT && row[cols.RELEASED_AT - 1] ? (row[cols.RELEASED_AT - 1] instanceof Date ? row[cols.RELEASED_AT - 1].toISOString() : String(row[cols.RELEASED_AT - 1])) : '',
+    attachmentUrl: has2026Format && cols.ATTACHMENT_URL && row[cols.ATTACHMENT_URL - 1] !== undefined ? row[cols.ATTACHMENT_URL - 1] : ''
   };
   return voucher;
 }
@@ -560,10 +644,11 @@ function rowToVoucher(row, rowIndex, has2026Format = true) {
 /**
  * Converts voucher object to row array for 2026 sheet
  * @param {Object} voucher - Voucher object
+ * @param {number} targetColumnCount
+ * @param {Object} cols - Columns map
  * @returns {Array} Row data
  */
-function voucherToRow(voucher, targetColumnCount) {
-  const cols = CONFIG.VOUCHER_COLUMNS;
+function voucherToRow(voucher, targetColumnCount, cols = CONFIG.VOUCHER_COLUMNS) {
   const maxConfiguredCol = Math.max.apply(null, Object.keys(cols).map(k => cols[k]));
   const width = Math.max(1, Math.min(parseInt(targetColumnCount || maxConfiguredCol, 10), maxConfiguredCol));
   const row = new Array(width).fill('');
@@ -591,10 +676,10 @@ function voucherToRow(voucher, targetColumnCount) {
   setCol(cols.OLD_VOUCHER_AVAILABLE, voucher.oldVoucherAvailable || '');
   setCol(cols.DATE, voucher.date ? new Date(voucher.date) : new Date());
   setCol(cols.ACCOUNT_TYPE, voucher.accountType || '');
-  setCol(cols.SUB_ACCOUNT_TYPE, voucher.subAccountType || '');
-  setCol(cols.CREATED_AT, voucher.createdAt ? new Date(voucher.createdAt) : new Date());
-  setCol(cols.RELEASED_AT, voucher.releasedAt ? new Date(voucher.releasedAt) : '');
-  setCol(cols.ATTACHMENT_URL, voucher.attachmentUrl || '');
+  if (cols.SUB_ACCOUNT_TYPE) setCol(cols.SUB_ACCOUNT_TYPE, voucher.subAccountType || '');
+  if (cols.CREATED_AT) setCol(cols.CREATED_AT, voucher.createdAt ? new Date(voucher.createdAt) : new Date());
+  if (cols.RELEASED_AT) setCol(cols.RELEASED_AT, voucher.releasedAt ? new Date(voucher.releasedAt) : '');
+  if (cols.ATTACHMENT_URL) setCol(cols.ATTACHMENT_URL, voucher.attachmentUrl || '');
 
   return row;
 }
@@ -627,6 +712,7 @@ function createVoucher(token, voucher) {
     }
     
     const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    const cols = resolveVoucherColumns_(sheet);
     
     // Check for duplicate OLD VOUCHER NUMBER in 2026
     if (voucher.oldVoucherNumber && voucher.oldVoucherNumber.trim()) {
@@ -634,7 +720,7 @@ function createVoucher(token, voucher) {
       const newOldVN = voucher.oldVoucherNumber.trim().toUpperCase();
       
       for (let i = 1; i < data.length; i++) {
-        const existingOldVN = String(data[i][CONFIG.VOUCHER_COLUMNS.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
+        const existingOldVN = String(data[i][cols.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
         if (existingOldVN === newOldVN) {
           return { 
             success: false, 
@@ -650,7 +736,7 @@ function createVoucher(token, voucher) {
       const newVN = voucher.accountOrMail.trim().toUpperCase();
       
       for (let i = 1; i < data.length; i++) {
-        const existingVN = String(data[i][CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
+        const existingVN = String(data[i][cols.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
         if (existingVN === newVN) {
           return { 
             success: false, 
@@ -677,7 +763,7 @@ function createVoucher(token, voucher) {
     voucher.net = gross - (vat + wht + stamp);
 
     // Create row array
-    const rowData = voucherToRow(voucher, sheet.getLastColumn());
+    const rowData = voucherToRow(voucher, sheet.getLastColumn(), cols);
     
     // Append to sheet
     sheet.appendRow(rowData);
@@ -694,7 +780,7 @@ function createVoucher(token, voucher) {
       success: true, 
       message: 'Voucher created successfully',
       rowIndex: newRowIndex,
-      voucher: rowToVoucher(rowData, newRowIndex, true)
+      voucher: rowToVoucher(rowData, newRowIndex, cols)
     };
     
   } catch (error) {
@@ -811,8 +897,9 @@ function updateVoucher(token, rowIndex, voucher) {
     
     // THEN: Get current data
     const sheetCols = sheet.getLastColumn();
+    const cols = resolveVoucherColumns_(sheet);
     const currentRow = sheet.getRange(rowIndex, 1, 1, sheetCols).getValues()[0];
-    const currentVoucher = rowToVoucher(currentRow, rowIndex, true);
+    const currentVoucher = rowToVoucher(currentRow, rowIndex, cols);
     
     // NOW we can check restrictions based on current voucher state
     
@@ -845,7 +932,7 @@ function updateVoucher(token, rowIndex, voucher) {
       for (let i = 1; i < data.length; i++) {
         if (i + 1 === rowIndex) continue; // Skip current row
         
-        const existingOldVN = String(data[i][CONFIG.VOUCHER_COLUMNS.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
+        const existingOldVN = String(data[i][cols.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
         if (existingOldVN === newOldVN) {
           return { 
             success: false, 
@@ -863,7 +950,7 @@ function updateVoucher(token, rowIndex, voucher) {
       for (let i = 1; i < data.length; i++) {
         if (i + 1 === rowIndex) continue; // Skip current row
         
-        const existingVN = String(data[i][CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
+        const existingVN = String(data[i][cols.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
         if (existingVN === newVN) {
           return { 
             success: false, 
@@ -920,7 +1007,7 @@ function updateVoucher(token, rowIndex, voucher) {
     voucher.net = gross - (vat + wht + stamp);
 
     // Create updated row
-    const rowData = voucherToRow(voucher, sheetCols);
+    const rowData = voucherToRow(voucher, sheetCols, cols);
     
     // Update the row
     sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
@@ -934,7 +1021,7 @@ function updateVoucher(token, rowIndex, voucher) {
     return { 
       success: true, 
       message: 'Voucher updated successfully',
-      voucher: rowToVoucher(rowData, rowIndex, true)
+      voucher: rowToVoucher(rowData, rowIndex, cols)
     };
     
   } catch (error) {

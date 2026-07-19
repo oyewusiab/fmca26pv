@@ -56,6 +56,21 @@ function clearCache(cacheKey) {
  */
 function clearAllVoucherCaches() {
   const cache = CacheService.getScriptCache();
+  
+  // Increment cache version to invalidate page caches and remove summary caches
+  try {
+    const years = ['2026', '2025', '2024', '2023', '<2023'];
+    years.forEach(year => {
+      const v = cache.get('v_cache_version_' + year);
+      const nextVer = v ? (parseInt(v, 10) + 1) : 2;
+      cache.put('v_cache_version_' + year, String(nextVer), 86400 * 30);
+      cache.remove('summary_cache_' + year);
+      cache.remove('quick_stats_' + year);
+    });
+  } catch (e) {
+    Logger.log('Error updating cache version: ' + e.message);
+  }
+
   cache.removeAll([
     'vouchers_2026_summary',
     'vouchers_2026_count',
@@ -63,8 +78,6 @@ function clearAllVoucherCaches() {
     'dashboard_stats'
   ]);
 }
-
-// ==================== MAIN ENTRY POINTS ====================
 
 /**
  * Handles GET requests
@@ -126,6 +139,9 @@ function doGet(e) {
             case 'getDebtProfileRequestStatus':
                 result = getDebtProfileRequestStatus(params.token);
                 break;
+            case 'getDebtProfileList':
+                result = getDebtProfileList(params.token);
+                break;
             case 'getDebtProfileFullData':
                 result = getDebtProfileFullData(params.token, params.requestId);
                 break;
@@ -138,18 +154,6 @@ function doGet(e) {
             case 'getQuickStats':
                 result = getQuickStats(params.token);
                 break;
-            case 'getUsers':
-                result = getUsers(params.token);
-                break;
-            case 'getRolePermissions':
-                result = getRolePermissions(params.token);
-                break;
-
-            // ---- NOTIFICATIONS ----
-            case 'getNotifications':
-                result = getNotifications(params.token, params.onlyUnread === 'true');
-                break;
-
             case 'getUsers':
                 result = getUsers(params.token);
                 break;
@@ -239,16 +243,6 @@ function doGet(e) {
     }
 }
 
-/**
- * Handles POST requests
- * @param {Object} e - Event object with post data
- * @returns {TextOutput} JSON response
- */
-/**
- * Handles POST requests
- * @param {Object} e - Event object with post data
- * @returns {TextOutput} JSON response
- */
 /**
  * Handles POST requests
  * @param {Object} e - Event object with post data
@@ -377,6 +371,12 @@ function doPost(e) {
             case 'rejectDebtProfile':
                 result = handleDebtProfileApproval(token, payload.requestId, 'reject', payload.comments);
                 break;
+            case 'deleteDebtProfile':
+                result = deleteDebtProfile(token, payload.requestId);
+                break;
+            case 'updateDebtProfileNarrative':
+                result = updateDebtProfileNarrative(token, payload.requestId, payload.narrative);
+                break;
 
             // ---- ANNOUNCEMENTS ----
             case 'createAnnouncement':
@@ -498,9 +498,10 @@ function deleteVoucher(token, rowIndex) {
     }
     
     // Get voucher details before deleting for logging
-    const row = sheet.getRange(rowIndex, 1, 1, 18).getValues()[0];
-    const voucherNum = row[CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1];
-    const payee = row[CONFIG.VOUCHER_COLUMNS.PAYEE - 1];
+    const cols = resolveVoucherColumns_(sheet);
+    const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const voucherNum = row[cols.ACCOUNT_OR_MAIL - 1];
+    const payee = row[cols.PAYEE - 1];
     
     // Delete the row
     sheet.deleteRow(rowIndex);
@@ -1867,17 +1868,128 @@ function resolveVoucherSummaryColumns_(sheet) {
     OLD_VN_COL: colFromHeaderOrConfig_(['OLD VOUCHER NUMBER', 'OLD VOUCHER NO'], cfg.OLD_VOUCHER_NUMBER),
     OLD_VN_AVAILABLE_COL: colFromHeaderOrConfig_(['OLD VOUCHER NO AVAILABLE?', 'OLD VOUCHER AVAILABLE'], cfg.OLD_VOUCHER_AVAILABLE),
     ACCOUNT_TYPE_COL: colFromHeaderOrConfig_(['ACCOUNT TYPE'], cfg.ACCOUNT_TYPE),
-    SUB_ACCT_COL: colFromHeaderOrConfig_(['SUB ACCOUNT', 'SUB ACCOUNT TYPE'], cfg.SUB_ACCOUNT_TYPE)
+    SUB_ACCT_COL: colFromHeaderOrConfig_(['SUB ACCOUNT', 'SUB ACCOUNT TYPE'], cfg.SUB_ACCOUNT_TYPE),
+    DATE_COL: colFromHeaderOrConfig_(['DATE'], cfg.DATE),
+    CREATED_AT_COL: colFromHeaderOrConfig_(['CREATED AT', 'CREATED_AT'], cfg.CREATED_AT)
   };
 
   out.LAST_COL = Math.max(
     out.STATUS_COL, out.PMT_MONTH_COL, out.PAYEE_COL, out.ACCT_COL,
     out.CONTRACT_COL, out.GROSS_COL, out.VAT_COL, out.WHT_COL,
     out.STAMP_COL, out.CATEGORY_COL, out.OLD_VN_COL, out.OLD_VN_AVAILABLE_COL,
-    out.ACCOUNT_TYPE_COL, out.SUB_ACCT_COL
+    out.ACCOUNT_TYPE_COL, out.SUB_ACCT_COL, out.DATE_COL, out.CREATED_AT_COL
   ) + 1;
 
   return out;
+}
+
+function getDashboardStats(token) {
+  try {
+    const session = getSession(token);
+    if (!session) {
+      return { success: false, error: 'Session expired' };
+    }
+    
+    // Get 2026 summary (uses its own cache)
+    const summary2026 = getSummary(token, '2026');
+    
+    if (!summary2026.success) {
+      return summary2026;
+    }
+    
+    // Get pending deletions and aged payables stats
+    let pendingCount = 0;
+    let aging = {
+      under30: { amount: 0, count: 0 },
+      thirtyToSixty: { amount: 0, count: 0 },
+      overSixty: { amount: 0, count: 0 }
+    };
+    
+    try {
+      const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+      const cols = resolveVoucherSummaryColumns_(sheet);
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        const data = sheet.getRange(2, 1, lastRow - 1, cols.LAST_COL).getValues();
+        const now = new Date();
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
+          const status = String(row[cols.STATUS_COL] || '').trim();
+          
+          if (status === 'Pending Deletion') {
+            pendingCount++;
+          }
+          
+          if (status === 'Unpaid' || status === 'Pending Deletion') {
+            const grossAmount = parseAmount(row[cols.GROSS_COL]);
+            let dateVal = row[cols.CREATED_AT_COL] || row[cols.DATE_COL];
+            let ageInDays = 999;
+            
+            if (dateVal) {
+              try {
+                const date = new Date(dateVal);
+                if (!isNaN(date.getTime())) {
+                  ageInDays = Math.floor((now.getTime() - date.getTime()) / (24 * 60 * 60 * 1000));
+                }
+              } catch (e) {}
+            }
+            
+            if (ageInDays <= 30) {
+              aging.under30.amount += grossAmount;
+              aging.under30.count++;
+            } else if (ageInDays <= 60) {
+              aging.thirtyToSixty.amount += grossAmount;
+              aging.thirtyToSixty.count++;
+            } else {
+              aging.overSixty.amount += grossAmount;
+              aging.overSixty.count++;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      pendingCount = 0;
+    }
+    
+    // Get only last 10 vouchers (not all vouchers)
+    let recentVouchers = [];
+    try {
+      const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        const startRow = Math.max(2, lastRow - 9); // Last 10 rows
+        const numRows = lastRow - startRow + 1;
+        const cols = resolveVoucherColumns_(sheet);
+        const data = sheet.getRange(startRow, 1, numRows, sheet.getLastColumn()).getValues();
+        
+        for (let i = data.length - 1; i >= 0; i--) {
+          if (data[i][cols.PAYEE - 1]) { // Has payee
+            recentVouchers.push(rowToVoucher(data[i], startRow + i, cols));
+          }
+          if (recentVouchers.length >= 10) break;
+        }
+      }
+    } catch (e) {
+      recentVouchers = [];
+    }
+    
+    return {
+      success: true,
+      stats: summary2026.summary,
+      taxSummary: summary2026.taxSummary,
+      categoryBreakdown: summary2026.categoryBreakdown,
+      monthlyBreakdown: summary2026.monthlyBreakdown,
+      pendingDeletions: pendingCount,
+      recentVouchers: recentVouchers,
+      aging: aging,
+      userRole: session.role,
+      userName: session.name
+    };
+    
+  } catch (error) {
+    return { success: false, error: 'Failed to get dashboard stats: ' + error.message };
+  }
 }
 
 function getSummary(token, year) {
@@ -1902,6 +2014,18 @@ function getSummary(token, year) {
     }
     
     year = year || '2026';
+    
+    // Cache Service check
+    const cacheKey = 'summary_cache_' + year;
+    const cache = CacheService.getScriptCache();
+    try {
+      const cached = cache.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      Logger.log('Summary cache read error: ' + e.message);
+    }
     
     // Pick sheet name based on year
     let sheetName = CONFIG.SHEETS.VOUCHERS_2026;
@@ -2207,7 +2331,7 @@ function getSummary(token, year) {
       })
       .sort((a, b) => b.totalAmount - a.totalAmount);
     
-    return {
+    const resultObj = {
       success: true,
       year: year,
       summary: {
@@ -2245,6 +2369,14 @@ function getSummary(token, year) {
       monthlyBreakdown: monthlyBreakdown,
       accountTypeBreakdown: accountTypeBreakdown
     };
+
+    try {
+      cache.put(cacheKey, JSON.stringify(resultObj), 1800); // 30 minutes cache
+    } catch (e) {
+      Logger.log('Failed to save summary cache: ' + e.message);
+    }
+
+    return resultObj;
     
   } catch (error) {
     return { success: false, error: 'Failed to get summary: ' + error.message };
@@ -2334,75 +2466,6 @@ function getDebtProfile(token) {
  * @param {string} token - Session token
  * @returns {Object} Dashboard stats
  */
-function getDashboardStats(token) {
-  try {
-    const session = getSession(token);
-    if (!session) {
-      return { success: false, error: 'Session expired' };
-    }
-    
-    // Get 2026 summary (uses its own cache)
-    const summary2026 = getSummary(token, '2026');
-    
-    if (!summary2026.success) {
-      return summary2026;
-    }
-    
-    // Get pending deletions count (quick query)
-    let pendingCount = 0;
-    try {
-      const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
-      const lastRow = sheet.getLastRow();
-      if (lastRow > 1) {
-        const statusColumn = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-        for (let i = 0; i < statusColumn.length; i++) {
-          if (statusColumn[i][0] === 'Pending Deletion') {
-            pendingCount++;
-          }
-        }
-      }
-    } catch (e) {
-      pendingCount = 0;
-    }
-    
-    // Get only last 10 vouchers (not all vouchers)
-    let recentVouchers = [];
-    try {
-      const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
-      const lastRow = sheet.getLastRow();
-      if (lastRow > 1) {
-        const startRow = Math.max(2, lastRow - 9); // Last 10 rows
-        const numRows = lastRow - startRow + 1;
-        const data = sheet.getRange(startRow, 1, numRows, 18).getValues();
-        
-        for (let i = data.length - 1; i >= 0; i--) {
-          if (data[i][2]) { // Has payee
-            recentVouchers.push(rowToVoucher(data[i], startRow + i, true));
-          }
-          if (recentVouchers.length >= 10) break;
-        }
-      }
-    } catch (e) {
-      recentVouchers = [];
-    }
-    
-    return {
-      success: true,
-      stats: summary2026.summary,
-      taxSummary: summary2026.taxSummary,  // ADD THIS LINE
-      categoryBreakdown: summary2026.categoryBreakdown,
-      monthlyBreakdown: summary2026.monthlyBreakdown,
-      pendingDeletions: pendingCount,
-      recentVouchers: recentVouchers,
-      userRole: session.role,
-      userName: session.name
-    };
-    
-  } catch (error) {
-    return { success: false, error: 'Failed to get dashboard stats: ' + error.message };
-  }
-}
-
 // ==================== TEST FUNCTIONS FOR PHASE 4 ====================
 
 /**
@@ -2474,19 +2537,18 @@ function getPendingDeletions(token) {
     
     const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
     const data = sheet.getDataRange().getValues();
-    
+    const cols = resolveVoucherColumns_(sheet);
     const pendingVouchers = [];
     
     for (let i = 1; i < data.length; i++) {
-      const status = data[i][CONFIG.VOUCHER_COLUMNS.STATUS - 1];
-      
+      const status = data[i][cols.STATUS - 1];
       if (status === 'Pending Deletion') {
-        pendingVouchers.push(rowToVoucher(data[i], i + 1, true));
+        pendingVouchers.push(rowToVoucher(data[i], i + 1, cols));
       }
     }
     
-    return { 
-      success: true, 
+    return {
+      success: true,
       vouchers: pendingVouchers,
       count: pendingVouchers.length
     };
@@ -2620,9 +2682,9 @@ function lookupVoucher(token, voucherNumber) {
           const cellValue = String(searchColumn[i][0]).trim().toUpperCase();
           
           if (cellValue === searchValue) {
-            // Found in Account/Mail column!
-            const fullRow = sheet.getRange(i + 2, 1, 1, 17).getValues()[0];
-            const voucher = rowToVoucher(fullRow, i + 2, false);
+             const cols = resolveVoucherColumns_(sheet);
+             const fullRow = sheet.getRange(i + 2, 1, 1, sheet.getLastColumn()).getValues()[0];
+             const voucher = rowToVoucher(fullRow, i + 2, cols);
             
             // Check if voucher is PAID - cannot be revalidated
             if (voucher.status === 'Paid') {
@@ -2692,10 +2754,9 @@ function lookupVoucher(token, voucherNumber) {
           
           if (cellValue === searchValue) {
             // Found as Old Voucher Number - this means it was already revalidated!
-            const has2026Format = sheetInfo.year === '2026';
-            const numCols = has2026Format ? 18 : 17;
-            const fullRow = sheet.getRange(i + 2, 1, 1, numCols).getValues()[0];
-            const voucher = rowToVoucher(fullRow, i + 2, has2026Format);
+            const cols = resolveVoucherColumns_(sheet);
+            const fullRow = sheet.getRange(i + 2, 1, 1, sheet.getLastColumn()).getValues()[0];
+            const voucher = rowToVoucher(fullRow, i + 2, cols);
             
             return {
               success: true,
@@ -2972,11 +3033,12 @@ function releaseVouchersWithNotification(token, rowIndexes, controlNumber, targe
           setControlNoAndReleasedAt_(sheet, rowIndex, cn, colReleasedAt);
         
         // Get voucher details for notification
-        const row = sheet.getRange(rowIndex, 1, 1, 18).getValues()[0];
+        const cols = resolveVoucherColumns_(sheet);
+        const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
         releasedVouchers.push({
-          voucherNumber: row[3], // Account/Mail
-          payee: row[2],
-          amount: row[6]
+          voucherNumber: row[cols.ACCOUNT_OR_MAIL - 1], // Account/Mail
+          payee: row[cols.PAYEE - 1],
+          amount: row[cols.GROSS_AMOUNT - 1]
         });
         
         updatedCount++;
@@ -3089,107 +3151,7 @@ function sendReleaseNotification(controlNumber, targetUnit, vouchers, releasedBy
   }
 }
 
-/**
- * Create notifications for given users
- */
-function createNotifications(recipientEmails, title, message, link) {
-  try {
-    if (!recipientEmails || recipientEmails.length === 0) return;
-    
-    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-    let sheet = ss.getSheetByName('NOTIFICATIONS');
-    if (!sheet) {
-      sheet = ss.insertSheet('NOTIFICATIONS');
-      sheet.getRange(1,1,1,6).setValues([['TIMESTAMP','USER_EMAIL','TITLE','MESSAGE','LINK','READ']]);
-    }
-    
-    const ts = getNigerianTimestamp();
-    const rows = recipientEmails.map(email => [
-      ts,
-      String(email || '').toLowerCase(),
-      title,
-      message,
-      link || '',
-      false
-    ]);
-    
-    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 6).setValues(rows);
-    
-  } catch (e) {
-    console.log('createNotifications error: ' + e.message);
-  }
-}
 
-/**
- * Get notifications for current user
- */
-function getNotifications(token, onlyUnread) {
-  try {
-    const session = getSession(token);
-    if (!session) return { success: false, error: 'Session expired' };
-    
-    const email = String(session.email || '').toLowerCase();
-    
-    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-    const sheet = ss.getSheetByName('NOTIFICATIONS');
-    if (!sheet) return { success: true, notifications: [], unreadCount: 0 };
-    
-    const data = sheet.getDataRange().getValues();
-    const notifications = [];
-    let unreadCount = 0;
-    
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      const rowEmail = String(row[1] || '').toLowerCase();
-      if (rowEmail !== email) continue;
-      
-      const read = row[5] === true || String(row[5]).toUpperCase() === 'TRUE';
-      if (!read) unreadCount++;
-      if (onlyUnread && read) continue;
-      
-      notifications.push({
-        rowIndex: i + 1,
-        timestamp: row[0],
-        title: row[2],
-        message: row[3],
-        link: row[4],
-        read: read
-      });
-    }
-    
-    return { success: true, notifications: notifications, unreadCount: unreadCount };
-    
-  } catch (e) {
-    return { success: false, error: 'Failed to get notifications: ' + e.message };
-  }
-}
-
-/**
- * Mark notification as read
- */
-function markNotificationRead(token, rowIndex) {
-  try {
-    const session = getSession(token);
-    if (!session) return { success: false, error: 'Session expired' };
-    
-    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-    const sheet = ss.getSheetByName('NOTIFICATIONS');
-    if (!sheet) return { success: false, error: 'No notifications sheet' };
-    
-    const lastRow = sheet.getLastRow();
-    rowIndex = parseInt(rowIndex, 10);
-    if (rowIndex < 2 || rowIndex > lastRow) {
-      return { success: false, error: 'Invalid notification reference' };
-    }
-    
-    sheet.getRange(rowIndex, 6).setValue(true); // READ column
-    
-    return { success: true };
-    
-  } catch (e) {
-    return { success: false, error: 'Failed to mark notification read: ' + e.message };
-  }
-}
 
 /**
  * Gets summary across all years for debt tracking
@@ -3407,8 +3369,9 @@ function releaseVouchers(data) {
       const rowIndex = parseInt(r, 10);
       if (rowIndex < 2 || rowIndex > lastRow) continue;
 
-      const row = sheet.getRange(rowIndex, 1, 1, 18).getValues()[0];
-      const currentCN = String(row[CONFIG.VOUCHER_COLUMNS.CONTROL_NUMBER - 1] || '').trim();
+      const cols = resolveVoucherColumns_(sheet);
+      const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const currentCN = String(row[cols.CONTROL_NUMBER - 1] || '').trim();
 
       // Check for double release (for non-CPO)
       if (!isCPORelease && currentCN !== '') {
@@ -3428,12 +3391,12 @@ function releaseVouchers(data) {
         }
       }
 
-      const amount = parseAmount(row[CONFIG.VOUCHER_COLUMNS.GROSS_AMOUNT - 1]);
+      const amount = parseAmount(row[cols.GROSS_AMOUNT - 1]);
 
       const voucherInfo = {
         rowIndex: rowIndex,
-        voucherNumber: row[CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1],
-        payee: row[CONFIG.VOUCHER_COLUMNS.PAYEE - 1],
+        voucherNumber: row[cols.ACCOUNT_OR_MAIL - 1],
+        payee: row[cols.PAYEE - 1],
         amount: amount
       };
 
@@ -3570,11 +3533,12 @@ function approveVoucherDelete(token, rowIndex) {
     }
     
     // Get the full row data
-    const row = sheet.getRange(rowIndex, 1, 1, 18).getValues()[0];
-    const currentStatus = String(row[CONFIG.VOUCHER_COLUMNS.STATUS - 1] || '').trim();
-    const controlNumber = String(row[CONFIG.VOUCHER_COLUMNS.CONTROL_NUMBER - 1] || '').trim();
-    const payee = row[CONFIG.VOUCHER_COLUMNS.PAYEE - 1];
-    const voucherNum = row[CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1];
+    const cols = resolveVoucherColumns_(sheet);
+    const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const currentStatus = String(row[cols.STATUS - 1] || '').trim();
+    const controlNumber = String(row[cols.CONTROL_NUMBER - 1] || '').trim();
+    const payee = row[cols.PAYEE - 1];
+    const voucherNum = row[cols.ACCOUNT_OR_MAIL - 1];
     
     // Check if status is Pending Deletion
     if (currentStatus !== 'Pending Deletion') {
@@ -3673,13 +3637,20 @@ function getNotifications(token, onlyUnread) {
     const email = String(session.email || '').toLowerCase().trim();
     
     const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-    const sheet = ss.getSheetByName('NOTIFICATIONS');
+    let sheet = ss.getSheetByName('NOTIFICATIONS');
     
     if (!sheet) {
       return { success: true, notifications: [], unreadCount: 0 };
     }
     
-    const lastRow = sheet.getLastRow();
+    let lastRow = sheet.getLastRow();
+    if (lastRow > 500) {
+      autoPruneNotifications();
+      // Re-fetch sheet and row count after pruning
+      sheet = ss.getSheetByName('NOTIFICATIONS');
+      lastRow = sheet.getLastRow();
+    }
+    
     if (lastRow <= 1) {
       return { success: true, notifications: [], unreadCount: 0 };
     }
@@ -3800,6 +3771,51 @@ function markAllNotificationsRead(token) {
 }
 
 /**
+ * Prunes read notifications older than 30 days.
+ */
+function autoPruneNotifications() {
+  try {
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('NOTIFICATIONS');
+    if (!sheet) return { success: true, message: 'No notifications sheet' };
+    
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, message: 'No notifications to prune' };
+    
+    const data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    const rowsToKeep = [];
+    let prunedCount = 0;
+    
+    for (let i = 0; i < data.length; i++) {
+      const timestamp = new Date(data[i][0]);
+      const isRead = data[i][6] === true || String(data[i][6]).toUpperCase() === 'TRUE';
+      
+      // Keep if not read OR if read but less than 30 days old
+      if (!isRead || timestamp > thirtyDaysAgo) {
+        rowsToKeep.push(data[i]);
+      } else {
+        prunedCount++;
+      }
+    }
+    
+    if (prunedCount > 0) {
+      sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
+      if (rowsToKeep.length > 0) {
+        sheet.getRange(2, 1, rowsToKeep.length, 7).setValues(rowsToKeep);
+      }
+    }
+    
+    return { success: true, message: `Pruned ${prunedCount} notification(s)` };
+  } catch (e) {
+    console.log('autoPruneNotifications error: ' + e.message);
+    return { success: false, error: 'Prune failed: ' + e.message };
+  }
+}
+
+/**
  * Get pending deletions for approval
  */
 function getPendingDeletions(token) {
@@ -3825,18 +3841,19 @@ function getPendingDeletions(token) {
       return { success: true, vouchers: [], count: 0 };
     }
     
-    const data = sheet.getRange(2, 1, lastRow - 1, 18).getValues();
+    const cols = resolveVoucherColumns_(sheet);
+    const data = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
     const pendingVouchers = [];
     
     for (let i = 0; i < data.length; i++) {
-      const status = String(data[i][CONFIG.VOUCHER_COLUMNS.STATUS - 1] || "")
+      const status = String(data[i][cols.STATUS - 1] || "")
         .trim().toUpperCase();
 
-      let cn = String(data[i][CONFIG.VOUCHER_COLUMNS.CONTROL_NUMBER - 1] || "").trim();
+      let cn = String(data[i][cols.CONTROL_NUMBER - 1] || "").trim();
       cn = (cn === "-" || cn.toUpperCase() === "N/A") ? "" : cn; // optional cleanup
       
-      if (status === 'Pending Deletion') {
-        const voucher = rowToVoucher(data[i], i + 2, true);
+      if (status === 'PENDING DELETION') {
+        const voucher = rowToVoucher(data[i], i + 2, cols);
         pendingVouchers.push(voucher);
       }
     }
@@ -3880,8 +3897,9 @@ function rejectVoucherDelete(token, rowIndex, reason) {
       return { success: false, error: 'Voucher not found' };
     }
     
-    const row = sheet.getRange(rowIndex, 1, 1, 18).getValues()[0];
-    const currentStatus = String(row[CONFIG.VOUCHER_COLUMNS.STATUS - 1] || '').trim();
+    const cols = resolveVoucherColumns_(sheet);
+    const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const currentStatus = String(row[cols.STATUS - 1] || '').trim();
     
     if (currentStatus !== 'Pending Deletion') {
       return { success: false, error: 'Voucher is not pending deletion' };
@@ -3956,10 +3974,11 @@ function rejectVoucherDelete(token, rowIndex, reason) {
     }
     
     // Get voucher data
-    const row = sheet.getRange(rowIndex, 1, 1, 18).getValues()[0];
-    const currentStatus = String(row[CONFIG.VOUCHER_COLUMNS.STATUS - 1] || '').trim();
-    const voucherNum = row[CONFIG.VOUCHER_COLUMNS.ACCOUNT_OR_MAIL - 1] || '';
-    const payee = row[CONFIG.VOUCHER_COLUMNS.PAYEE - 1] || '';
+    const cols = resolveVoucherColumns_(sheet);
+    const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const currentStatus = String(row[cols.STATUS - 1] || '').trim();
+    const voucherNum = row[cols.ACCOUNT_OR_MAIL - 1] || '';
+    const payee = row[cols.PAYEE - 1] || '';
     
     if (currentStatus !== 'Pending Deletion') {
       return { success: false, error: 'Voucher is not pending deletion' };
@@ -5212,6 +5231,122 @@ function getDebtProfileFullData(token, requestId) {
     };
   } catch (error) {
     return { success: false, error: 'Data aggregation failed: ' + error.message };
+  }
+}
+
+/**
+ * API: Fetch list of all historical debt profile requests.
+ */
+function getDebtProfileList(token) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    if (!hasPermission(session.role, [CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.DDFA, CONFIG.ROLES.DFA, CONFIG.ROLES.ADMIN])) {
+      return { success: false, error: 'Unauthorized: You do not have permission to view debt profile requests.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!sheet) return { success: true, reports: [] };
+    
+    const data = sheet.getDataRange().getValues();
+    const reports = [];
+    const reqCols = CONFIG.DEBT_REQUEST_COLUMNS;
+    
+    for (let i = 1; i < data.length; i++) {
+      reports.push({
+        requestId: data[i][0],
+        timestamp: data[i][1] instanceof Date ? Utilities.formatDate(data[i][1], "GMT+1", "yyyy-MM-dd HH:mm:ss") : String(data[i][1]),
+        requesterEmail: data[i][2],
+        requesterName: data[i][3],
+        filters: JSON.parse(data[i][reqCols.FILTERS - 1] || '{}'),
+        status: data[i][reqCols.STATUS - 1],
+        approverEmail: data[i][reqCols.APPROVER_EMAIL - 1] || '',
+        approvalDate: data[i][reqCols.APPROVAL_DATE - 1] || '',
+        comments: data[i][reqCols.COMMENTS - 1] || '',
+        title: data[i][reqCols.REPORT_TITLE - 1] || 'Debt Profile Report',
+        summary: data[i][reqCols.EXECUTIVE_SUMMARY - 1] || '',
+        analysis: data[i][reqCols.ANALYSIS - 1] || '',
+        recommendations: data[i][reqCols.RECOMMENDATIONS - 1] || ''
+      });
+    }
+    
+    // Sort newest first
+    reports.sort((a, b) => b.requestId.localeCompare(a.requestId));
+    
+    return { success: true, reports };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * API: Delete a historical debt profile request.
+ */
+function deleteDebtProfile(token, requestId) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    if (!hasPermission(session.role, [CONFIG.ROLES.ADMIN, CONFIG.ROLES.DFA, CONFIG.ROLES.DDFA])) {
+      return { success: false, error: 'Unauthorized to delete reports.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!sheet) return { success: false, error: 'Requests sheet missing.' };
+    
+    const data = sheet.getDataRange().getValues();
+    let rowIndex = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === requestId) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) return { success: false, error: 'Report not found.' };
+    
+    sheet.deleteRow(rowIndex);
+    return { success: true, message: 'Report deleted successfully.' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * API: Update narrative parts of a debt profile request.
+ */
+function updateDebtProfileNarrative(token, requestId, narrative) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+    
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(CONFIG.SHEETS.DEBT_PROFILE_REQUESTS);
+    if (!sheet) return { success: false, error: 'Requests sheet missing.' };
+    
+    const data = sheet.getDataRange().getValues();
+    let rowIndex = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === requestId) {
+        rowIndex = i + 1;
+        break;
+      }
+    }
+    
+    if (rowIndex === -1) return { success: false, error: 'Report not found.' };
+    
+    const reqCols = CONFIG.DEBT_REQUEST_COLUMNS;
+    sheet.getRange(rowIndex, reqCols.REPORT_TITLE).setValue(narrative.title || '');
+    sheet.getRange(rowIndex, reqCols.EXECUTIVE_SUMMARY).setValue(narrative.summary || '');
+    sheet.getRange(rowIndex, reqCols.ANALYSIS).setValue(narrative.analysis || '');
+    sheet.getRange(rowIndex, reqCols.RECOMMENDATIONS).setValue(narrative.recommendations || '');
+    
+    return { success: true, message: 'Report narrative updated successfully.' };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 }
 

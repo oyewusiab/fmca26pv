@@ -69,6 +69,8 @@
         </article>
       </section>
 
+
+
       <nav class="notification-hub-tabs" id="notificationHubTabs">
         <button class="tab-btn active" data-target="tab-notifications">
           <i class="fas fa-bell"></i> Notifications
@@ -85,6 +87,29 @@
       </nav>
 
       <section class="hub-tab-content active" id="tab-notifications">
+        <!-- Search and filters toolbar -->
+        <div class="action-items-toolbar" style="display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; background: var(--card-bg, #ffffff); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color, #e9ecef); box-shadow: var(--shadow-sm);">
+          <div style="display: flex; gap: 10px; flex-grow: 1; min-width: 300px; align-items: center;">
+            <div style="flex-grow: 1; position: relative;">
+              <input type="text" id="notificationSearchInput" class="form-control" placeholder="Search title or message..." style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; width: 100%; font-family: inherit;">
+            </div>
+            <select id="notificationReadFilter" class="form-control" style="width: auto; min-width: 140px; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; cursor: pointer;">
+              <option value="ALL">All Status</option>
+              <option value="UNREAD" selected>Unread</option>
+              <option value="READ">Read</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 0.85rem; font-weight: 500;">Filter by Date:</span>
+            <input type="date" id="notificationDateFrom" class="form-control" style="width: auto; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">
+            <span>to</span>
+            <input type="date" id="notificationDateTo" class="form-control" style="width: auto; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">
+            <button class="btn btn-secondary btn-sm" id="clearNotificationFiltersBtn" style="padding: 8px 12px; height: 38px;">
+              <i class="fas fa-times-circle"></i> Clear
+            </button>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-header">
             <h3 class="card-title"><i class="fas fa-bell"></i> Notification Feed</h3>

@@ -108,12 +108,7 @@ const Components = {
             </nav>
 
             <div class="sidebar-footer">
-            <div class="user-info"
-                style="cursor:pointer;"
-                role="button"
-                tabindex="0"
-                onclick="window.location.href='profile.html'"
-                onkeydown="if(event.key==='Enter'){window.location.href='profile.html'}">
+            <div class="user-info">
                 <div class="user-avatar" id="userAvatar">${Utils.getInitials(user.name)}</div>
                 <div class="user-details">
                 <div class="user-name" id="userName">${user.name}</div>
@@ -344,5 +339,11 @@ console.log('Components loaded successfully');
 document.addEventListener('DOMContentLoaded', () => {
     if (window.Components && typeof Components.upgradeLoadingOverlay === 'function') {
         Components.upgradeLoadingOverlay();
+    }
+    
+    // Clean .html from URL in the browser address bar
+    if (window.location.pathname.endsWith('.html')) {
+        const cleanPath = window.location.pathname.slice(0, -5);
+        window.history.replaceState(null, '', cleanPath + window.location.search + window.location.hash);
     }
 });

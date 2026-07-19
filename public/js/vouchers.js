@@ -31,6 +31,12 @@ const Vouchers = {
   permissions: null,
   isEditMode: false,
 
+  // Sorting state
+  sortConfig: {
+    field: 'date',    // date, amount, payee
+    direction: 'desc' // asc, desc
+  },
+
   filters: {
     status: 'All',
     category: 'All',
@@ -91,6 +97,7 @@ const Vouchers = {
     await Promise.all(preloadTasks);
     await this.loadVouchers();
     this.loadPendingDeletions();
+    await this.loadPayeeSuggestions();
 
     this.setupEventListeners();
     this.handleUrlParams();
@@ -492,6 +499,21 @@ const Vouchers = {
     const requestId = ++this._loadSeq;
     if (!options.skipLoading) this.showLoading(true);
 
+    // Try to load from client-side cache immediately for instant render (SWR)
+    const cacheKey = `pv2026_vouchers_page_${this.currentPage}_size_${this.pageSize}_filters_${JSON.stringify(this.filters)}`;
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        const cachedData = JSON.parse(cached);
+        this.vouchers = cachedData.vouchers || [];
+        this.totalCount = cachedData.totalCount || 0;
+        this.totalPages = cachedData.totalPages || 0;
+        this.renderVoucherList();
+      } catch (e) {
+        console.warn('Failed to load vouchers from client cache:', e);
+      }
+    }
+
     try {
       const result = await API.getVouchers('2026', this.filters, this.currentPage, this.pageSize);
       if (requestId !== this._loadSeq) return;
@@ -514,12 +536,33 @@ const Vouchers = {
         return bd - ad;
       });
 
+      // Save to client-side cache
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify({
+          vouchers: this.vouchers,
+          totalCount: this.totalCount,
+          totalPages: this.totalPages
+        }));
+      } catch (e) {
+        console.warn('Failed to save vouchers to client cache:', e);
+      }
+
       this.renderVoucherList();
     } catch (e) {
       console.error('loadVouchers error:', e);
       Utils.showToast('Error loading vouchers', 'error');
     } finally {
       if (!options.skipLoading) this.showLoading(false);
+    }
+  },
+
+  clearVouchersCache() {
+    console.log('Clearing client-side cache');
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key && (key.startsWith('pv2026_vouchers_page_') || key === 'pv2026_dashboard_stats')) {
+        sessionStorage.removeItem(key);
+      }
     }
   },
 
@@ -539,6 +582,9 @@ const Vouchers = {
       return;
     }
 
+    // Apply sorting
+    const sortedVouchers = this.getSortedVouchers();
+
     const user = Auth.getUser();
     const canSelect = user && [
       CONFIG.ROLES.PAYABLE_STAFF,
@@ -555,20 +601,26 @@ const Vouchers = {
 
     const table = document.createElement('table');
     const thead = document.createElement('thead');
+    
+    const sortIcon = (field) => {
+      if (this.sortConfig.field !== field) return '<i class="fas fa-arrows-alt-v" style="opacity: 0.4;"></i>';
+      return this.sortConfig.direction === 'asc' ? '<i class="fas fa-arrow-up"></i>' : '<i class="fas fa-arrow-down"></i>';
+    };
+    
     thead.innerHTML = `
         <tr>
             ${canSelect ? '<th><input type="checkbox" id="selectAll"></th>' : ''}
-            <th>S/N</th>
-            <th>Voucher No.</th>
-            <th>Payee</th>
-            <th>Particular</th>
-            <th>Gross Amount</th>
-            <th>Category</th>
-            <th>Account Type</th>
-            <th>Control No.</th>
-            <th>Status</th>
-            <th>Pmt Month</th>
-            <th>Actions</th>
+            <th class="sn-header">S/N</th>
+            <th class="sortable voucher-no-header" onclick="Vouchers.updateSort('voucherNo')">Voucher No. ${sortIcon('voucherNo')}</th>
+            <th class="sortable payee-header" onclick="Vouchers.updateSort('payee')">Payee ${sortIcon('payee')}</th>
+            <th class="particular-header">Particular</th>
+            <th class="sortable amount-header" onclick="Vouchers.updateSort('grossAmount')">Gross Amount ${sortIcon('grossAmount')}</th>
+            <th class="sortable amount-header" onclick="Vouchers.updateSort('netAmount')">Net Amount ${sortIcon('netAmount')}</th>
+            <th class="category-header">Category</th>
+            <th class="control-no-header">Control No.</th>
+            <th class="status-header">Status</th>
+            <th class="pmt-month-header">Pmt Month</th>
+            <th class="actions-header">Actions</th>
         </tr>
     `;
     table.appendChild(thead);
@@ -576,24 +628,26 @@ const Vouchers = {
     const tbody = document.createElement('tbody');
     const startSN = (this.currentPage - 1) * this.pageSize;
 
-    this.vouchers.forEach((v, idx) => {
+    sortedVouchers.forEach((v, idx) => {
       const sn = startSN + idx + 1;
       const tr = document.createElement('tr');
       tr.dataset.row = v.rowIndex;
+      
+      const netAmount = (v.grossAmount || 0) - ((v.vat || 0) + (v.wht || 0) + (v.stampDuty || 0));
 
       tr.innerHTML = `
           ${canSelect ? `<td><input type="checkbox" class="voucher-checkbox" value="${v.rowIndex}"></td>` : ''}
-          <td>${sn}</td>
-          <td><strong>${v.accountOrMail || '-'}</strong></td>
-          <td title="${v.payee || ''}">${Utils.truncate(v.payee || '-', 20)}</td>
-          <td title="${v.particular || ''}"><div class="particular-cell">${v.particular || '-'}</div></td>
-          <td>${Utils.formatCurrency(v.grossAmount || 0)}</td>
-          <td>${v.categories || '-'}</td>
-          <td title="${v.subAccountType ? `${v.accountType} - ${v.subAccountType}` : v.accountType || ''}">${v.subAccountType ? `${v.accountType} (${v.subAccountType})` : (v.accountType || '-')}</td>
-          <td>${v.controlNumber || '<span class="text-muted">-</span>'}</td>
-          <td>${Utils.getStatusBadge(v.status || '')}</td>
-          <td>${v.pmtMonth || '-'}</td>
-          <td>
+          <td class="sn-cell">${sn}</td>
+          <td class="voucher-no-cell"><strong>${v.accountOrMail || '-'}</strong></td>
+          <td class="payee-cell" title="${v.payee || ''}">${Utils.truncate(v.payee || '-', 50)}</td>
+          <td class="particular-cell" title="${v.particular || ''}">${v.particular || '-'}</td>
+          <td class="amount-cell" style="text-align: right;">${Utils.formatCurrency(v.grossAmount || 0)}</td>
+          <td class="amount-cell" style="text-align: right;">${Utils.formatCurrency(netAmount || 0)}</td>
+          <td class="category-cell">${v.categories || '-'}</td>
+          <td class="control-no-cell">${v.controlNumber || '<span class="text-muted">-</span>'}</td>
+          <td class="status-cell">${Utils.getStatusBadge(v.status || '')}</td>
+          <td class="pmt-month-cell">${v.pmtMonth || '-'}</td>
+          <td class="actions-cell">
             <div class="action-buttons">
               <button class="btn btn-sm btn-secondary" onclick="Vouchers.viewVoucher(${v.rowIndex})" title="View">
                 <i class="fas fa-eye"></i>
@@ -636,6 +690,56 @@ const Vouchers = {
   updateSelection() {
     const checked = document.querySelectorAll('.voucher-checkbox:checked');
     this.selectedVouchers = Array.from(checked).map(cb => parseInt(cb.value, 10));
+  },
+
+  getSortedVouchers() {
+    const sorted = [...this.vouchers];
+    const { field, direction } = this.sortConfig;
+    
+    sorted.sort((a, b) => {
+      let aVal, bVal;
+      
+      switch(field) {
+        case 'voucherNo':
+          aVal = (a.accountOrMail || '').toLowerCase();
+          bVal = (b.accountOrMail || '').toLowerCase();
+          break;
+        case 'payee':
+          aVal = (a.payee || '').toLowerCase();
+          bVal = (b.payee || '').toLowerCase();
+          break;
+        case 'grossAmount':
+          aVal = parseFloat(a.grossAmount || 0);
+          bVal = parseFloat(b.grossAmount || 0);
+          break;
+        case 'netAmount':
+          aVal = parseFloat((a.grossAmount || 0) - ((a.vat || 0) + (a.wht || 0) + (a.stampDuty || 0)));
+          bVal = parseFloat((b.grossAmount || 0) - ((b.vat || 0) + (b.wht || 0) + (b.stampDuty || 0)));
+          break;
+        case 'date':
+        default:
+          aVal = a.date ? new Date(a.date).getTime() : 0;
+          bVal = b.date ? new Date(b.date).getTime() : 0;
+      }
+      
+      if (typeof aVal === 'string') {
+        return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      } else {
+        return direction === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+    });
+    
+    return sorted;
+  },
+
+  updateSort(field) {
+    if (this.sortConfig.field === field) {
+      this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+      this.sortConfig.field = field;
+      this.sortConfig.direction = field === 'grossAmount' || field === 'netAmount' ? 'desc' : 'asc';
+    }
+    this.renderVoucherList();
   },
 
   getActionButtons(voucher) {
@@ -983,6 +1087,12 @@ const Vouchers = {
     title.textContent = this.isEditMode ? 'Edit Voucher' : 'Create New Voucher';
     form.reset();
 
+    const warning = document.getElementById('formAccountOrMailWarning');
+    if (warning) warning.classList.add('hidden');
+    
+    const payeeInfo = document.getElementById('payeeValidationInfo');
+    if (payeeInfo) payeeInfo.classList.add('hidden');
+
     const lumpSumRadio = document.getElementById('paymentLumpSum');
     if (lumpSumRadio) lumpSumRadio.checked = true;
 
@@ -1040,6 +1150,13 @@ const Vouchers = {
 
     this.setupPaymentTypeHandlers();
     this.recalculateVoucherNet();
+
+    // Trigger validation styling on load if in edit mode
+    if (this.isEditMode) {
+      this.handlePayeeChange();
+      this.validateVoucherNumber();
+    }
+
     modal.classList.add('active');
   },
 
@@ -1234,6 +1351,7 @@ const Vouchers = {
 
       if (result.success) {
         Utils.showToast(result.message || 'Voucher saved successfully', 'success');
+        this.clearVouchersCache();
         this.closeModal('voucherFormModal');
         this.selectedVoucher = null;
         this.isEditMode = false;
@@ -1489,6 +1607,7 @@ const Vouchers = {
       const result = await API.batchUpdateStatus(cn, status, pmtMonth);
       if (result.success) {
         Utils.showToast(result.message, 'success');
+        this.clearVouchersCache();
       } else {
         // Revert Optimistic Update
         oldStates.forEach(s => {
@@ -1537,6 +1656,7 @@ const Vouchers = {
       const result = await API.assignControlNumber(this.selectedVouchers, cn);
       if (result.success) {
         Utils.showToast(result.message, 'success');
+        this.clearVouchersCache();
         this.selectedVouchers = [];
         // Background SWR handles sync
       } else {
@@ -1630,6 +1750,7 @@ const Vouchers = {
       const result = await API.requestDelete(voucher.rowIndex, reason, originalStatus || 'Unpaid');
       if (result.success) {
         Utils.showToast(result.message || 'Deletion request submitted', 'success');
+        this.clearVouchersCache();
         this.deleteTargetVoucher = null;
         if (this.pendingDeletionsLoaded) await this.loadPendingDeletions();
       } else {
@@ -1712,6 +1833,7 @@ const Vouchers = {
       const result = await API.approveDelete(rowIndex);
       if (result.success) {
         Utils.showToast(result.message || 'Voucher deleted', 'success');
+        this.clearVouchersCache();
         await this.loadVouchers();
         if (this.pendingDeletionsLoaded) {
           await this.loadPendingDeletions();
@@ -1741,6 +1863,7 @@ const Vouchers = {
       const result = await API.rejectDelete(v.rowIndex, reason);
       if (result.success) {
         Utils.showToast(result.message || 'Request rejected', 'success');
+        this.clearVouchersCache();
         this.rejectTargetVoucher = null;
         await this.loadVouchers();
         if (this.pendingDeletionsLoaded) {
@@ -1771,6 +1894,7 @@ const Vouchers = {
       const result = await API.cancelDeleteRequest(rowIndex);
       if (result.success) {
         Utils.showToast(result.message || 'Request cancelled', 'success');
+        this.clearVouchersCache();
         await this.loadVouchers();
         if (this.pendingDeletionsLoaded) await this.loadPendingDeletions();
       } else {
@@ -2531,6 +2655,7 @@ const Vouchers = {
 
       if (result.success) {
         Utils.showToast(result.message || 'Released successfully', 'success');
+        this.clearVouchersCache();
         this.closeModal('releaseModal');
         this.selectedForRelease = [];
         this.selectedVouchers = [];
@@ -2659,12 +2784,33 @@ const Vouchers = {
       radio.addEventListener('change', () => this.applyOldVoucherAvailability());
     });
 
-    const recalcNet = () => this.recalculateVoucherNet();
+    const recalcNet = () => {
+      this.recalculateVoucherNet();
+      // Auto-calculate WHT if payee matches validated registry
+      const payeeVal = document.getElementById('formPayee')?.value.trim().toUpperCase();
+      const gross = this.getAmountFieldValue('formGrossAmount');
+      const currentWht = this.getAmountFieldValue('formWht');
+      if (payeeVal && gross && this.payeeRegistry) {
+        const match = this.payeeRegistry.find(v => v.name.toUpperCase() === payeeVal);
+        if (match && match.whtRate && (!currentWht || currentWht === 0)) {
+          const calculatedWht = gross * (match.whtRate / 100);
+          this.setAmountFieldValue('formWht', calculatedWht);
+          this.recalculateVoucherNet();
+        }
+      }
+    };
 
     ['formGrossAmount', 'formVat', 'formWht', 'formStampDuty'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', recalcNet);
     });
+
+    // Payee suggestion and auto-suggest listener
+    document.getElementById('formPayee')?.addEventListener('change', () => this.handlePayeeChange());
+    document.getElementById('formPayee')?.addEventListener('input', () => this.handlePayeeChange());
+
+    // Duplicate check listener
+    document.getElementById('formAccountOrMail')?.addEventListener('change', () => this.validateVoucherNumber());
   },
 
   async saveStatus() {
@@ -2705,6 +2851,7 @@ const Vouchers = {
 
       if (result.success) {
         Utils.showToast(result.message || 'Status updated successfully', 'success');
+        this.clearVouchersCache();
         // Background SWR handles fresh data sync, no block on UI needed
       } else {
         // Revert 
@@ -2985,6 +3132,209 @@ const Vouchers = {
     }
     const loader = document.getElementById('loadingOverlay');
     if (loader) loader.classList.toggle('hidden', !show);
+  },
+
+  // ===== Voucher Enhancements 2026 =====
+  payeeRegistry: [
+    { name: "CROWN MEDICAL SUPPLIES LTD", taxId: "RC-998877", whtRate: 5 },
+    { name: "HEALTHCARE LOGISTICS NIGERIA", taxId: "RC-443322", whtRate: 10 },
+    { name: "GLAXOSMITHKLINE CONSUMER NIG", taxId: "RC-001234", whtRate: 10 },
+    { name: "FMC COOPERATIVE SOCIETY", taxId: "FMC-COOP-01", whtRate: 0 },
+    { name: "IBEDC (IBADAN ELECTRICITY)", taxId: "RC-887766", whtRate: 5 },
+    { name: "JULIUS BERGER NIGERIA PLC", taxId: "RC-123456", whtRate: 10 },
+    { name: "MEDILINE PHARMACEUTICALS", taxId: "RC-556677", whtRate: 5 },
+    { name: "OAKWOOD DIAGNOSTICS", taxId: "RC-778899", whtRate: 5 },
+    { name: "STERLING PHARMA NIG LTD", taxId: "RC-112233", whtRate: 10 },
+    { name: "ZENECA DIAGNOSTIC LABS", taxId: "RC-223344", whtRate: 5 }
+  ],
+
+  escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  },
+
+  async loadPayeeSuggestions() {
+    try {
+      const result = await API.getTaxByPayee('2026');
+      const payeeNames = new Set();
+      
+      // Add default registry vendors
+      this.payeeRegistry.forEach(v => payeeNames.add(v.name));
+      
+      // Add tax payees
+      if (result.success && result.payees) {
+        result.payees.forEach(p => {
+          if (p.payee) payeeNames.add(p.payee.toUpperCase().trim());
+        });
+      }
+
+      // Add local voucher payees
+      if (this.vouchers) {
+        this.vouchers.forEach(v => {
+          if (v.payee) payeeNames.add(v.payee.toUpperCase().trim());
+        });
+      }
+
+      const datalist = document.getElementById('payeeSuggestions');
+      if (datalist) {
+        datalist.innerHTML = '';
+        Array.from(payeeNames).sort().forEach(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          datalist.appendChild(option);
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load payee suggestions:', e);
+    }
+  },
+
+  handlePayeeChange() {
+    const input = document.getElementById('formPayee');
+    const info = document.getElementById('payeeValidationInfo');
+    const validatedName = document.getElementById('validatedPayeeName');
+    const validatedTaxId = document.getElementById('validatedPayeeTaxId');
+    const validatedWhtRate = document.getElementById('validatedPayeeWhtRate');
+    if (!input || !info) return;
+
+    const value = input.value.trim().toUpperCase();
+    if (!value) {
+      info.classList.add('hidden');
+      return;
+    }
+
+    const match = this.payeeRegistry.find(v => v.name.toUpperCase() === value);
+    if (match) {
+      info.classList.remove('hidden');
+      if (validatedName) validatedName.textContent = match.name;
+      if (validatedTaxId) validatedTaxId.textContent = match.taxId || 'N/A';
+      if (validatedWhtRate) validatedWhtRate.textContent = match.whtRate !== undefined ? match.whtRate : '0';
+
+      // Auto-calculate WHT if WHT field is empty/0 and gross is set
+      const gross = this.getAmountFieldValue('formGrossAmount');
+      const currentWht = this.getAmountFieldValue('formWht');
+      if (gross && (!currentWht || currentWht === 0) && match.whtRate) {
+        const calculatedWht = gross * (match.whtRate / 100);
+        this.setAmountFieldValue('formWht', calculatedWht);
+        this.recalculateVoucherNet();
+      }
+    } else {
+      info.classList.add('hidden');
+    }
+  },
+
+  async validateVoucherNumber() {
+    const input = document.getElementById('formAccountOrMail');
+    const warning = document.getElementById('formAccountOrMailWarning');
+    if (!input || !warning) return;
+
+    const voucherNumber = input.value.trim();
+    if (!voucherNumber) {
+      warning.classList.add('hidden');
+      return;
+    }
+
+    try {
+      const result = await API.lookupVoucher(voucherNumber);
+      if (result.success && result.found) {
+        // If editing, make sure it's not the same voucher
+        if (this.isEditMode && this.selectedVoucher && String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex)) {
+          warning.classList.add('hidden');
+          return;
+        }
+        warning.classList.remove('hidden');
+        const payeeName = this.escapeHtml(result.voucher.payee || '');
+        const grossVal = Utils.formatNumber(result.voucher.grossAmount || 0);
+        warning.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Warning: A voucher with number <strong>${this.escapeHtml(voucherNumber)}</strong> already exists (Payee: ${payeeName}, Gross: ₦${grossVal}).`;
+      } else {
+        warning.classList.add('hidden');
+      }
+    } catch (e) {
+      console.error('Error validating voucher number:', e);
+    }
+  },
+
+  async toggleHistoryLog() {
+    const container = document.getElementById('voucherHistoryContainer');
+    const icon = document.getElementById('historyToggleIcon');
+    if (!container || !icon) return;
+
+    const isCollapsed = container.classList.contains('hidden');
+    if (isCollapsed) {
+      container.classList.remove('hidden');
+      icon.className = 'fas fa-chevron-up';
+      await this.loadVoucherHistory();
+    } else {
+      container.classList.add('hidden');
+      icon.className = 'fas fa-chevron-down';
+    }
+  },
+
+  async loadVoucherHistory() {
+    const loading = document.getElementById('historyLoading');
+    const recordsDiv = document.getElementById('historyRecords');
+    if (!recordsDiv) return;
+
+    if (loading) loading.style.display = 'block';
+    recordsDiv.innerHTML = '';
+
+    if (!this.selectedVoucher) return;
+
+    try {
+      const result = await API.getAuditTrail(500, 0);
+      if (result.success && result.records) {
+        const filtered = result.records.filter(r => {
+          const isVoucherSheet = String(r.sheet).toLowerCase() === 'vouchers';
+          const matchesRow = String(r.rowIndex) === String(this.selectedVoucher.rowIndex);
+          const matchesVoucherNo = this.selectedVoucher.accountOrMail && 
+            r.description && String(r.description).includes(this.selectedVoucher.accountOrMail);
+          return isVoucherSheet && (matchesRow || matchesVoucherNo);
+        });
+
+        if (filtered.length === 0) {
+          recordsDiv.innerHTML = '<p class="text-muted text-center" style="padding: 10px; margin: 0;">No historical changes logged for this voucher.</p>';
+        } else {
+          let html = '<div class="history-timeline" style="font-size: 13px; line-height: 1.5; padding: 5px;">';
+          filtered.forEach(r => {
+            let badgeBg = '#fff3cd', badgeColor = '#856404';
+            if (r.action === 'CREATE') {
+              badgeBg = '#d4edda';
+              badgeColor = '#155724';
+            } else if (r.action === 'DELETE') {
+              badgeBg = '#f8d7da';
+              badgeColor = '#721c24';
+            }
+            html += `
+              <div class="history-item" style="border-left: 2px solid var(--primary, #1a5f2a); padding-left: 12px; margin-bottom: 12px; position: relative;">
+                <div class="history-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--primary, #1a5f2a); position: absolute; left: -5px; top: 6px;"></div>
+                <div style="display: flex; justify-content: space-between; color: var(--text-muted, #666); font-size: 11px;">
+                  <span><strong>${this.escapeHtml(r.name || r.email || 'System')}</strong> (${this.escapeHtml(r.role || 'User')})</span>
+                  <span>${this.escapeHtml(r.timestamp || '')}</span>
+                </div>
+                <div style="margin-top: 4px; color: var(--text-color, #333);">
+                  <span class="badge" style="background-color: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-right: 5px;">${this.escapeHtml(r.action)}</span>
+                  ${this.escapeHtml(r.description || '')}
+                </div>
+              </div>
+            `;
+          });
+          html += '</div>';
+          recordsDiv.innerHTML = html;
+        }
+      } else {
+        recordsDiv.innerHTML = `<p class="text-danger text-center" style="padding: 10px; margin: 0;">Failed to load history: ${this.escapeHtml(result.error || 'Unknown error')}</p>`;
+      }
+    } catch (e) {
+      console.error('Error loading history:', e);
+      recordsDiv.innerHTML = '<p class="text-danger text-center" style="padding: 10px; margin: 0;">Error fetching audit log.</p>';
+    } finally {
+      if (loading) loading.style.display = 'none';
+    }
   }
 
 }; // <-- This closes the Vouchers object

@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reports - PAYABLE VOUCHER 2026</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -112,6 +115,121 @@
                 break-inside: avoid;
             }
         }
+
+        /* Tab Button Styles */
+        .tab-btn {
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-bottom: 3px solid transparent !important;
+        }
+        
+        .tab-btn:hover {
+            color: var(--primary-color);
+            background-color: rgba(26, 95, 42, 0.04);
+        }
+        
+        .tab-btn.active {
+            background-color: var(--secondary-color) !important;
+            border-bottom: 3px solid var(--primary-color) !important;
+            color: var(--primary-color) !important;
+            font-weight: 600;
+        }
+        
+        /* Drill down links */
+        .drill-down-link {
+            cursor: pointer;
+            color: var(--primary-color) !important;
+            text-decoration: underline;
+            transition: color 0.15s ease;
+        }
+        
+        .drill-down-link:hover {
+            color: #0d3817 !important;
+        }
+        
+        /* Date range inputs styling */
+        .form-control-sm-custom {
+            height: 32px;
+            padding: 4px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+        }
+
+        /* Glassmorphism modal for drill-down */
+        .modal-overlay {
+            backdrop-filter: blur(8px);
+            background-color: rgba(26, 95, 42, 0.12) !important;
+        }
+        
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
+        }
+
+        @media print {
+            #tab-summary, #tab-expense, #tab-tax, #tab-debt, #tab-requests {
+                display: block !important;
+            }
+            .report-tabs, .report-actions, .card-header button, .card-header select {
+                display: none !important;
+            }
+            .card, .report-section {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+                margin-bottom: 20px !important;
+            }
+            .card-body {
+                aspect-ratio: 16/9 !important;
+                max-height: 380px !important;
+                overflow: hidden !important;
+            }
+            canvas {
+                max-height: 320px !important;
+                width: 100% !important;
+                height: auto !important;
+            }
+        }
+
+        /* Tabular Numbers */
+        .tabular-nums,
+        .amount-cell,
+        .totals-row td,
+        .stat-value,
+        .stats-grid .stat-value,
+        table td {
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Zero/Empty State Placeholders */
+        .chart-empty-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+            background: rgba(248, 249, 250, 0.5);
+            border: 1px dashed #dee2e6;
+            border-radius: var(--radius-sm);
+            text-align: center;
+            margin: 10px 0;
+        }
+        .chart-empty-placeholder i {
+            font-size: 2.5rem;
+            color: #ccc;
+            margin-bottom: 12px;
+        }
+        .chart-empty-placeholder p {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
@@ -157,8 +275,55 @@
                 </div>
             </div>
 
+            <!-- Custom Date Range Filters -->
+            <div class="card mb-3 no-print" style="border: 1px solid rgba(26, 95, 42, 0.08); background-color: #f8f9fa;">
+                <div class="card-body" style="padding: 12px 16px;">
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+                            <span style="font-weight: 600; font-size: 13px; color: var(--text-dark);"><i class="fas fa-filter"></i> Date Range:</span>
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <label for="reportDateFrom" style="font-size: 12px; color: var(--text-muted); margin: 0;">From</label>
+                                <input type="date" id="reportDateFrom" class="form-control form-control-sm-custom" style="width: 140px; height: 32px; padding: 4px 8px; font-size: 12px;">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <label for="reportDateTo" style="font-size: 12px; color: var(--text-muted); margin: 0;">To</label>
+                                <input type="date" id="reportDateTo" class="form-control form-control-sm-custom" style="width: 140px; height: 32px; padding: 4px 8px; font-size: 12px;">
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="Reports.applyDateFilter()" style="height: 32px; padding: 0 12px; font-size: 12px; border-radius: 4px;">
+                                <i class="fas fa-check"></i> Apply
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="Reports.clearDateFilter()" style="height: 32px; padding: 0 12px; font-size: 12px; border-radius: 4px;">
+                                <i class="fas fa-times"></i> Reset
+                            </button>
+                        </div>
+                        <div id="dateFilterStatus" class="text-muted" style="font-size: 12px; font-style: italic;">
+                            Showing full year summary
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabbed Navigation -->
+            <div class="report-tabs no-print" style="display: flex; gap: 10px; margin-bottom: 24px; border-bottom: 1px solid rgba(26, 95, 42, 0.1); padding-bottom: 10px; flex-wrap: wrap;">
+                <button class="tab-btn active" onclick="Reports.changeTab('summary')" data-tab="summary">
+                    <i class="fas fa-chart-line"></i> Executive Summary
+                </button>
+                <button class="tab-btn" onclick="Reports.changeTab('expense')" data-tab="expense">
+                    <i class="fas fa-calculator"></i> Expense Analysis
+                </button>
+                <button class="tab-btn" onclick="Reports.changeTab('tax')" data-tab="tax">
+                    <i class="fas fa-receipt"></i> Tax Reports
+                </button>
+                <button class="tab-btn" onclick="Reports.changeTab('debt')" data-tab="debt">
+                    <i class="fas fa-hourglass-half"></i> Debt & Aging
+                </button>
+                <button class="tab-btn" onclick="Reports.changeTab('requests')" data-tab="requests">
+                    <i class="fas fa-file-invoice"></i> Debt Profile Requests
+                </button>
+            </div>
+
             <!-- Year Summary Section -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-chart-pie"></i> Year Summary - <span id="currentYearLabel">2026</span>
                 </h2>
@@ -172,7 +337,7 @@
             </div>
 
             <!-- Financial Insights -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-coins"></i> Financial Insights
                 </h2>
@@ -185,7 +350,7 @@
             </div>
 
             <!-- Cash Outflow vs Commitment -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">
@@ -202,7 +367,7 @@
             </div>
 
             <!-- Accruals Snapshot -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">
@@ -220,7 +385,7 @@
             </div>
 
             <!-- Net Payable Position -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-layer-group"></i> Net Payable Position (All Years)
                 </h2>
@@ -242,7 +407,7 @@
             </div>
 
             <!-- Voucher Value & Distribution -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-chart-area"></i> Average Voucher Value & Distribution
                 </h2>
@@ -266,7 +431,7 @@
             </div>
 
             <!-- Tax Liability vs Paid -->
-            <div class="report-section">
+            <div class="report-section tab-section-tax">
                 <h2 class="report-section-title">
                     <i class="fas fa-receipt"></i> Tax Analysis
                 </h2>
@@ -307,25 +472,42 @@
                 </div>
             </div>
 
+            <!-- Tax Remittance history Ledger -->
+            <div class="report-section tab-section-tax">
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3 class="card-title">
+                            <i class="fas fa-history"></i> Tax Remittance History Ledger
+                        </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('taxPaymentsContainer', 'Tax_Remittance_Ledger')">
+                            <i class="fas fa-file-excel"></i> Export Ledger
+                        </button>
+                    </div>
+                    <div class="card-body" id="taxPaymentsContainer">
+                        <p class="text-muted text-center">Loading remittance logs...</p>
+                    </div>
+                </div>
+            </div>
 
-            <div class="report-section">
-    <h2 class="report-section-title">
-        <i class="fas fa-tachometer-alt"></i> Analytics
-    </h2>
-    <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); gap: 15px;">
-        <div class="stat-card" id="largestVoucher">
-            <div class="stat-label">-</div>
-        </div>
-        <div class="stat-card" id="avgVoucher">
-            <div class="stat-label">-</div>
-        </div>
-        <div class="stat-card" id="paymentRate">
-            <div class="stat-label">-</div>
-        </div>
-    </div>
-</div>
 
-    <div class="report-section">
+            <div class="report-section tab-section-summary">
+                <h2 class="report-section-title">
+                    <i class="fas fa-tachometer-alt"></i> Analytics
+                </h2>
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                    <div class="stat-card" id="largestVoucher">
+                        <div class="stat-label">-</div>
+                    </div>
+                    <div class="stat-card" id="avgVoucher">
+                        <div class="stat-label">-</div>
+                    </div>
+                    <div class="stat-card" id="paymentRate">
+                        <div class="stat-label">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-section tab-section-summary">
     <h2 class="report-section-title">
         <i class="fas fa-chart-pie"></i> Status Distribution
     </h2>
@@ -358,12 +540,15 @@
     </div>
 
             <!-- Category Breakdown Section -->
-            <div class="report-section">
+            <div class="report-section tab-section-expense" id="cardCategoryBreakdown">
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-th-list"></i> Category Breakdown
                         </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('categoryTable', 'Category_Breakdown')">
+                            <i class="fas fa-file-excel"></i> Export
+                        </button>
                     </div>
                     <div class="card-body" id="categoryTable">
                         <p class="text-muted text-center">Loading...</p>
@@ -372,12 +557,15 @@
             </div>
 
             <!-- Account Type Breakdown Section -->
-            <div class="report-section">
+            <div class="report-section tab-section-expense" id="cardAccountTypeBreakdown">
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-university"></i> Account Type Breakdown
                         </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('accountTypeTable', 'Account_Type_Breakdown')">
+                            <i class="fas fa-file-excel"></i> Export
+                        </button>
                     </div>
                     <div class="card-body" style="padding-bottom: 0;">
                         <div class="form-row" style="margin-bottom: 0;">
@@ -402,12 +590,15 @@
             </div>
 
             <!-- Monthly Breakdown Section -->
-            <div class="report-section">
+            <div class="report-section tab-section-expense" id="cardMonthlyBreakdown">
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-calendar-alt"></i> Monthly Breakdown
                         </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('monthlyTable', 'Monthly_Breakdown')">
+                            <i class="fas fa-file-excel"></i> Export
+                        </button>
                     </div>
                     <div class="card-body" id="monthlyTable">
                         <p class="text-muted text-center">Loading...</p>
@@ -415,7 +606,8 @@
                 </div>
             </div>
             <!-- Category Chart -->
-            <div class="report-section">
+            <!-- Category Chart -->
+            <div class="report-section tab-section-expense">
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">
@@ -429,24 +621,33 @@
             </div>
 
             <!-- Category Pareto Chart -->
-                <div class="report-section">
+            <div class="report-section tab-section-expense">
                 <div class="card">
-                    <div class="card-header">
-                    <h3 class="card-title">
-                        <i class="fas fa-chart-bar"></i> Unpaid Balance Pareto (80/20)
-                    </h3>
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-bar"></i> Unpaid Balance Pareto (80/20)
+                        </h3>
+                        <div style="display: flex; gap: 8px;">
+                            <select class="form-control" id="paretoGroupSelector" onchange="Reports.toggleParetoGroup()" style="width: auto; padding: 2px 8px; font-size: 12px; height: 28px; line-height: 1;">
+                                <option value="category">By Category</option>
+                                <option value="vendor">By Vendor</option>
+                            </select>
+                            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('categoryParetoChart', 'Pareto_Analysis')">
+                                <i class="fas fa-download"></i> PNG
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body">
-                    <canvas id="categoryParetoChart" height="120"></canvas>
-                    <p class="text-muted" style="font-size:12px; margin-top:8px;">
-                        Shows categories ranked by unpaid balance with cumulative percentage line.
-                    </p>
+                        <canvas id="categoryParetoChart" height="120"></canvas>
+                        <p class="text-muted" style="font-size:12px; margin-top:8px;">
+                            Shows categories or vendors ranked by unpaid balance with cumulative percentage line.
+                        </p>
                     </div>
                 </div>
-                </div>
+            </div>
 
             <!-- Monthly Chart -->
-            <div class="report-section">
+            <div class="report-section tab-section-expense">
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">
@@ -459,24 +660,30 @@
                 </div>
             </div>
 
-            <div class="report-section" id="agingSection">
+            <div class="report-section tab-section-debt" id="agingSection">
                 <h2 class="report-section-title">
                     <i class="fas fa-hourglass-half"></i> Outstanding by Age (Amount + Count Trend)
                 </h2>
 
                 <div class="card">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6;">
+                        <h3 class="card-title"><i class="fas fa-table"></i> Aging Breakdown</h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('agingTable', 'Aging_Breakdown')">
+                            <i class="fas fa-file-excel"></i> Export Table
+                        </button>
+                    </div>
                     <div class="card-body">
-                    <canvas id="agingChart" height="120"></canvas>
-                    <div id="agingTable" style="margin-top: 15px;"></div>
-                    <p class="text-muted" style="font-size:12px; margin-top:8px;">
-                        Computed client-side from vouchers in the selected year.
-                    </p>
+                        <canvas id="agingChart" height="120"></canvas>
+                        <div id="agingTable" style="margin-top: 15px;"></div>
+                        <p class="text-muted" style="font-size:12px; margin-top:8px;">
+                            Computed client-side from vouchers in the selected year.
+                        </p>
                     </div>
                 </div>
-                </div>
+            </div>
 
             <!-- All Years Summary (Debt Tracking) -->
-            <div class="report-section">
+            <div class="report-section tab-section-debt" id="cardMultiYearDebt">
                 <h2 class="report-section-title">
                     <i class="fas fa-history"></i> Multi-Year Debt Tracking
                 </h2>
@@ -493,10 +700,13 @@
                 </div>
                 
                 <div class="card">
-                    <div class="card-header">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-table"></i> Year-by-Year Summary
                         </h3>
+                        <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('allYearsTable', 'Multi_Year_Summary')">
+                            <i class="fas fa-file-excel"></i> Export
+                        </button>
                     </div>
                     <div class="card-body" id="allYearsTable">
                         <p class="text-muted text-center">Loading...</p>
@@ -504,7 +714,7 @@
                 </div>
             </div>
 
-            <div class="report-section">
+            <div class="report-section tab-section-debt">
                 <h2 class="report-section-title">
                     <i class="fas fa-chart-line"></i> Outstanding Debt Trend (All Years)
                 </h2>
@@ -523,7 +733,7 @@
                 </div>
 
             <!-- Debt Profile Section -->
-            <div class="report-section">
+            <div class="report-section tab-section-debt">
                 <h2 class="report-section-title">
                     <i class="fas fa-exclamation-triangle"></i> Debt Profile (2026)
                 </h2>
@@ -555,7 +765,7 @@
                 </div>
             </div>
             
-            <div class="report-section">
+            <div class="report-section tab-section-debt">
             <div class="card">
                 <div class="card-header">
                 <h3 class="card-title"><i class="fas fa-users"></i> Top Debtors (Chart)</h3>
@@ -569,7 +779,7 @@
             </div>
             </div>
 
-            <div class="report-section">
+            <div class="report-section tab-section-debt">
                 <div class="card">
                     <div class="card-header">
                     <h3 class="card-title"><i class="fas fa-bullseye"></i> Debt Concentration</h3>
@@ -590,7 +800,7 @@
                 </div>
 
             <!-- Revalidated Impact -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-rotate-right"></i> Revalidated Impact
                 </h2>
@@ -612,7 +822,7 @@
             </div>
 
             <!-- Category Margin/Share Shift -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">
@@ -629,7 +839,7 @@
             </div>
 
             <!-- Cancelled Voucher Financial Impact -->
-            <div class="report-section">
+            <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-ban"></i> Cancelled Voucher Financial Impact
                 </h2>
@@ -654,10 +864,41 @@
             </div>
 
             <!-- Official Debt Profile Report Section (New) -->
-            <div class="report-section" id="officialDebtProfileSection">
+            <div class="report-section tab-section-requests" id="officialDebtProfileSection">
                 <h2 class="report-section-title">
                     <i class="fas fa-file-invoice"></i> Official Debt Profile Report 2026
                 </h2>
+                
+                <!-- Saved Reports Selector -->
+                <div class="card mb-4" id="historicalReportsCard">
+                    <div class="card-body" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px; padding: 15px;">
+                        <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 300px;">
+                            <label style="font-weight: 600; white-space: nowrap; margin-bottom: 0;" for="reportDropdown">
+                                <i class="fas fa-history text-primary"></i> Historical Reports:
+                            </label>
+                            <select id="reportDropdown" class="form-control" style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; flex-grow: 1; max-width: 400px; font-family: inherit;">
+                                <option value="">-- Loading Saved Reports... --</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-primary" id="viewReportBtn" disabled style="padding: 6px 12px; font-size: 0.9rem;">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button class="btn btn-info text-white" id="editReportBtn" disabled style="padding: 6px 12px; font-size: 0.9rem; color: white !important;">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                            <button class="btn btn-danger" id="deleteReportBtn" disabled style="padding: 6px 12px; font-size: 0.9rem; background-color: #dc3545; border-color: #dc3545;">
+                                <i class="fas fa-trash-alt"></i> Delete
+                            </button>
+                            <button class="btn btn-secondary" id="previewReportBtn" disabled style="padding: 6px 12px; font-size: 0.9rem;">
+                                <i class="fas fa-file-pdf"></i> Preview
+                            </button>
+                            <button class="btn btn-success" id="generateNewReportBtn" style="padding: 6px 12px; font-size: 0.9rem;">
+                                <i class="fas fa-plus-circle"></i> Generate New
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="card" id="debtProfileWorkflowCard">
                     <div class="card-body text-center p-5">
@@ -855,7 +1096,7 @@
                     <div class="form-group mb-3">
                         <label class="form-label" for="reportSummary">1. Overview & Objectives</label>
                         <textarea id="reportSummary" class="form-control" rows="3" placeholder="Summarize the purpose and period of this report..."></textarea>
-                        <small class="text-muted"><strong>Guide:</strong> Briefly state the total debt, its purpose as a handover/analysis document, and key highlights.</small>
+                        <small class="text-muted"><strong>Guide:</strong> Briefly state the total debt, its purpose as ananalysis document, and key highlights.</small>
                     </div>
                     
                     <div class="form-group mb-3">
@@ -879,6 +1120,41 @@
                 </form>
             </div>
         </div>
+    </div>
+
+    <!-- Drill-Down Modal -->
+    <div class="modal-overlay" id="drillDownModal">
+        <div class="modal" style="max-width: 900px; width: 90%; max-height: 85vh;">
+            <div class="modal-header">
+                <h3 class="modal-title" id="drillDownTitle"><i class="fas fa-list-ul"></i> Contributing Vouchers</h3>
+                <button class="modal-close" onclick="Reports.closeDrillDownModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; max-height: 50vh;">
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>S/N</th>
+                                <th>Voucher No.</th>
+                                <th>Payee</th>
+                                <th>Particular</th>
+                                <th class="text-right">Gross (₦)</th>
+                                <th class="text-right">Net (₦)</th>
+                                <th class="text-center">Status</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="drillDownTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="Reports.closeDrillDownModal()">Close</button>
+                <button class="btn btn-primary" onclick="Reports.exportDrillDownCSV()"><i class="fas fa-file-excel"></i> Export Table</button>
+            </div>
+        </div>
+    </div>
+        </main>
     </div>
 
     <!-- Scripts -->

@@ -31,7 +31,7 @@ const Dashboard = {
         console.log('Permissions loaded:', this.permissions);
 
         // Setup UI components - ORDER MATTERS!
-        this.setupSidebar();
+        await Components.initPage('dashboard');
         this.setupUserInfo();
         this.setupEventListeners();
         this.initMasking();
@@ -45,49 +45,6 @@ const Dashboard = {
         }
 
         console.log('Dashboard.init() completed');
-    },
-
-    // ---------- SIDEBAR ----------
-
-    setupSidebar() {
-        console.log('setupSidebar() called');
-
-        const sidebar = document.getElementById('sidebar');
-        if (!sidebar) {
-            console.error('ERROR: Sidebar element not found!');
-            return;
-        }
-
-        // Check if Components is available
-        if (typeof Components === 'undefined') {
-            console.error('ERROR: Components is not defined!');
-            return;
-        }
-
-        if (typeof Components.getSidebar !== 'function') {
-            console.error('ERROR: Components.getSidebar is not a function!');
-            return;
-        }
-
-        // Check if user is available
-        const user = Auth.getUser();
-        console.log('User for sidebar:', user);
-
-        if (!user) {
-            console.error('ERROR: No user found for sidebar!');
-            return;
-        }
-
-        // Generate and set sidebar HTML
-        const sidebarHtml = Components.getSidebar('dashboard');
-        console.log('Sidebar HTML length:', sidebarHtml.length);
-
-        if (sidebarHtml && sidebarHtml.length > 0) {
-            sidebar.innerHTML = sidebarHtml;
-            console.log('Sidebar HTML set successfully');
-        } else {
-            console.error('ERROR: getSidebar returned empty string!');
-        }
     },
 
     setupUserInfo() {
@@ -116,40 +73,7 @@ const Dashboard = {
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => this.loadDashboardData());
-        }
-
-        // Mobile menu toggle
-        const menuToggle = document.getElementById('menuToggle');
-        const sidebar = document.getElementById('sidebar');
-        if (menuToggle && sidebar) {
-            const closeSidebar = () => sidebar.classList.remove('active');
-
-            menuToggle.addEventListener('click', (event) => {
-                event.stopPropagation();
-                sidebar.classList.toggle('active');
-            });
-
-            document.addEventListener('click', (event) => {
-                if (window.innerWidth > 992) return;
-                if (!sidebar.contains(event.target) && !menuToggle.contains(event.target)) {
-                    closeSidebar();
-                }
-            });
-
-            document.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') closeSidebar();
-            });
-
-            window.addEventListener('resize', () => {
-                if (window.innerWidth > 992) closeSidebar();
-            });
-
-            sidebar.querySelectorAll('.nav-item').forEach((link) => {
-                link.addEventListener('click', () => {
-                    if (window.innerWidth <= 992) closeSidebar();
-                });
-            });
-        }
+          }
 
         // Primary button setup
         this.setupPrimaryButtons();
@@ -212,6 +136,7 @@ const Dashboard = {
             this.renderCategoryBreakdown(this.stats.categoryBreakdown);
             this.renderMonthlyBreakdown(this.stats.monthlyBreakdown);
             this.renderRecentVouchers(this.stats.recentVouchers);
+            this.renderAgedPayables(this.stats.aging);
         }
 
         const btn = document.getElementById('maskToggleBtn');
@@ -234,6 +159,8 @@ const Dashboard = {
         if (cached) {
             this.stats = JSON.parse(cached);
             this.applyMasking();
+            this.loadCriticalComplianceActions();
+            this.loadApprovalsQueue();
         }
 
         this.showLoading(true);
@@ -250,6 +177,9 @@ const Dashboard = {
             this.stats = result;
             sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(result));
             this.applyMasking();
+
+            await this.loadCriticalComplianceActions();
+            await this.loadApprovalsQueue();
 
         } catch (error) {
             console.error('Dashboard load error:', error);
@@ -275,7 +205,6 @@ const Dashboard = {
         const debt = Utils.formatCurrency(stats.totalDebt || 0);
         const pRate = `${stats.averagePaymentPercent || 0}%`;
         const revalCnt = Utils.formatNumber(stats.revalidatedVouchers || 0);
-        const revalMissing = Utils.formatNumber(stats.revalidatedWithoutOldNumber || 0);
 
         container.innerHTML = `
             <div class="stat-card">
@@ -325,11 +254,6 @@ const Dashboard = {
             <div class="stat-card">
                 <div class="stat-label">Revalidated Vouchers</div>
                 <div class="stat-value">${m ? '***' : revalCnt}</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-label">Revalidated (No Old Voucher No.)</div>
-                <div class="stat-value">${m ? '***' : revalMissing}</div>
             </div>
         `;
     },
@@ -467,6 +391,231 @@ const Dashboard = {
         if (overlay) {
             overlay.classList.toggle('hidden', !show);
         }
+    },
+
+    renderAgedPayables(aging) {
+        const container = document.getElementById('agedPayables');
+        if (!container) return;
+
+        if (!aging) {
+            container.innerHTML = '<p class="text-muted text-center">No aging data available</p>';
+            return;
+        }
+
+        const m = this.masked;
+
+        const u30Amt = aging.under30 ? aging.under30.amount : 0;
+        const u30Cnt = aging.under30 ? aging.under30.count : 0;
+        const t60Amt = aging.thirtyToSixty ? aging.thirtyToSixty.amount : 0;
+        const t60Cnt = aging.thirtyToSixty ? aging.thirtyToSixty.count : 0;
+        const o60Amt = aging.overSixty ? aging.overSixty.amount : 0;
+        const o60Cnt = aging.overSixty ? aging.overSixty.count : 0;
+
+        const totalAmt = u30Amt + t60Amt + o60Amt;
+        const u30Pct = totalAmt > 0 ? (u30Amt / totalAmt) * 100 : 0;
+        const t60Pct = totalAmt > 0 ? (t60Amt / totalAmt) * 100 : 0;
+        const o60Pct = totalAmt > 0 ? (o60Amt / totalAmt) * 100 : 0;
+
+        container.innerHTML = `
+            <div class="aging-bar-container">
+                <div class="aging-bar-label">
+                    <span>0 - 30 Days</span>
+                    <span>${m ? '***' : Utils.formatCurrency(u30Amt)}</span>
+                </div>
+                <div class="aging-bar-progress">
+                    <div class="aging-bar-fill under-30" style="width: ${u30Pct}%"></div>
+                </div>
+                <div class="aging-bar-meta">${m ? '***' : u30Cnt} voucher(s) outstanding</div>
+            </div>
+
+            <div class="aging-bar-container">
+                <div class="aging-bar-label">
+                    <span>31 - 60 Days</span>
+                    <span>${m ? '***' : Utils.formatCurrency(t60Amt)}</span>
+                </div>
+                <div class="aging-bar-progress">
+                    <div class="aging-bar-fill thirty-to-sixty" style="width: ${t60Pct}%"></div>
+                </div>
+                <div class="aging-bar-meta">${m ? '***' : t60Cnt} voucher(s) outstanding</div>
+            </div>
+
+            <div class="aging-bar-container">
+                <div class="aging-bar-label">
+                    <span>61+ Days</span>
+                    <span>${m ? '***' : Utils.formatCurrency(o60Amt)}</span>
+                </div>
+                <div class="aging-bar-progress">
+                    <div class="aging-bar-fill over-60" style="width: ${o60Pct}%"></div>
+                </div>
+                <div class="aging-bar-meta">${m ? '***' : o60Cnt} voucher(s) outstanding</div>
+            </div>
+        `;
+    },
+
+    async loadCriticalComplianceActions() {
+        const card = document.getElementById('criticalComplianceActionsCard');
+        const list = document.getElementById('criticalComplianceActionsList');
+        if (!card || !list) return;
+
+        try {
+            // Fetch PENDING action items
+            const res = await API.getActionItems({ status: 'PENDING' });
+            if (res.success && res.items && res.items.length > 0) {
+                // Filter and sort by severity (critical first)
+                const sorted = res.items.sort((a, b) => {
+                    const sevA = String(a.severity || '').toLowerCase();
+                    const sevB = String(b.severity || '').toLowerCase();
+                    if (sevA === 'danger' && sevB !== 'danger') return -1;
+                    if (sevA !== 'danger' && sevB === 'danger') return 1;
+                    if (sevA === 'warning' && sevB !== 'warning' && sevB !== 'danger') return -1;
+                    if (sevA !== 'warning' && sevB === 'warning' && sevA !== 'danger') return 1;
+                    return 0;
+                });
+
+                // Pick top 3
+                const top3 = sorted.slice(0, 3);
+                
+                let html = '';
+                top3.forEach(item => {
+                    const isDanger = String(item.severity || '').toLowerCase() === 'danger';
+                    const iconClass = isDanger ? 'fa-exclamation-circle text-danger' : 'fa-exclamation-triangle text-warning';
+                    const bgStyle = isDanger ? 'background: #fff8f8; border-color: #fbd5d5;' : 'background: #fffdf5; border-color: #fef3c7;';
+                    
+                    html += `
+                        <div class="mini-compliance-item" style="${bgStyle}">
+                            <div class="mini-compliance-text">
+                                <i class="fas ${iconClass}" style="margin-right: 8px;"></i>
+                                <strong>[${item.voucherNumber || 'General'}]</strong> ${item.message || item.title}
+                            </div>
+                            <a href="vouchers.html?lookup=true&voucher=${encodeURIComponent(item.voucherNumber)}" class="btn btn-sm btn-secondary" style="margin-left: 10px;">
+                                <i class="fas fa-arrow-right"></i> Fix
+                            </a>
+                        </div>
+                    `;
+                });
+                
+                list.innerHTML = html;
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        } catch (e) {
+            console.error('Error loading critical compliance actions:', e);
+            card.style.display = 'none';
+        }
+    },
+
+    async loadApprovalsQueue() {
+        const card = document.getElementById('myApprovalsQueueCard');
+        const container = document.getElementById('myApprovalsQueue');
+        const middleRow = document.getElementById('middleRowGrid');
+        if (!card || !container) return;
+
+        // Check if user is an authorized approver
+        const user = Auth.getUser();
+        const perms = this.permissions || {};
+        
+        // Approver roles: Payable Head, CPO, Admin
+        const approverRoles = [CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO, CONFIG.ROLES.ADMIN];
+        const isApprover = user && (approverRoles.includes(user.role) || perms.canApproveDelete);
+
+        if (!isApprover) {
+            // Hide approvals queue and make Aged Payables span 100% full-width
+            card.style.display = 'none';
+            if (middleRow) middleRow.style.gridTemplateColumns = '1fr';
+            return;
+        }
+
+        // Show approvals queue card and restore 2-column grid
+        card.style.display = 'block';
+        if (middleRow) middleRow.style.gridTemplateColumns = '1fr 1fr';
+
+        try {
+            const res = await API.getPendingDeletions();
+            if (res.success && res.vouchers && res.vouchers.length > 0) {
+                // Show top 5 recent pending deletions
+                const top5 = res.vouchers.slice(0, 5);
+                
+                let html = '';
+                top5.forEach(v => {
+                    const rowIdx = v.rowIndex;
+                    html += `
+                        <div class="approvals-queue-item">
+                            <div class="approvals-queue-details">
+                                <strong>Voucher:</strong> ${v.accountOrMail || v.voucherNo || '-'}<br>
+                                <span class="text-muted" style="font-size: 13px;">
+                                    <strong>Payee:</strong> ${Utils.truncate(v.payee, 22)} | 
+                                    <strong>Category:</strong> ${v.categories || '-'}
+                                </span>
+                                <div class="approvals-queue-amount">${Utils.formatCurrency(v.grossAmount || 0)}</div>
+                            </div>
+                            <div class="approvals-queue-actions">
+                                <button class="btn btn-sm btn-success" onclick="Dashboard.approveVoucherDelete(${rowIdx}, '${v.accountOrMail || v.voucherNo || ''}')" title="Approve Deletion" style="background-color: #2ecc71; border-color: #2ecc71; color: white;">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="Dashboard.rejectVoucherDelete(${rowIdx}, '${v.accountOrMail || v.voucherNo || ''}')" title="Reject Deletion" style="background-color: #e74c3c; border-color: #e74c3c; color: white;">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `
+                    <div class="text-center py-4 text-muted">
+                        <i class="fas fa-check-double fa-2x mb-2 text-success"></i>
+                        <p class="mb-0">No deletion requests awaiting your approval.</p>
+                    </div>
+                `;
+            }
+        } catch (e) {
+            console.error('Error loading approvals queue:', e);
+            container.innerHTML = '<p class="text-danger text-center">Failed to load approvals queue.</p>';
+        }
+    },
+
+    async approveVoucherDelete(rowIndex, voucherNo) {
+        const confirmed = await Utils.confirm(`Approve permanent deletion of voucher ${voucherNo}? This cannot be undone.`, 'Approve Deletion');
+        if (!confirmed) return;
+
+        this.showLoading(true);
+        try {
+            const res = await API.approveDelete(rowIndex);
+            if (res.success) {
+                Utils.showToast('Voucher successfully deleted', 'success');
+                // Reload dashboard data
+                await this.loadDashboardData();
+            } else {
+                Utils.showToast(res.error || 'Failed to approve deletion', 'error');
+            }
+        } catch (e) {
+            console.error('approveVoucherDelete error:', e);
+            Utils.showToast('Error approving deletion', 'error');
+        }
+        this.showLoading(false);
+    },
+
+    async rejectVoucherDelete(rowIndex, voucherNo) {
+        const reason = prompt('Reason for rejecting deletion request:', 'Rejected from Dashboard');
+        if (reason === null) return; // Cancelled prompt
+
+        this.showLoading(true);
+        try {
+            const res = await API.rejectDelete(rowIndex, reason || 'Rejected from Dashboard');
+            if (res.success) {
+                Utils.showToast('Deletion request rejected. Voucher restored.', 'success');
+                // Reload dashboard data
+                await this.loadDashboardData();
+            } else {
+                Utils.showToast(res.error || 'Failed to reject deletion request', 'error');
+            }
+        } catch (e) {
+            console.error('rejectVoucherDelete error:', e);
+            Utils.showToast('Error rejecting deletion request', 'error');
+        }
+        this.showLoading(false);
     }
 };
 
@@ -508,4 +657,15 @@ document.addEventListener("DOMContentLoaded", loadDashboardActionItems);
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOMContentLoaded fired for dashboard');
     Dashboard.init();
+    
+    // Listen for background API updates (SWR)
+    document.addEventListener('apiDataUpdated', (e) => {
+        const { action, data } = e.detail;
+        if (action === 'getDashboardStats') {
+            console.log('Dashboard stats updated in background:', data);
+            Dashboard.stats = data;
+            sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(data));
+            Dashboard.applyMasking();
+        }
+    });
 });

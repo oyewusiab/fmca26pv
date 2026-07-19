@@ -72,7 +72,7 @@
       });
     },
 
-    async _fetchJson(url, options = {}, retries = 1, timeoutMs = 18000) {
+    async _fetchJson(url, options = {}, retries = 1, timeoutMs = 45000) {
       let lastError = null;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const controller = new AbortController();
@@ -423,6 +423,18 @@
     
     async getDebtProfileExcel(requestId) {
       return await this.get("generateDebtProfileExcel", { requestId }, 0);
+    },
+
+    async getDebtProfileList() {
+      return await this.get("getDebtProfileList", {}, 0);
+    },
+
+    async deleteDebtProfile(requestId) {
+      return await this.post("deleteDebtProfile", { requestId });
+    },
+
+    async updateDebtProfileNarrative(requestId, narrative) {
+      return await this.post("updateDebtProfileNarrative", { requestId, narrative });
     },
 
     async getTaxSummary(year = "2026") {

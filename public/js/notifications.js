@@ -28,7 +28,7 @@ const Notifications = {
     await this.updateBellCount();
 
     if (!this.bellInitialized) {
-      setInterval(() => this.updateBellCount(), 120000);
+      setInterval(() => this.updateBellCount(), 30000); // 30 seconds polling
       this.bellInitialized = true;
     }
   },
@@ -96,6 +96,23 @@ const Notifications = {
 
     document.getElementById('refreshHubBtn')?.addEventListener('click', () => this.refreshHub());
     document.getElementById('markAllReadBtn')?.addEventListener('click', () => this.markAllAsRead());
+
+    // Search and filter listeners
+    document.getElementById('notificationSearchInput')?.addEventListener('input', () => this.renderNotifications());
+    document.getElementById('notificationReadFilter')?.addEventListener('change', () => this.renderNotifications());
+    document.getElementById('notificationDateFrom')?.addEventListener('change', () => this.renderNotifications());
+    document.getElementById('notificationDateTo')?.addEventListener('change', () => this.renderNotifications());
+    document.getElementById('clearNotificationFiltersBtn')?.addEventListener('click', () => {
+      const searchInput = document.getElementById('notificationSearchInput');
+      const readFilter = document.getElementById('notificationReadFilter');
+      const dateFrom = document.getElementById('notificationDateFrom');
+      const dateTo = document.getElementById('notificationDateTo');
+      if (searchInput) searchInput.value = '';
+      if (readFilter) readFilter.value = 'ALL';
+      if (dateFrom) dateFrom.value = '';
+      if (dateTo) dateTo.value = '';
+      this.renderNotifications();
+    });
 
     this.setupRoleView();
     this.setupTabs();
@@ -177,7 +194,20 @@ const Notifications = {
       const result = await API.getNotifications(true);
       if (!result.success) return;
 
-      this.unreadCount = result.unreadCount || 0;
+      const newUnreadCount = result.unreadCount || 0;
+
+      if (this.bellInitialized && newUnreadCount > this.unreadCount) {
+        const fullRes = await API.getNotifications(false);
+        if (fullRes.success && fullRes.notifications) {
+          const newItems = fullRes.notifications.filter(n => !n.read);
+          const newlyReceived = newItems.slice(0, newUnreadCount - this.unreadCount);
+          newlyReceived.reverse().forEach(item => {
+            Utils.showToast(`🔔 ${item.title}: ${item.message}`, item.type || 'info');
+          });
+        }
+      }
+
+      this.unreadCount = newUnreadCount;
       const badge = document.getElementById('notificationBadge');
       if (badge) {
         if (this.unreadCount > 0) {
@@ -256,8 +286,52 @@ const Notifications = {
     const container = document.getElementById('notificationsList');
     if (!container) return;
 
+    const query = document.getElementById('notificationSearchInput')?.value?.toLowerCase() || '';
+    const readFilter = document.getElementById('notificationReadFilter')?.value || 'UNREAD';
+    const dateFromVal = document.getElementById('notificationDateFrom')?.value || '';
+    const dateToVal = document.getElementById('notificationDateTo')?.value || '';
+
+    const dateFrom = dateFromVal ? new Date(dateFromVal + 'T00:00:00') : null;
+    const dateTo = dateToVal ? new Date(dateToVal + 'T23:59:59') : null;
+
+    const filtered = this.notifications.filter(notification => {
+      const isRead = Boolean(notification.read);
+      if (readFilter === 'UNREAD' && isRead) return false;
+      if (readFilter === 'READ' && !isRead) return false;
+
+      if (query) {
+        const title = (notification.title || '').toLowerCase();
+        const msg = (notification.message || '').toLowerCase();
+        if (!title.includes(query) && !msg.includes(query)) return false;
+      }
+
+      if (dateFrom || dateTo) {
+        const ts = new Date(notification.timestamp);
+        if (dateFrom && ts < dateFrom) return false;
+        if (dateTo && ts > dateTo) return false;
+      }
+
+      return true;
+    });
+
+    const countEl = document.getElementById('notificationCount');
+    if (countEl) {
+      countEl.textContent = `${filtered.length} matching of ${this.notifications.length} notification(s), ${this.unreadCount} unread`;
+    }
+
+    if (!filtered.length) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-filter"></i>
+          <h3>No matching notifications</h3>
+          <p class="text-muted">Adjust your filters to see more results.</p>
+        </div>
+      `;
+      return;
+    }
+
     let html = '<div class="notifications-list">';
-    this.notifications.forEach((notification) => {
+    filtered.forEach((notification) => {
       const rowIndex = Number(notification.rowIndex || 0);
       const isRead = Boolean(notification.read);
       const typeClass = this.getTypeClass(notification.type);
@@ -268,7 +342,7 @@ const Notifications = {
       const safeTime = this.escapeHtml(Utils.formatDateTime(notification.timestamp));
 
       html += `
-        <div class="notification-item ${typeClass} ${readClass}" data-row="${rowIndex}">
+        <div class="notification-item ${typeClass} ${readClass}" data-row="${rowIndex}" ${notification.link ? `style="cursor: pointer;" onclick="Notifications.handleNotificationClick(${rowIndex}, '${notification.link}')"` : ''}>
           <div class="notification-icon">
             <i class="fas ${iconClass}"></i>
           </div>
@@ -277,7 +351,7 @@ const Notifications = {
             <div class="notification-message">${safeMessage}</div>
             <div class="notification-time"><i class="fas fa-clock"></i> ${safeTime}</div>
           </div>
-          <div class="notification-actions">
+          <div class="notification-actions" onclick="event.stopPropagation();">
             ${!isRead ? `
               <button class="btn btn-sm btn-secondary" onclick="Notifications.markAsRead(${rowIndex})">
                 <i class="fas fa-check"></i>
@@ -338,6 +412,19 @@ const Notifications = {
     }
   },
 
+  async handleNotificationClick(rowIndex, link) {
+    if (!rowIndex) return;
+    try {
+      await this.markAsRead(rowIndex);
+      if (link) {
+        window.location.href = link;
+      }
+    } catch (error) {
+      console.error('Handle notification click error:', error);
+      if (link) window.location.href = link;
+    }
+  },
+
   async markAllAsRead() {
     try {
       const result = await API.markAllNotificationsRead();
@@ -353,7 +440,7 @@ const Notifications = {
       console.error('Mark all notifications error:', error);
       Utils.showToast('Failed to mark all notifications as read.', 'error');
     }
-  }
+  },
 };
 
 window.Notifications = Notifications;

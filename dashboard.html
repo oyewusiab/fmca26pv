@@ -7,6 +7,38 @@
     <title>Dashboard - PAYABLE VOUCHER 2026</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        window.addEventListener('error', function(e) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.position = 'fixed';
+            errorDiv.style.top = '0';
+            errorDiv.style.left = '0';
+            errorDiv.style.width = '100%';
+            errorDiv.style.background = 'red';
+            errorDiv.style.color = 'white';
+            errorDiv.style.padding = '20px';
+            errorDiv.style.zIndex = '999999';
+            errorDiv.style.fontSize = '16px';
+            errorDiv.style.fontWeight = 'bold';
+            errorDiv.innerHTML = 'CRITICAL ERROR: ' + e.message + ' at ' + e.filename + ':' + e.lineno + ':' + e.colno + '<br><pre>' + (e.error ? e.error.stack : '') + '</pre>';
+            document.body.appendChild(errorDiv);
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.position = 'fixed';
+            errorDiv.style.top = '0';
+            errorDiv.style.left = '0';
+            errorDiv.style.width = '100%';
+            errorDiv.style.background = 'orange';
+            errorDiv.style.color = 'white';
+            errorDiv.style.padding = '20px';
+            errorDiv.style.zIndex = '999999';
+            errorDiv.style.fontSize = '16px';
+            errorDiv.style.fontWeight = 'bold';
+            errorDiv.innerHTML = 'UNHANDLED REJECTION: ' + e.reason + '<br><pre>' + (e.reason && e.reason.stack ? e.reason.stack : '') + '</pre>';
+            document.body.appendChild(errorDiv);
+        });
+    </script>
 </head>
 
 <body>
@@ -25,7 +57,7 @@
         <!-- Main Content -->
         <main class="main-content">
             <!-- Mobile Menu Toggle -->
-            <button class="menu-toggle" id="menuToggle" style="display: none;">
+            <button class="menu-toggle" id="menuToggle">
                 <i class="fas fa-bars"></i>
             </button>
 
@@ -62,12 +94,51 @@
                 <i class="fas fa-chevron-right" style="color: white; font-size: 18px;"></i>
             </div>
 
+            <!-- Critical Compliance Actions Widget (Dashboard) -->
+            <div id="criticalComplianceActionsCard" class="card mt-2 mb-2" style="display:none; border-left: 5px solid #e74c3c;">
+                <div class="card-header" style="background: #fdf2f2; color: #c0392b; border-bottom: 1px solid #fde2e2;">
+                    <h3 class="card-title" style="color: #c0392b; font-weight: 700; margin: 0;">
+                        <i class="fas fa-exclamation-triangle"></i> Critical Compliance Actions
+                    </h3>
+                </div>
+                <div class="card-body" id="criticalComplianceActionsList" style="padding: 10px 15px;">
+                    <!-- Action items list populated by JS -->
+                </div>
+            </div>
+
             <!-- Stats Grid -->
             <div class="stats-grid" id="statsGrid">
                 <!-- Stats cards will be populated by JavaScript -->
                 <div class="stat-card">
                     <div class="stat-label">Loading...</div>
                     <div class="stat-value">-</div>
+                </div>
+            </div>
+
+            <!-- Dashboard Middle Row (Aged Payables & My Approvals Queue) -->
+            <div class="middle-row-grid mt-2 mb-2" id="middleRowGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <!-- Aged Payables -->
+                <div class="card" id="agedPayablesCard">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-history"></i> Aged Payables (Outstanding Debt)
+                        </h3>
+                    </div>
+                    <div class="card-body" id="agedPayables">
+                        <p class="text-muted">Loading...</p>
+                    </div>
+                </div>
+
+                <!-- My Approvals Queue -->
+                <div class="card" id="myApprovalsQueueCard" style="display:none;">
+                    <div class="card-header" style="background: var(--primary-color); color: white;">
+                        <h3 class="card-title" style="color: white; margin: 0;">
+                            <i class="fas fa-check-circle"></i> My Approvals Queue (Pending Deletions)
+                        </h3>
+                    </div>
+                    <div class="card-body" id="myApprovalsQueue">
+                        <p class="text-muted">Loading...</p>
+                    </div>
                 </div>
             </div>
 
@@ -181,8 +252,10 @@
                     }
                 }
             </style>
+        </main>
+    </div>
 
-            <script src="js/config.js"></script>
+    <script src="js/config.js"></script>
             <script src="js/auth.js"></script>
             <script src="js/api.js"></script>
             <script src="js/announcements.js"></script>

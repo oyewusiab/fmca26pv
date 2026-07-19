@@ -40,6 +40,48 @@ const Reports = {
     accountTypeFilters: { accountType: 'ALL', subAccountType: 'ALL' },
     expandedAccountTypeGroups: new Set(),
 
+    // Unified Chart Colors System
+    THEME: {
+        primaryGreen: 'rgba(46, 125, 50, 0.85)',
+        primaryGreenBorder: '#2e7d32',
+        
+        softGrey: 'rgba(108, 117, 125, 0.7)',
+        softGreyBorder: '#6c757d',
+        
+        successPaid: 'rgba(40, 167, 69, 0.85)',
+        successPaidBorder: '#28a745',
+        
+        warningAccent: 'rgba(255, 193, 7, 0.85)',
+        warningAccentBorder: '#ffc107',
+        
+        dangerAccent: 'rgba(220, 53, 69, 0.85)',
+        dangerAccentBorder: '#dc3545',
+        
+        accentBlue: 'rgba(0, 123, 255, 0.85)',
+        accentBlueBorder: '#007bff',
+        
+        accentPurple: 'rgba(111, 66, 193, 0.85)',
+        accentPurpleBorder: '#6f42c1',
+
+        palette: [
+            'rgba(46, 125, 50, 0.85)',   // Primary Green
+            'rgba(0, 123, 255, 0.85)',   // Blue
+            'rgba(111, 66, 193, 0.85)',  // Purple
+            'rgba(255, 193, 7, 0.85)',   // Yellow
+            'rgba(220, 53, 69, 0.85)',   // Red
+            'rgba(23, 162, 184, 0.85)',  // Cyan
+            'rgba(253, 126, 20, 0.85)',  // Orange
+            'rgba(108, 117, 125, 0.85)'  // Grey
+        ],
+        paletteBorder: [
+            '#2e7d32', '#007bff', '#6f42c1', '#ffc107', '#dc3545', '#17a2b8', '#fd7e14', '#6c757d'
+        ]
+    },
+
+    // Lazy Rendering Registry
+    pendingChartRenders: {},
+    lazyIntersectionObserver: null,
+
     /**
      * Initialize reports page
      */
@@ -60,7 +102,18 @@ const Reports = {
         this.setupEventListeners();
         await this.loadSystemConfig();
         await this.loadAllReports();
-        await this.checkDebtProfileStatus();
+        window.addEventListener('beforeprint', () => {
+            Object.entries(this.pendingChartRenders).forEach(([canvasId, renderFn]) => {
+                try {
+                    renderFn();
+                } catch (e) {
+                    console.error('Error drawing chart on print:', e);
+                }
+            });
+            this.pendingChartRenders = {};
+        });
+
+        this.changeTab('summary');
     },
 
     /**
@@ -84,6 +137,15 @@ const Reports = {
                 this.currentYear = e.target.value;
                 document.getElementById('currentYearLabel').textContent = this.currentYear;
                 this.expandedAccountTypeGroups.clear();
+
+                // Clear date filter inputs on year change
+                const fromInput = document.getElementById('reportDateFrom');
+                const toInput = document.getElementById('reportDateTo');
+                if (fromInput) fromInput.value = '';
+                if (toInput) toInput.value = '';
+                const statusLabel = document.getElementById('dateFilterStatus');
+                if (statusLabel) statusLabel.textContent = 'Showing full year summary';
+
                 this.loadYearSummary();
             });
         }
@@ -124,6 +186,9 @@ const Reports = {
 
         // View Report
         document.getElementById('viewApprovedReportBtn')?.addEventListener('click', () => this.loadFullDebtReport());
+
+        // Historical Reports Dropdown Listeners
+        this.setupHistoricalReportsListeners();
 
         // Debt Profile Events (using delegation for components that might be re-rendered)
         document.addEventListener('click', (e) => {
@@ -180,29 +245,34 @@ const Reports = {
                 this.renderCategoryTable(data.categoryBreakdown);
                 this.renderAccountTypeTable(data.accountTypeBreakdown);
                 this.renderMonthlyTable(data.monthlyBreakdown);
-                this.drawCategoryChart(data.categoryBreakdown);
-                this.drawCategoryParetoChart(data.categoryBreakdown);
-                this.drawCategoryShareShiftChart(data.categoryBreakdown);
-                this.drawMonthlyChart(data.monthlyBreakdown);
-                this.drawStatusCharts(data.summary);
-                this.drawCashCommitChart(data.summary);
-                this.drawAccrualsSnapshot(data.summary);
+                this.queueChartRender('categoryChart', () => this.drawCategoryChart(data.categoryBreakdown));
+                this.queueChartRender('categoryParetoChart', () => this.drawCategoryParetoChart(data.categoryBreakdown));
+                this.queueChartRender('categoryShareShiftChart', () => this.drawCategoryShareShiftChart(data.categoryBreakdown));
+                this.queueChartRender('monthlyChart', () => this.drawMonthlyChart(data.monthlyBreakdown));
+                this.queueChartRender('statusCountChart', () => this.drawStatusCharts(data.summary));
+                this.queueChartRender('statusAmountChart', () => this.drawStatusCharts(data.summary));
+                this.queueChartRender('cashCommitChart', () => this.drawCashCommitChart(data.summary));
+                this.queueChartRender('accrualsSnapshotChart', () => this.drawAccrualsSnapshot(data.summary));
+                this.setupLazyChartRendering();
             }
             if (action === 'getAllYearsSummary') {
                 this.allYearsData = data;
                 this.renderAllYearsSummary(data);
-                this.drawDebtTrendChart(data);
-                this.drawNetPayableChart(data);
+                this.queueChartRender('debtTrendChart', () => this.drawDebtTrendChart(data));
+                this.queueChartRender('netPayableChart', () => this.drawNetPayableChart(data));
+                this.setupLazyChartRendering();
             }
             if (action === 'getDebtProfile') {
                 this.debtProfile = data;
                 this.renderDebtProfile(data);
-                this.drawDebtConcentration(data);
-                this.drawTopDebtorsChart(data);
+                this.queueChartRender('debtConcentrationChart', () => this.drawDebtConcentration(data));
+                this.queueChartRender('topDebtorsChart', () => this.drawTopDebtorsChart(data));
+                this.setupLazyChartRendering();
             }
             if (action === 'getTaxByMonth' && params.year === this.currentYear) {
                 this.taxMonthlyData = data;
-                this.drawTaxSplitChart(data);
+                this.queueChartRender('taxSplitChart', () => this.drawTaxSplitChart(data));
+                this.setupLazyChartRendering();
             }
         });
     },
@@ -217,7 +287,9 @@ const Reports = {
             await Promise.all([
                 this.loadYearSummary(),
                 this.loadAllYearsSummary(),
-                this.loadDebtProfile()
+                this.loadDebtProfile(),
+                this.loadHistoricalReports(),
+                this.checkDebtProfileStatus()
             ]);
         } catch (error) {
             console.error('Error loading reports:', error);
@@ -251,13 +323,15 @@ const Reports = {
             this.renderCategoryTable(result.categoryBreakdown);
             this.renderAccountTypeTable(result.accountTypeBreakdown);
             this.renderMonthlyTable(result.monthlyBreakdown);
-            this.drawCategoryChart(result.categoryBreakdown);
-            this.drawCategoryParetoChart(result.categoryBreakdown);
-            this.drawCategoryShareShiftChart(result.categoryBreakdown);
-            this.drawMonthlyChart(result.monthlyBreakdown);
-            this.drawStatusCharts(result.summary);
-            this.drawCashCommitChart(result.summary);
-            this.drawAccrualsSnapshot(result.summary);
+            this.queueChartRender('categoryChart', () => this.drawCategoryChart(result.categoryBreakdown));
+            this.queueChartRender('categoryParetoChart', () => this.drawCategoryParetoChart(result.categoryBreakdown));
+            this.queueChartRender('categoryShareShiftChart', () => this.drawCategoryShareShiftChart(result.categoryBreakdown));
+            this.queueChartRender('monthlyChart', () => this.drawMonthlyChart(result.monthlyBreakdown));
+            this.queueChartRender('statusCountChart', () => this.drawStatusCharts(result.summary));
+            this.queueChartRender('statusAmountChart', () => this.drawStatusCharts(result.summary));
+            this.queueChartRender('cashCommitChart', () => this.drawCashCommitChart(result.summary));
+            this.queueChartRender('accrualsSnapshotChart', () => this.drawAccrualsSnapshot(result.summary));
+            this.setupLazyChartRendering();
         } else {
             Utils.showToast(result.error || 'Failed to load summary', 'error');
         }
@@ -265,7 +339,8 @@ const Reports = {
         await Promise.all([
             this.loadVoucherAnalytics(),
             this.loadTaxByMonth(),
-            this.loadTaxSummary()
+            this.loadTaxSummary(),
+            this.loadTaxPayments()
         ]);
     },
 
@@ -388,7 +463,7 @@ const Reports = {
                     <tbody>
                     ${buckets.map(b => `
                         <tr>
-                        <td><strong>${b.label}</strong></td>
+                        <td class="drill-down-link" onclick="Reports.drillDown('aging', '${b.label}')"><strong>${b.label}</strong></td>
                         <td class="text-center">${Utils.formatNumber(b.count)}</td>
                         <td class="text-right">${Utils.formatCurrency(b.amount)}</td>
                         </tr>
@@ -452,7 +527,10 @@ const Reports = {
         section?.classList.remove('hidden');
 
         const unpaid = (vouchers || []).filter(v => String(v.status || '').toLowerCase() === 'unpaid');
-        if (!unpaid.length) {
+        const isEmpty = !unpaid.length;
+        this.toggleChartPlaceholder('agingChart', isEmpty);
+
+        if (isEmpty) {
             document.getElementById('agingTable')?.replaceChildren();
             if (this.agingChart) this.agingChart.destroy();
             return;
@@ -493,15 +571,16 @@ const Reports = {
                             type: 'bar',
                             label: 'Outstanding Amount',
                             data: buckets.map(b => b.amount),
-                            backgroundColor: 'rgba(255,193,7,0.65)',
+                            backgroundColor: this.THEME.dangerAccent,
+                            borderColor: this.THEME.dangerAccentBorder,
                             yAxisID: 'y'
                         },
                         {
                             type: 'line',
                             label: 'Voucher Count',
                             data: buckets.map(b => b.count),
-                            borderColor: 'rgba(23,162,184,1)',
-                            backgroundColor: 'rgba(23,162,184,0.2)',
+                            borderColor: this.THEME.accentBlueBorder,
+                            backgroundColor: this.THEME.accentBlue,
                             tension: 0.3,
                             yAxisID: 'y1'
                         }
@@ -511,7 +590,7 @@ const Reports = {
                     responsive: true,
                     plugins: { legend: { position: 'top' } },
                     scales: {
-                        y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } },
+                        y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } },
                         y1: {
                             position: 'right',
                             grid: { drawOnChartArea: false },
@@ -554,7 +633,15 @@ const Reports = {
      */
     drawCategoryChart(categories) {
         const ctx = document.getElementById('categoryChart');
-        if (!ctx || !categories || categories.length === 0) return;
+        if (!ctx) return;
+
+        const isEmpty = !categories || categories.length === 0 || categories.every(c => !c.amountPaid && !c.balance);
+        this.toggleChartPlaceholder('categoryChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.categoryChart) this.categoryChart.destroy();
+            return;
+        }
 
         const labels = categories.map(c => c.category);
         const paidData = categories.map(c => c.amountPaid);
@@ -572,12 +659,16 @@ const Reports = {
                     {
                         label: 'Amount Paid',
                         data: paidData,
-                        backgroundColor: 'rgba(40, 167, 69, 0.7)'
+                        backgroundColor: this.THEME.successPaid,
+                        borderColor: this.THEME.successPaidBorder,
+                        borderWidth: 1
                     },
                     {
                         label: 'Balance (Unpaid)',
                         data: balanceData,
-                        backgroundColor: 'rgba(220, 53, 69, 0.7)'
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1
                     }
                 ]
             },
@@ -602,7 +693,15 @@ const Reports = {
 
     drawCategoryParetoChart(categories) {
         const ctx = document.getElementById('categoryParetoChart');
-        if (!ctx || !categories || !categories.length) return;
+        if (!ctx) return;
+
+        const isEmpty = !categories || !categories.length || categories.every(c => !c.balance);
+        this.toggleChartPlaceholder('categoryParetoChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.categoryParetoChart) this.categoryParetoChart.destroy();
+            return;
+        }
 
         // Sort by unpaid balance desc
         const sorted = [...categories].sort((a, b) => (b.balance || 0) - (a.balance || 0));
@@ -628,15 +727,17 @@ const Reports = {
                         type: 'bar',
                         label: 'Unpaid Balance',
                         data: balances,
-                        backgroundColor: 'rgba(220, 53, 69, 0.65)',
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1,
                         yAxisID: 'y'
                     },
                     {
                         type: 'line',
                         label: 'Cumulative %',
                         data: cumPct,
-                        borderColor: 'rgba(0, 123, 255, 1)',
-                        backgroundColor: 'rgba(0, 123, 255, 0.15)',
+                        borderColor: this.THEME.accentBlueBorder,
+                        backgroundColor: this.THEME.accentBlue,
                         tension: 0.25,
                         yAxisID: 'y1'
                     }
@@ -664,13 +765,42 @@ const Reports = {
     /**
      * Draw monthly line chart
      */
-    drawMonthlyChart(months) {
+    async drawMonthlyChart(months) {
         const ctx = document.getElementById('monthlyChart');
-        if (!ctx || !months || months.length === 0) return;
+        if (!ctx) return;
+
+        const isEmpty = !months || months.length === 0 || months.every(m => !(m.paidAmount || m.amountPaid) && !(m.unpaidAmount || m.balance));
+        this.toggleChartPlaceholder('monthlyChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.monthlyChart) this.monthlyChart.destroy();
+            return;
+        }
 
         const labels = months.map(m => m.month);
-        const paidData = months.map(m => m.paidAmount);
-        const unpaidData = months.map(m => m.unpaidAmount);
+        const paidData = months.map(m => m.paidAmount !== undefined ? m.paidAmount : (m.amountPaid || 0));
+        const unpaidData = months.map(m => m.unpaidAmount !== undefined ? m.unpaidAmount : (m.balance || 0));
+
+        let prevYearPaid = Array(12).fill(0);
+        const prevYear = String(parseInt(this.currentYear, 10) - 1);
+        
+        try {
+            if (!this.prevYearSummaryCache) this.prevYearSummaryCache = {};
+            
+            let prevData = this.prevYearSummaryCache[prevYear];
+            if (!prevData) {
+                const res = await API.getSummary(prevYear);
+                if (res.success && res.monthlyBreakdown) {
+                    prevData = res.monthlyBreakdown;
+                    this.prevYearSummaryCache[prevYear] = prevData;
+                }
+            }
+            if (prevData) {
+                prevYearPaid = prevData.map(m => m.paidAmount !== undefined ? m.paidAmount : (m.amountPaid || 0));
+            }
+        } catch (e) {
+            console.warn('Failed to load comparative year data:', e);
+        }
 
         if (this.monthlyChart) {
             this.monthlyChart.destroy();
@@ -682,17 +812,27 @@ const Reports = {
                 labels: labels,
                 datasets: [
                     {
-                        label: 'Paid Amount',
+                        label: `${this.currentYear} Paid Disbursements`,
                         data: paidData,
-                        borderColor: 'rgba(40, 167, 69, 1)',
-                        backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                        borderColor: this.THEME.successPaidBorder,
+                        backgroundColor: 'rgba(40,167,69,0.05)',
+                        fill: true,
                         tension: 0.3
                     },
                     {
-                        label: 'Unpaid Amount',
+                        label: `${this.currentYear} Unpaid Liabilities`,
                         data: unpaidData,
-                        borderColor: 'rgba(255, 193, 7, 1)',
-                        backgroundColor: 'rgba(255, 193, 7, 0.2)',
+                        borderColor: this.THEME.dangerAccentBorder,
+                        backgroundColor: 'rgba(220,53,69,0.05)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: `${prevYear} Paid Disbursements (Comparative)`,
+                        data: prevYearPaid,
+                        borderColor: this.THEME.softGreyBorder,
+                        borderDash: [5, 5],
+                        fill: false,
                         tension: 0.3
                     }
                 ]
@@ -771,11 +911,19 @@ const Reports = {
 
     drawCashCommitChart(summary) {
         const ctx = document.getElementById('cashCommitChart');
-        if (!ctx || !summary) return;
+        if (!ctx) return;
 
         const totalVoucherAmount = this.getTotalVoucherAmount(summary);
-        const paid = Number(summary.totalPaidAmount || 0);
-        const contractSum = Number(summary.totalProcessedContractSum || 0);
+        const paid = Number(summary?.totalPaidAmount || 0);
+        const contractSum = Number(summary?.totalProcessedContractSum || 0);
+
+        const isEmpty = !summary || (!paid && !totalVoucherAmount && !contractSum);
+        this.toggleChartPlaceholder('cashCommitChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.cashCommitChart) this.cashCommitChart.destroy();
+            return;
+        }
 
         if (this.cashCommitChart) this.cashCommitChart.destroy();
 
@@ -786,14 +934,16 @@ const Reports = {
                 datasets: [{
                     label: 'Amount',
                     data: [paid, totalVoucherAmount, contractSum],
-                    backgroundColor: ['rgba(40,167,69,0.7)', 'rgba(0,123,255,0.6)', 'rgba(255,193,7,0.7)']
+                    backgroundColor: [this.THEME.successPaid, this.THEME.accentBlue, this.THEME.warningAccent],
+                    borderColor: [this.THEME.successPaidBorder, this.THEME.accentBlueBorder, this.THEME.warningAccentBorder],
+                    borderWidth: 1
                 }]
             },
             options: {
                 responsive: true,
                 plugins: { legend: { display: false } },
                 scales: {
-                    y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } }
+                    y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } }
                 }
             }
         });
@@ -801,15 +951,20 @@ const Reports = {
 
     drawAccrualsSnapshot(summary) {
         const ctx = document.getElementById('accrualsSnapshotChart');
-        if (!ctx || !summary) return;
+        if (!ctx) return;
 
-        const paid = Number(summary.totalPaidAmount || 0);
-        const unpaid = Number(summary.totalUnpaidAmount || 0);
-        const cancelled = Number(summary.totalCancelledAmount || 0);
+        const paid = Number(summary?.totalPaidAmount || 0);
+        const unpaid = Number(summary?.totalUnpaidAmount || 0);
+        const cancelled = Number(summary?.totalCancelledAmount || 0);
         const total = paid + unpaid + cancelled;
-        const accrualRate = total > 0 ? (unpaid / total) * 100 : 0;
-        const contractSum = Number(summary.totalProcessedContractSum || 0);
-        const accrualToContract = contractSum > 0 ? (unpaid / contractSum) * 100 : 0;
+
+        const isEmpty = !summary || total === 0;
+        this.toggleChartPlaceholder('accrualsSnapshotChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.accrualsSnapshotChart) this.accrualsSnapshotChart.destroy();
+            return;
+        }
 
         if (this.accrualsSnapshotChart) this.accrualsSnapshotChart.destroy();
 
@@ -818,9 +973,9 @@ const Reports = {
             data: {
                 labels: ['Total Raised'],
                 datasets: [
-                    { label: 'Paid', data: [paid], backgroundColor: 'rgba(40,167,69,0.7)' },
-                    { label: 'Unpaid (Accrual)', data: [unpaid], backgroundColor: 'rgba(220,53,69,0.7)' },
-                    { label: 'Cancelled', data: [cancelled], backgroundColor: 'rgba(108,117,125,0.6)' }
+                    { label: 'Paid', data: [paid], backgroundColor: this.THEME.successPaid, borderColor: this.THEME.successPaidBorder, borderWidth: 1 },
+                    { label: 'Unpaid (Accrual)', data: [unpaid], backgroundColor: this.THEME.dangerAccent, borderColor: this.THEME.dangerAccentBorder, borderWidth: 1 },
+                    { label: 'Cancelled', data: [cancelled], backgroundColor: this.THEME.softGrey, borderColor: this.THEME.softGreyBorder, borderWidth: 1 }
                 ]
             },
             options: {
@@ -830,7 +985,7 @@ const Reports = {
                     x: { stacked: true },
                     y: {
                         stacked: true,
-                        ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() }
+                        ticks: { callback: v => '₦' + Number(v).toLocaleString() }
                     }
                 }
             }
@@ -844,7 +999,15 @@ const Reports = {
 
     drawCategoryShareShiftChart(categories) {
         const ctx = document.getElementById('categoryShareShiftChart');
-        if (!ctx || !categories || !categories.length) return;
+        if (!ctx) return;
+
+        const isEmpty = !categories || !categories.length || categories.every(c => !c.amountPaid && !c.balance);
+        this.toggleChartPlaceholder('categoryShareShiftChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.categoryShareShiftChart) this.categoryShareShiftChart.destroy();
+            return;
+        }
 
         const totalPaid = categories.reduce((s, c) => s + Number(c.amountPaid || 0), 0) || 1;
         const totalUnpaid = categories.reduce((s, c) => s + Number(c.balance || 0), 0) || 1;
@@ -867,12 +1030,16 @@ const Reports = {
                     {
                         label: 'Paid Share %',
                         data: rows.map(r => r.paidShare),
-                        backgroundColor: 'rgba(40,167,69,0.7)'
+                        backgroundColor: this.THEME.successPaid,
+                        borderColor: this.THEME.successPaidBorder,
+                        borderWidth: 1
                     },
                     {
                         label: 'Unpaid Share %',
                         data: rows.map(r => r.unpaidShare),
-                        backgroundColor: 'rgba(220,53,69,0.7)'
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1
                     }
                 ]
             },
@@ -889,12 +1056,20 @@ const Reports = {
 
     drawNetPayableChart(allYearsData) {
         const ctx = document.getElementById('netPayableChart');
-        if (!ctx || !allYearsData || !allYearsData.yearsSummary) return;
+        if (!ctx) return;
 
-        const total = Number(allYearsData.grandTotals?.currentOutstandingBalance || 0);
-        const currentRow = allYearsData.yearsSummary.find(y => y.label === this.currentYear);
+        const total = Number(allYearsData?.grandTotals?.currentOutstandingBalance || 0);
+        const currentRow = allYearsData?.yearsSummary?.find(y => y.label === this.currentYear);
         const current = Number(currentRow?.currentBalance || 0);
         const prior = Math.max(total - current, 0);
+
+        const isEmpty = !allYearsData || total === 0;
+        this.toggleChartPlaceholder('netPayableChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.netPayableChart) this.netPayableChart.destroy();
+            return;
+        }
 
         if (this.netPayableChart) this.netPayableChart.destroy();
 
@@ -904,7 +1079,9 @@ const Reports = {
                 labels: ['Current Year', 'Prior Years'],
                 datasets: [{
                     data: [current, prior],
-                    backgroundColor: ['rgba(0,123,255,0.7)', 'rgba(108,117,125,0.5)']
+                    backgroundColor: [this.THEME.accentBlue, this.THEME.softGrey],
+                    borderColor: [this.THEME.accentBlueBorder, this.THEME.softGreyBorder],
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -913,7 +1090,7 @@ const Reports = {
                     legend: { position: 'bottom' },
                     tooltip: {
                         callbacks: {
-                            label: c => `${c.label}: â‚¦${Number(c.raw || 0).toLocaleString()}`
+                            label: c => `${c.label}: ₦${Number(c.raw || 0).toLocaleString()}`
                         }
                     }
                 }
@@ -967,9 +1144,16 @@ const Reports = {
 
     drawTaxSplitChart(data) {
         const ctx = document.getElementById('taxSplitChart');
-        if (!ctx || !data) return;
-        const months = data.months || data;
-        if (!months || !months.length) return;
+        if (!ctx) return;
+
+        const months = data?.months || data;
+        const isEmpty = !months || !months.length || months.every(m => !m.totalTax && !m.paidTax);
+        this.toggleChartPlaceholder('taxSplitChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.taxSplitChart) this.taxSplitChart.destroy();
+            return;
+        }
 
         const labels = months.map(m => m.month);
         const liability = months.map(m => Number(m.totalTax || 0));
@@ -985,14 +1169,16 @@ const Reports = {
                         type: 'bar',
                         label: 'Total Tax Liability',
                         data: liability,
-                        backgroundColor: 'rgba(255,193,7,0.7)'
+                        backgroundColor: this.THEME.warningAccent,
+                        borderColor: this.THEME.warningAccentBorder,
+                        borderWidth: 1
                     },
                     {
                         type: 'line',
                         label: 'Tax Paid',
                         data: paid,
-                        borderColor: 'rgba(40,167,69,1)',
-                        backgroundColor: 'rgba(40,167,69,0.2)',
+                        borderColor: this.THEME.successPaidBorder,
+                        backgroundColor: 'rgba(40,167,69,0.05)',
                         tension: 0.3,
                         yAxisID: 'y'
                     }
@@ -1002,7 +1188,7 @@ const Reports = {
                 responsive: true,
                 plugins: { legend: { position: 'top' } },
                 scales: {
-                    y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } }
+                    y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } }
                 }
             }
         });
@@ -1068,10 +1254,11 @@ const Reports = {
         }
         this.renderFinancialInsights(this.summaryData?.summary);
         this.renderVoucherValueCards(stats);
-        this.drawVoucherDistributionChart(stats);
-        this.drawRevalidatedImpactChart(stats);
-        this.drawCancelledImpactChart(stats);
-        this.drawAgingAnalysisFromVouchers(vouchers || []);
+        this.queueChartRender('voucherDistChart', () => this.drawVoucherDistributionChart(stats));
+        this.queueChartRender('revalidatedImpactChart', () => this.drawRevalidatedImpactChart(stats));
+        this.queueChartRender('cancelledImpactChart', () => this.drawCancelledImpactChart(stats));
+        this.queueChartRender('agingChart', () => this.drawAgingAnalysisFromVouchers(vouchers || []));
+        this.setupLazyChartRendering();
     },
 
     computeVoucherStats(vouchers) {
@@ -1149,7 +1336,15 @@ const Reports = {
 
     drawVoucherDistributionChart(stats) {
         const ctx = document.getElementById('voucherDistChart');
-        if (!ctx || !stats || !stats.amounts || stats.amounts.length === 0) return;
+        if (!ctx) return;
+
+        const isEmpty = !stats || !stats.amounts || stats.amounts.length === 0;
+        this.toggleChartPlaceholder('voucherDistChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.voucherDistChart) this.voucherDistChart.destroy();
+            return;
+        }
 
         const values = stats.amounts;
         const min = values[0];
@@ -1178,7 +1373,9 @@ const Reports = {
                 datasets: [{
                     label: 'Voucher Count',
                     data: bins,
-                    backgroundColor: 'rgba(0,123,255,0.6)'
+                    backgroundColor: this.THEME.accentBlue,
+                    borderColor: this.THEME.accentBlueBorder,
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -1193,12 +1390,20 @@ const Reports = {
 
     drawRevalidatedImpactChart(stats) {
         const ctx = document.getElementById('revalidatedImpactChart');
-        if (!ctx || !stats) return;
+        if (!ctx) return;
 
         const totalAmount = this.getTotalVoucherAmount(this.summaryData?.summary || {});
-        const revalidatedAmount = Number(stats.revalidatedAmount || 0);
+        const revalidatedAmount = Number(stats?.revalidatedAmount || 0);
         const newAmount = Math.max(totalAmount - revalidatedAmount, 0);
         const share = totalAmount > 0 ? (revalidatedAmount / totalAmount) * 100 : 0;
+
+        const isEmpty = !stats || totalAmount === 0;
+        this.toggleChartPlaceholder('revalidatedImpactChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.revalidatedImpactChart) this.revalidatedImpactChart.destroy();
+            return;
+        }
 
         if (this.revalidatedImpactChart) this.revalidatedImpactChart.destroy();
 
@@ -1208,7 +1413,9 @@ const Reports = {
                 labels: ['Revalidated', 'New'],
                 datasets: [{
                     data: [revalidatedAmount, newAmount],
-                    backgroundColor: ['rgba(0,123,255,0.7)', 'rgba(108,117,125,0.4)']
+                    backgroundColor: [this.THEME.accentBlue, this.THEME.softGrey],
+                    borderColor: [this.THEME.accentBlueBorder, this.THEME.softGreyBorder],
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -1217,7 +1424,7 @@ const Reports = {
                     legend: { position: 'bottom' },
                     tooltip: {
                         callbacks: {
-                            label: c => `${c.label}: â‚¦${Number(c.raw || 0).toLocaleString()}`
+                            label: c => `${c.label}: ₦${Number(c.raw || 0).toLocaleString()}`
                         }
                     }
                 }
@@ -1236,11 +1443,20 @@ const Reports = {
 
     drawCancelledImpactChart(stats) {
         const ctx = document.getElementById('cancelledImpactChart');
-        if (!ctx || !stats) return;
+        if (!ctx) return;
+
+        const amountSeries = stats?.cancelledByMonth || Array(12).fill(0);
+        const countSeries = stats?.cancelledCountByMonth || Array(12).fill(0);
+
+        const isEmpty = !stats || (!amountSeries.some(v => v > 0) && !countSeries.some(v => v > 0));
+        this.toggleChartPlaceholder('cancelledImpactChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.cancelledImpactChart) this.cancelledImpactChart.destroy();
+            return;
+        }
 
         const labels = CONFIG.MONTHS;
-        const amountSeries = stats.cancelledByMonth || Array(12).fill(0);
-        const countSeries = stats.cancelledCountByMonth || Array(12).fill(0);
 
         if (this.cancelledImpactChart) this.cancelledImpactChart.destroy();
 
@@ -1252,15 +1468,17 @@ const Reports = {
                         type: 'bar',
                         label: 'Cancelled Amount',
                         data: amountSeries,
-                        backgroundColor: 'rgba(220,53,69,0.65)',
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1,
                         yAxisID: 'y'
                     },
                     {
                         type: 'line',
                         label: 'Cancelled Count',
                         data: countSeries,
-                        borderColor: 'rgba(108,117,125,1)',
-                        backgroundColor: 'rgba(108,117,125,0.2)',
+                        borderColor: this.THEME.softGreyBorder,
+                        backgroundColor: this.THEME.softGrey,
                         tension: 0.3,
                         yAxisID: 'y1'
                     }
@@ -1270,7 +1488,7 @@ const Reports = {
                 responsive: true,
                 plugins: { legend: { position: 'top' } },
                 scales: {
-                    y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } },
+                    y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } },
                     y1: {
                         position: 'right',
                         grid: { drawOnChartArea: false },
@@ -1341,49 +1559,69 @@ const Reports = {
         const unpaidAmt = Number(summary.totalUnpaidAmount || 0);
         const cancelledAmt = Number(summary.totalCancelledAmount || 0);
 
-        // Destroy previous
+        const isEmptyCount = !paidCount && !unpaidCount && !cancelledCount;
+        const isEmptyAmt = !paidAmt && !unpaidAmt && !cancelledAmt;
+
+        this.toggleChartPlaceholder('statusCountChart', isEmptyCount);
+        this.toggleChartPlaceholder('statusAmountChart', isEmptyAmt);
+
         if (this.statusCountChart) this.statusCountChart.destroy();
         if (this.statusAmountChart) this.statusAmountChart.destroy();
 
+        if (isEmptyCount && isEmptyAmt) return;
+
         const labels = ['Paid', 'Unpaid', 'Cancelled'];
-        const colors = ['#28a745', '#ffc107', '#dc3545'];
+        const colors = [this.THEME.successPaid, this.THEME.warningAccent, this.THEME.dangerAccent];
+        const borderColors = [this.THEME.successPaidBorder, this.THEME.warningAccentBorder, this.THEME.dangerAccentBorder];
 
-        this.statusCountChart = new Chart(countCtx, {
-            type: 'doughnut',
-            data: {
-                labels,
-                datasets: [{ data: [paidCount, unpaidCount, cancelledCount], backgroundColor: colors }]
-            },
-            options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
-        });
+        if (!isEmptyCount) {
+            this.statusCountChart = new Chart(countCtx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{ data: [paidCount, unpaidCount, cancelledCount], backgroundColor: colors, borderColor: borderColors, borderWidth: 1 }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
 
-        this.statusAmountChart = new Chart(amtCtx, {
-            type: 'doughnut',
-            data: {
-                labels,
-                datasets: [{ data: [paidAmt, unpaidAmt, cancelledAmt], backgroundColor: colors }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { position: 'bottom' },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => `${ctx.label}: ₦${Number(ctx.raw || 0).toLocaleString()}`
+        if (!isEmptyAmt) {
+            this.statusAmountChart = new Chart(amtCtx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{ data: [paidAmt, unpaidAmt, cancelledAmt], backgroundColor: colors, borderColor: borderColors, borderWidth: 1 }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ₦${Number(ctx.raw || 0).toLocaleString()}`
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
     },
 
     drawDebtTrendChart(allYearsData) {
         const ctx = document.getElementById('debtTrendChart');
-        if (!ctx || !allYearsData || !allYearsData.yearsSummary) return;
+        if (!ctx) return;
 
-        const points = allYearsData.yearsSummary
+        const points = (allYearsData?.yearsSummary || [])
             .filter(y => !y.error && y.label)
             .map(y => ({ year: y.label, balance: Number(y.currentBalance || 0) }));
+
+        const isEmpty = !allYearsData || points.length === 0 || points.every(p => !p.balance);
+        this.toggleChartPlaceholder('debtTrendChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.debtTrendChart) this.debtTrendChart.destroy();
+            return;
+        }
 
         if (this.debtTrendChart) this.debtTrendChart.destroy();
 
@@ -1394,7 +1632,7 @@ const Reports = {
                 datasets: [{
                     label: 'Outstanding Balance',
                     data: points.map(p => p.balance),
-                    borderColor: '#dc3545',
+                    borderColor: this.THEME.dangerAccentBorder,
                     backgroundColor: 'rgba(220,53,69,0.15)',
                     tension: 0.3,
                     fill: true
@@ -1414,11 +1652,19 @@ const Reports = {
 
     drawTopDebtorsChart(debtProfile) {
         const ctx = document.getElementById('topDebtorsChart');
-        if (!ctx || !debtProfile || !debtProfile.topDebtors) return;
+        if (!ctx) return;
 
-        const top = debtProfile.topDebtors.slice(0, 10);
+        const top = (debtProfile?.topDebtors || []).slice(0, 10);
         const labels = top.map(d => Utils.truncate(d.payee || '-', 18));
         const values = top.map(d => Number(d.amount || 0));
+
+        const isEmpty = !debtProfile || top.length === 0 || top.every(d => !d.amount);
+        this.toggleChartPlaceholder('topDebtorsChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.topDebtorsChart) this.topDebtorsChart.destroy();
+            return;
+        }
 
         if (this.topDebtorsChart) this.topDebtorsChart.destroy();
 
@@ -1429,7 +1675,9 @@ const Reports = {
                 datasets: [{
                     label: 'Amount Owed',
                     data: values,
-                    backgroundColor: 'rgba(220,53,69,0.75)'
+                    backgroundColor: this.THEME.dangerAccent,
+                    borderColor: this.THEME.dangerAccentBorder,
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -1460,14 +1708,22 @@ const Reports = {
 
     drawDebtConcentration(data) {
         const ctx = document.getElementById('debtConcentrationChart');
-        if (!ctx || !data) return;
+        if (!ctx) return;
 
-        const totalDebt = Number(data.totalDebt || 0);
-        const top10 = (data.topDebtors || []).slice(0, 10);
+        const totalDebt = Number(data?.totalDebt || 0);
+        const top10 = (data?.topDebtors || []).slice(0, 10);
         const top10Sum = top10.reduce((s, d) => s + Number(d.amount || 0), 0);
         const others = Math.max(totalDebt - top10Sum, 0);
 
         const pct = totalDebt > 0 ? ((top10Sum / totalDebt) * 100) : 0;
+
+        const isEmpty = !data || totalDebt === 0;
+        this.toggleChartPlaceholder('debtConcentrationChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.debtConcentrationChart) this.debtConcentrationChart.destroy();
+            return;
+        }
 
         if (this.debtConcentrationChart) this.debtConcentrationChart.destroy();
 
@@ -1477,7 +1733,9 @@ const Reports = {
                 labels: ['Top 10 Payees', 'Others'],
                 datasets: [{
                     data: [top10Sum, others],
-                    backgroundColor: ['rgba(220,53,69,0.8)', 'rgba(108,117,125,0.4)']
+                    backgroundColor: [this.THEME.dangerAccent, this.THEME.softGrey],
+                    borderColor: [this.THEME.dangerAccentBorder, this.THEME.softGreyBorder],
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -1643,9 +1901,10 @@ const Reports = {
                 <small>${cat.percentagePaid}%</small>
             `;
 
+            const safeCat = cat.category.replace(/'/g, "\\'");
             html += `
                 <tr>
-                    <td><strong>${cat.category}</strong></td>
+                    <td class="drill-down-link" onclick="Reports.drillDown('category', '${safeCat}')"><strong>${cat.category}</strong></td>
                     <td class="text-center">${Utils.formatNumber(cat.vouchersRaised)}</td>
                     <td class="text-right text-success">${Utils.formatCurrency(cat.amountPaid)}</td>
                     <td class="text-right text-danger">${Utils.formatCurrency(cat.balance)}</td>
@@ -1928,8 +2187,8 @@ const Reports = {
                 html += `
                     <tr class="parent-account-row">
                         <td>
-                            ${hasChildren ? `<button class="btn btn-sm btn-secondary" style="margin-right:8px;padding:2px 8px;" onclick="Reports.toggleAccountTypeGroup('${safeBase}')">${isExpanded ? '-' : '+'}</button>` : ''}
-                            <strong>${baseType}</strong>
+                            <span class="drill-down-link" onclick="Reports.drillDown('accountType', '${safeBase}')"><strong>${baseType}</strong></span>
+                            ${hasChildren ? `<button class="btn btn-sm btn-secondary" style="margin-left:8px;padding:2px 8px;" onclick="Reports.toggleAccountTypeGroup('${safeBase}')">${isExpanded ? '-' : '+'}</button>` : ''}
                         </td>
                         <td class="text-center">${Utils.formatNumber(parent.count)}</td>
                         <td class="text-right">${Utils.formatCurrency(parent.totalAmount)}</td>
@@ -1951,7 +2210,7 @@ const Reports = {
                             const childRate = child.totalAmount > 0 ? (child.paidAmount / child.totalAmount) * 100 : 0;
                             html += `
                                 <tr class="sub-account-row">
-                                    <td style="padding-left:42px;">${child.name}</td>
+                                    <td style="padding-left:42px;" class="drill-down-link" onclick="Reports.drillDown('accountType', '${safeBase}', '${child.name.replace(/'/g, "\\'")}')">${child.name}</td>
                                     <td class="text-center">${Utils.formatNumber(child.count)}</td>
                                     <td class="text-right">${Utils.formatCurrency(child.totalAmount)}</td>
                                     <td class="text-right text-success">${Utils.formatCurrency(child.paidAmount)}</td>
@@ -2019,7 +2278,7 @@ const Reports = {
 
             html += `
                 <tr>
-                    <td><strong>${month.month}</strong></td>
+                    <td class="drill-down-link" onclick="Reports.drillDown('month', '${month.month}')"><strong>${month.month}</strong></td>
                     <td class="text-center">${Utils.formatNumber(month.count)}</td>
                     <td class="text-right text-success">${Utils.formatCurrency(month.paidAmount)}</td>
                     <td class="text-right text-warning">${Utils.formatCurrency(month.unpaidAmount)}</td>
@@ -2299,6 +2558,144 @@ const Reports = {
         }
     },
 
+    async loadHistoricalReports() {
+        try {
+            const dropdown = document.getElementById('reportDropdown');
+            if (!dropdown) return;
+
+            dropdown.innerHTML = '<option value="">-- Loading Saved Reports... --</option>';
+            const result = await API.getDebtProfileList();
+            if (result.success) {
+                this.historicalReports = result.reports || [];
+                dropdown.innerHTML = '<option value="">-- Select a Saved Report --</option>';
+                this.historicalReports.forEach(report => {
+                    const option = document.createElement('option');
+                    option.value = report.requestId;
+                    option.textContent = `${report.title} (${report.requestId}) [${report.status}]`;
+                    dropdown.appendChild(option);
+                });
+            } else {
+                dropdown.innerHTML = '<option value="">-- Error loading reports --</option>';
+                console.error('Error fetching historical reports:', result.error);
+            }
+        } catch (e) {
+            console.error('Failed to load historical reports:', e);
+        }
+    },
+
+    setupHistoricalReportsListeners() {
+        const dropdown = document.getElementById('reportDropdown');
+        const viewBtn = document.getElementById('viewReportBtn');
+        const editBtn = document.getElementById('editReportBtn');
+        const deleteBtn = document.getElementById('deleteReportBtn');
+        const previewBtn = document.getElementById('previewReportBtn');
+        const generateNewBtn = document.getElementById('generateNewReportBtn');
+
+        if (!dropdown) return;
+
+        dropdown.addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (!val) {
+                if (viewBtn) viewBtn.disabled = true;
+                if (editBtn) editBtn.disabled = true;
+                if (deleteBtn) deleteBtn.disabled = true;
+                if (previewBtn) previewBtn.disabled = true;
+                this.selectedReportId = null;
+                
+                document.getElementById('fullDebtReportContainer')?.classList.add('hidden');
+                document.getElementById('debtProfileWorkflowCard')?.classList.remove('hidden');
+                this.renderDebtProfileStatus();
+                return;
+            }
+
+            const report = this.historicalReports.find(r => r.requestId === val);
+            if (report) {
+                this.selectedReportId = val;
+                
+                this.debtRequestStatus = {
+                    success: true,
+                    requestId: report.requestId,
+                    timestamp: report.timestamp,
+                    requester: report.requesterName,
+                    filters: report.filters,
+                    status: report.status,
+                    approver: report.approverEmail,
+                    approvalDate: report.approvalDate,
+                    comments: report.comments,
+                    narrative: {
+                        title: report.title,
+                        summary: report.summary,
+                        analysis: report.analysis,
+                        recommendations: report.recommendations
+                    }
+                };
+
+                if (viewBtn) viewBtn.disabled = (report.status !== 'APPROVED');
+                if (editBtn) editBtn.disabled = false;
+                if (deleteBtn) deleteBtn.disabled = false;
+                if (previewBtn) previewBtn.disabled = (report.status !== 'APPROVED');
+            }
+        });
+
+        viewBtn?.addEventListener('click', () => {
+            if (this.selectedReportId) {
+                this.loadFullDebtReport();
+            }
+        });
+
+        editBtn?.addEventListener('click', () => {
+            if (this.selectedReportId) {
+                this.handleDebtProfileRequest(false);
+            }
+        });
+
+        deleteBtn?.addEventListener('click', async () => {
+            if (!this.selectedReportId) return;
+            const confirm = await Utils.confirm(`Are you sure you want to permanently delete report ${this.selectedReportId}? This action cannot be undone.`, "Delete Report");
+            if (!confirm) return;
+
+            this.showLoading(true);
+            const result = await API.deleteDebtProfile(this.selectedReportId);
+            this.showLoading(false);
+
+            if (result.success) {
+                Utils.showToast(result.message || 'Report deleted successfully', 'success');
+                this.selectedReportId = null;
+                dropdown.value = '';
+                
+                if (viewBtn) viewBtn.disabled = true;
+                if (editBtn) editBtn.disabled = true;
+                if (deleteBtn) deleteBtn.disabled = true;
+                if (previewBtn) previewBtn.disabled = true;
+
+                await this.loadHistoricalReports();
+                document.getElementById('fullDebtReportContainer')?.classList.add('hidden');
+                await this.checkDebtProfileStatus();
+            } else {
+                Utils.showToast(result.error || 'Failed to delete report', 'error');
+            }
+        });
+
+        previewBtn?.addEventListener('click', () => {
+            if (this.selectedReportId) {
+                this.downloadDebtReportGenerated('pdf');
+            }
+        });
+
+        generateNewBtn?.addEventListener('click', async () => {
+            dropdown.value = '';
+            this.selectedReportId = null;
+            if (viewBtn) viewBtn.disabled = true;
+            if (editBtn) editBtn.disabled = true;
+            if (deleteBtn) deleteBtn.disabled = true;
+            if (previewBtn) previewBtn.disabled = true;
+
+            document.getElementById('fullDebtReportContainer')?.classList.add('hidden');
+            document.getElementById('debtProfileWorkflowCard')?.classList.remove('hidden');
+            await this.checkDebtProfileStatus();
+        });
+    },
+
     renderDebtProfileStatus() {
         const status = this.debtRequestStatus?.status || 'NONE';
         const user = Auth.getUser();
@@ -2386,7 +2783,7 @@ const Reports = {
         const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
         // SECTION 1: OVERVIEW
-        const summary = `This report provides a comprehensive financial overview of the Federal Medical Centre, Abeokuta, as of ${today}. It serves as a dual-purpose handover document and performance analysis, integrating carryover liabilities from 2025 (${Utils.formatCurrency(balanceBF)}) with new 2026 obligations. The report evaluates contract sums, payment efficiency, and debt growth rates to guide management decision-making.`;
+        const summary = `This report provides a comprehensive financial overview of the Federal Medical Centre, Abeokuta, as of ${today}. It serves as a performance analysis, integrating carryover liabilities from 2025 (${Utils.formatCurrency(balanceBF)}) with new 2026 obligations. The report evaluates contract sums, payment efficiency, and debt growth rates to guide management decision-making.`;
         
         // SECTION 5: ANALYSIS
         const analysis = `Financial evaluation for 2026 reveals a total contract sum commitment of ${Utils.formatCurrency(p.contractSum)}. Payment efficiency currently stands at ${efficiency}, indicating the ratio of vouchers settled against total obligations raised. A growth rate of ${growth} is observed relative to the 2025 starting balance. Sectoral analysis identifies "${topCat ? topCat.name : 'Operations'}" as the lead expenditure category. In the current month (${cm.name}), the hospital processed ${Utils.formatCurrency(cm.newObligations)} in new vouchers while effecting ${Utils.formatCurrency(cm.payments)} in payments.`;
@@ -2394,7 +2791,7 @@ const Reports = {
         // SECTION 6: RECOMMENDATIONS
         const recommendations = `1. Prioritize the settlement of 2025 Balance B/F (${Utils.formatCurrency(balanceBF)}) to reduce legacy interest/inflation risk.\n2. Implement stricter commitment controls in the "${topCat ? topCat.name : 'High-Expenditure'}" sector.\n3. Target a payment efficiency improvement of 15% in the next quarter via automated voucher processing.\n4. Revalidate all outstanding 2026 vouchers to ensure budgetary alignment before the next fiscal cycle.`;
 
-        document.getElementById('reportTitle').value = `DEBT PROFILE & FINANCIAL HANDOVER REPORT - ${this.currentYear}`;
+        document.getElementById('reportTitle').value = `DEBT PROFILE & FINANCIAL REPORT - ${this.currentYear}`;
         document.getElementById('reportSummary').value = summary;
         document.getElementById('reportAnalysis').value = analysis;
         document.getElementById('reportRecommendations').value = recommendations;
@@ -2403,26 +2800,68 @@ const Reports = {
     },
 
     async submitDebtProfileRequest() {
+        const titleVal = document.getElementById('reportTitle').value;
+        const summaryVal = document.getElementById('reportSummary').value;
+        const analysisVal = document.getElementById('reportAnalysis').value;
+        const recommendationsVal = document.getElementById('reportRecommendations').value;
+
         const reportData = {
-            title: document.getElementById('reportTitle').value,
-            summary: document.getElementById('reportSummary').value,
-            analysis: document.getElementById('reportAnalysis').value,
-            recommendations: document.getElementById('reportRecommendations').value,
+            title: titleVal,
+            summary: summaryVal,
+            analysis: analysisVal,
+            recommendations: recommendationsVal,
             filters: { year: this.currentYear, requestedAt: new Date().toISOString() }
         };
 
         this.showLoading(true);
-        const result = await API.requestDebtProfile(reportData);
+        let result;
+        if (this.selectedReportId) {
+            result = await API.updateDebtProfileNarrative(this.selectedReportId, {
+                title: titleVal,
+                summary: summaryVal,
+                analysis: analysisVal,
+                recommendations: recommendationsVal
+            });
+        } else {
+            result = await API.requestDebtProfile(reportData);
+        }
         this.showLoading(false);
 
         if (result.success) {
             document.getElementById('analyticalFormModalOverlay')?.classList.remove('active');
             Utils.showToast(result.message || 'Request processed successfully', 'success');
-            await this.checkDebtProfileStatus();
             
-            // If it was already approved (re-generation), reload the report
-            if (this.debtRequestStatus?.status === 'APPROVED') {
-                await this.loadFullDebtReport();
+            if (this.selectedReportId) {
+                await this.loadHistoricalReports();
+                const dropdown = document.getElementById('reportDropdown');
+                if (dropdown) dropdown.value = this.selectedReportId;
+                
+                const report = this.historicalReports.find(r => r.requestId === this.selectedReportId);
+                if (report) {
+                    this.debtRequestStatus = {
+                        success: true,
+                        requestId: report.requestId,
+                        timestamp: report.timestamp,
+                        requester: report.requesterName,
+                        filters: report.filters,
+                        status: report.status,
+                        approver: report.approverEmail,
+                        approvalDate: report.approvalDate,
+                        comments: report.comments,
+                        narrative: {
+                            title: report.title,
+                            summary: report.summary,
+                            analysis: report.analysis,
+                            recommendations: report.recommendations
+                        }
+                    };
+                    await this.loadFullDebtReport();
+                }
+            } else {
+                await this.checkDebtProfileStatus();
+                if (this.debtRequestStatus?.status === 'APPROVED') {
+                    await this.loadFullDebtReport();
+                }
             }
         } else {
             Utils.showToast(result.error || 'Request failed', 'error');
@@ -2544,7 +2983,7 @@ const Reports = {
                     labels: Object.keys(data.byAge),
                     datasets: [{
                         data: Object.values(data.byAge),
-                        backgroundColor: ['#28a745', '#ffc107', '#dc3545']
+                        backgroundColor: [this.THEME.successPaid, this.THEME.warningAccent, this.THEME.dangerAccent]
                     }]
                 },
                 options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
@@ -2566,14 +3005,16 @@ const Reports = {
                     datasets: [{
                         label: 'Amount',
                         data: topCats.map(c => c[1]),
-                        backgroundColor: 'rgba(0, 123, 255, 0.7)'
+                        backgroundColor: this.THEME.primaryGreen,
+                        borderColor: this.THEME.primaryGreenBorder,
+                        borderWidth: 1
                     }]
                 },
                 options: { 
                     indexAxis: 'y', 
                     responsive: true,
                     plugins: { legend: { display: false } },
-                    scales: { x: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } } }
+                    scales: { x: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } } }
                 }
             });
         }
@@ -2590,13 +3031,15 @@ const Reports = {
                     datasets: [{
                         label: 'Amount',
                         data: depts.map(d => d[1]),
-                        backgroundColor: 'rgba(108, 117, 125, 0.7)'
+                        backgroundColor: this.THEME.softGrey,
+                        borderColor: this.THEME.softGreyBorder,
+                        borderWidth: 1
                     }]
                 },
                 options: { 
                     responsive: true,
                     plugins: { legend: { display: false } },
-                    scales: { y: { ticks: { callback: v => 'â‚¦' + Number(v).toLocaleString() } } }
+                    scales: { y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } } }
                 }
             });
         }
@@ -2672,6 +3115,648 @@ const Reports = {
         } finally {
             this.showLoading(false);
         }
+    },
+
+    changeTab(tabName) {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.getAttribute('data-tab') === tabName) {
+                btn.classList.add('active');
+            }
+        });
+
+        const tabClasses = {
+            summary: 'tab-section-summary',
+            expense: 'tab-section-expense',
+            tax: 'tab-section-tax',
+            debt: 'tab-section-debt',
+            requests: 'tab-section-requests'
+        };
+
+        Object.entries(tabClasses).forEach(([name, className]) => {
+            document.querySelectorAll('.' + className).forEach(el => {
+                if (name === tabName) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            });
+        });
+    },
+
+    async applyDateFilter() {
+        const fromDate = document.getElementById('reportDateFrom')?.value;
+        const toDate = document.getElementById('reportDateTo')?.value;
+
+        if (!fromDate && !toDate) {
+            Utils.showToast('Please select at least one date boundary', 'warning');
+            return;
+        }
+
+        this.showLoading(true);
+
+        try {
+            if (!this.voucherCache[this.currentYear] || this.voucherCache[this.currentYear].length === 0) {
+                await this.loadVoucherAnalytics();
+            }
+
+            const start = fromDate ? new Date(fromDate).getTime() : 0;
+            const end = toDate ? new Date(toDate).getTime() : Infinity;
+
+            const vouchers = (this.voucherCache[this.currentYear] || []).filter(v => {
+                const vDate = this.parseDateFlexible(v.createdAt || v.date);
+                if (!vDate) return false;
+                const t = vDate.getTime();
+                return t >= start && t <= end;
+            });
+
+            const statusLabel = document.getElementById('dateFilterStatus');
+            if (statusLabel) {
+                const formattedFrom = fromDate ? new Date(fromDate).toLocaleDateString('en-GB') : 'Start';
+                const formattedTo = toDate ? new Date(toDate).toLocaleDateString('en-GB') : 'End';
+                statusLabel.textContent = `Showing range: ${formattedFrom} to ${formattedTo} (${vouchers.length} vouchers)`;
+            }
+
+            this.rebuildReportData(vouchers);
+            Utils.showToast('Date range filter applied successfully', 'success');
+        } catch (error) {
+            console.error('Error applying date filter:', error);
+            Utils.showToast('Failed to apply date filter', 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    },
+
+    clearDateFilter() {
+        const fromInput = document.getElementById('reportDateFrom');
+        const toInput = document.getElementById('reportDateTo');
+        if (fromInput) fromInput.value = '';
+        if (toInput) toInput.value = '';
+
+        const statusLabel = document.getElementById('dateFilterStatus');
+        if (statusLabel) {
+            statusLabel.textContent = 'Showing full year summary';
+        }
+
+        this.loadYearSummary();
+        Utils.showToast('Date filter cleared', 'info');
+    },
+
+    rebuildReportData(vouchers) {
+        let totalVouchersRaised = vouchers.length;
+        let totalPaidAmount = 0;
+        let paidVouchers = 0;
+        let totalUnpaidAmount = 0;
+        let unpaidVouchers = 0;
+        let totalCancelledAmount = 0;
+        let cancelledVouchers = 0;
+        let totalProcessedContractSum = 0;
+        let revalidatedVouchers = 0;
+
+        vouchers.forEach(v => {
+            const gross = parseFloat(v.grossAmount || 0);
+            const contract = parseFloat(v.contractSum || 0);
+            
+            if (v.oldVoucherNumber || String(v.oldVoucherAvailable).toLowerCase() === 'yes') {
+                revalidatedVouchers++;
+            }
+
+            if (v.status === 'Paid') {
+                totalPaidAmount += gross;
+                paidVouchers++;
+            } else if (v.status === 'Unpaid') {
+                totalUnpaidAmount += gross;
+                unpaidVouchers++;
+            } else if (v.status === 'Cancelled') {
+                totalCancelledAmount += gross;
+                cancelledVouchers++;
+            }
+
+            if (contract) totalProcessedContractSum += contract;
+        });
+
+        let totalDebt = totalUnpaidAmount;
+        let averagePaymentPercent = totalPaidAmount + totalUnpaidAmount > 0 
+            ? Math.round((totalPaidAmount / (totalPaidAmount + totalUnpaidAmount)) * 100)
+            : 0;
+
+        const summary = {
+            totalVouchersRaised,
+            totalPaidAmount,
+            paidVouchers,
+            totalUnpaidAmount,
+            unpaidVouchers,
+            totalCancelledAmount,
+            cancelledVouchers,
+            totalProcessedContractSum,
+            totalDebt,
+            averagePaymentPercent,
+            revalidatedVouchers
+        };
+
+        const categoryMap = {};
+        vouchers.forEach(v => {
+            const cat = v.categories || 'Uncategorized';
+            if (!categoryMap[cat]) {
+                categoryMap[cat] = { category: cat, vouchersRaised: 0, amountPaid: 0, balance: 0 };
+            }
+            const gross = parseFloat(v.grossAmount || 0);
+            categoryMap[cat].vouchersRaised++;
+            if (v.status === 'Paid') {
+                categoryMap[cat].amountPaid += gross;
+            } else if (v.status === 'Unpaid') {
+                categoryMap[cat].balance += gross;
+            }
+        });
+        const categoryBreakdown = Object.values(categoryMap).map(cat => {
+            const total = cat.amountPaid + cat.balance;
+            cat.percentagePaid = total > 0 ? parseFloat(((cat.amountPaid / total) * 100).toFixed(2)) : 0;
+            cat.percentOfTotalPayment = totalPaidAmount > 0 ? parseFloat(((cat.amountPaid / totalPaidAmount) * 100).toFixed(2)) : 0;
+            return cat;
+        });
+
+        const accountTypeBreakdown = this.buildAccountTypeBreakdownFromVouchers(vouchers);
+
+        const monthlyMap = {};
+        CONFIG.MONTHS.forEach((m, idx) => {
+            monthlyMap[idx] = { month: m, vouchersRaised: 0, amountPaid: 0, balance: 0, percentagePaid: 0 };
+        });
+        vouchers.forEach(v => {
+            const idx = this.getMonthIndexFromVoucher(v);
+            if (idx !== null && idx !== undefined && monthlyMap[idx]) {
+                const gross = parseFloat(v.grossAmount || 0);
+                const cell = monthlyMap[idx];
+                cell.vouchersRaised++;
+                if (v.status === 'Paid') {
+                    cell.amountPaid += gross;
+                } else if (v.status === 'Unpaid') {
+                    cell.balance += gross;
+                }
+            }
+        });
+        const monthlyBreakdown = Object.values(monthlyMap).map(m => {
+            return {
+                month: m.month,
+                count: m.vouchersRaised,
+                paidAmount: m.amountPaid,
+                unpaidAmount: m.balance
+            };
+        });
+
+        this.summaryData = {
+            success: true,
+            summary,
+            categoryBreakdown,
+            accountTypeBreakdown,
+            monthlyBreakdown
+        };
+
+        this.renderYearSummary(this.summaryData);
+        this.renderFinancialInsights(summary);
+        this.renderCategoryTable(categoryBreakdown);
+        this.renderAccountTypeTable(accountTypeBreakdown);
+        this.renderMonthlyTable(monthlyBreakdown);
+        this.queueChartRender('categoryChart', () => this.drawCategoryChart(categoryBreakdown));
+        
+        const paretoMode = document.getElementById('paretoGroupSelector')?.value || 'category';
+        if (paretoMode === 'category') {
+            this.queueChartRender('categoryParetoChart', () => this.drawCategoryParetoChart(categoryBreakdown));
+        } else {
+            this.queueChartRender('categoryParetoChart', () => this.drawVendorParetoChart());
+        }
+
+        this.queueChartRender('monthlyChart', () => this.drawMonthlyChart(monthlyBreakdown));
+        this.queueChartRender('statusCountChart', () => this.drawStatusCharts(summary));
+        this.queueChartRender('statusAmountChart', () => this.drawStatusCharts(summary));
+
+        let totalTaxLiability = 0;
+        let totalTaxPaid = 0;
+        let totalTaxOutstanding = 0;
+        
+        vouchers.forEach(v => {
+            const vat = parseFloat(v.vat || 0);
+            const wht = parseFloat(v.wht || 0);
+            const stamp = parseFloat(v.stampDuty || 0);
+            const taxLiab = vat + wht + stamp;
+            totalTaxLiability += taxLiab;
+            
+            if (v.status === 'Paid') {
+                totalTaxPaid += taxLiab;
+            } else {
+                totalTaxOutstanding += taxLiab;
+            }
+        });
+        
+        const taxSummary = {
+            totalTaxLiability,
+            totalPaid: totalTaxPaid,
+            totalOutstanding: totalTaxOutstanding,
+            complianceRate: totalTaxLiability > 0 ? (totalTaxPaid / totalTaxLiability) * 100 : 0
+        };
+        
+        this.taxSummary = taxSummary;
+        this.renderTaxSummary(taxSummary);
+
+        const taxMonths = CONFIG.MONTHS.map(m => ({ month: m, totalTax: 0, paidTax: 0 }));
+        vouchers.forEach(v => {
+            const idx = this.getMonthIndexFromVoucher(v);
+            if (idx !== null && idx !== undefined && taxMonths[idx]) {
+                const vat = parseFloat(v.vat || 0);
+                const wht = parseFloat(v.wht || 0);
+                const stamp = parseFloat(v.stampDuty || 0);
+                const taxLiab = vat + wht + stamp;
+                
+                taxMonths[idx].totalTax += taxLiab;
+                if (v.status === 'Paid') {
+                    taxMonths[idx].paidTax += taxLiab;
+                }
+            }
+        });
+        this.taxMonthlyData = taxMonths;
+        this.queueChartRender('taxSplitChart', () => this.drawTaxSplitChart(taxMonths));
+        this.setupLazyChartRendering();
+    },
+
+    drillDown(type, key, subKey = '') {
+        const titleEl = document.getElementById('drillDownTitle');
+        const tbody = document.getElementById('drillDownTableBody');
+        const modal = document.getElementById('drillDownModal');
+        if (!titleEl || !tbody || !modal) return;
+
+        this.activeDrillDown = { type, key, subKey };
+
+        let titleText = `Contributing Vouchers - ${key}`;
+        if (subKey) titleText += ` (${subKey})`;
+        titleEl.innerHTML = `<i class="fas fa-list-ul"></i> ${titleText}`;
+
+        let vouchers = this.voucherCache[this.currentYear] || [];
+
+        const fromDate = document.getElementById('reportDateFrom')?.value;
+        const toDate = document.getElementById('reportDateTo')?.value;
+        const start = fromDate ? new Date(fromDate).getTime() : 0;
+        const end = toDate ? new Date(toDate).getTime() : Infinity;
+
+        vouchers = vouchers.filter(v => {
+            const vDate = this.parseDateFlexible(v.createdAt || v.date);
+            if (!vDate) return false;
+            const t = vDate.getTime();
+            return t >= start && t <= end;
+        });
+
+        let filtered = [];
+        if (type === 'category') {
+            filtered = vouchers.filter(v => (v.categories || 'Uncategorized') === key);
+        } else if (type === 'month') {
+            filtered = vouchers.filter(v => {
+                const monthIdx = this.getMonthIndexFromVoucher(v);
+                return monthIdx !== null && CONFIG.MONTHS[monthIdx] === key;
+            });
+        } else if (type === 'accountType') {
+            filtered = vouchers.filter(v => (v.accountType || 'Unassigned') === key && (!subKey || v.subAccountType === subKey));
+        } else if (type === 'aging') {
+            const now = new Date().getTime();
+            filtered = vouchers.filter(v => {
+                if (v.status !== 'Unpaid') return false;
+                const vDate = this.parseDateFlexible(v.date || v.createdAt);
+                if (!vDate) return false;
+                const days = Math.floor((now - vDate.getTime()) / (1000 * 60 * 60 * 24));
+                if (key === '0–7 days') return days >= 0 && days <= 7;
+                if (key === '8–14 days') return days >= 8 && days <= 14;
+                if (key === '15–30 days') return days >= 15 && days <= 30;
+                if (key === '31–60 days') return days >= 31 && days <= 60;
+                if (key === '61–90 days') return days >= 61 && days <= 90;
+                if (key === '90+ days') return days >= 91;
+                return false;
+            });
+        }
+
+        this.activeDrillDown.vouchers = filtered;
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No contributing vouchers found.</td></tr>';
+        } else {
+            let html = '';
+            filtered.forEach((v, index) => {
+                const net = parseFloat((v.grossAmount || 0) - ((v.vat || 0) + (v.wht || 0) + (v.stampDuty || 0)));
+                const sn = v.accountOrMail || '-';
+                const dateVal = v.date ? new Date(v.date).toLocaleDateString('en-GB') : '-';
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td style="font-weight:600; color:var(--primary-color);">${sn}</td>
+                        <td><strong>${v.payee || '-'}</strong></td>
+                        <td class="particular-cell" title="${this.escapeHtml(v.particular || '')}">${this.escapeHtml(v.particular || '')}</td>
+                        <td class="text-right amount-cell" style="font-variant-numeric: tabular-nums;">${Utils.formatCurrency(v.grossAmount || 0)}</td>
+                        <td class="text-right amount-cell" style="font-variant-numeric: tabular-nums;">${Utils.formatCurrency(net)}</td>
+                        <td class="text-center">
+                           <span class="badge status-${String(v.status).toLowerCase()}" style="background-color: ${v.status === 'Paid' ? 'rgba(40,167,69,0.1)' : v.status === 'Cancelled' ? 'rgba(220,53,69,0.1)' : 'rgba(255,193,7,0.1)'}; color: ${v.status === 'Paid' ? '#28a745' : v.status === 'Cancelled' ? '#dc3545' : '#ffc107'}; border: 1px solid ${v.status === 'Paid' ? 'rgba(40,167,69,0.2)' : v.status === 'Cancelled' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.2)'};">${v.status}</span>
+                        </td>
+                        <td>${dateVal}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        modal.classList.add('active');
+    },
+
+    closeDrillDownModal() {
+        document.getElementById('drillDownModal')?.classList.remove('active');
+    },
+
+    exportDrillDownCSV() {
+        if (!this.activeDrillDown || !this.activeDrillDown.vouchers || this.activeDrillDown.vouchers.length === 0) {
+            Utils.showToast('No data to export', 'warning');
+            return;
+        }
+
+        let csv = `PAYABLE VOUCHER DRILLDOWN - ${this.activeDrillDown.key}\n`;
+        csv += `Exported: ${new Date().toLocaleString()}\n\n`;
+        csv += 'S/N,Voucher No.,Payee,Particular,Gross Amount (NGN),Net Amount (NGN),Status,Date\n';
+
+        this.activeDrillDown.vouchers.forEach((v, idx) => {
+            const net = parseFloat((v.grossAmount || 0) - ((v.vat || 0) + (v.wht || 0) + (v.stampDuty || 0)));
+            const particularClean = String(v.particular || '').replace(/"/g, '""');
+            const payeeClean = String(v.payee || '').replace(/"/g, '""');
+            csv += `${idx + 1},"${v.accountOrMail || ''}","${payeeClean}","${particularClean}",${v.grossAmount || 0},${net},"${v.status || ''}","${v.date || ''}"\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', `Voucher_Drilldown_${this.activeDrillDown.key.replace(/\s+/g, '_')}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    },
+
+    exportCard(cardId, title) {
+        const card = document.getElementById(cardId);
+        const table = card?.querySelector('table');
+        if (!table) {
+            Utils.showToast('No table found to export', 'warning');
+            return;
+        }
+
+        let csv = `${title.toUpperCase()} REPORT\n`;
+        csv += `Exported: ${new Date().toLocaleString()}\n\n`;
+
+        const rows = table.querySelectorAll('tr');
+        rows.forEach(tr => {
+            const cols = tr.querySelectorAll('th, td');
+            const rowData = [];
+            cols.forEach(col => {
+                let btn = col.querySelector('button');
+                let text = col.innerText.trim();
+                if (btn) {
+                    text = text.replace(btn.innerText, '').trim();
+                }
+                text = text.replace(/"/g, '""');
+                rowData.push(`"${text}"`);
+            });
+            csv += rowData.join(',') + '\n';
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', `${title.replace(/\s+/g, '_')}_Report.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    },
+
+    toggleParetoGroup() {
+        const select = document.getElementById('paretoGroupSelector');
+        if (!select) return;
+        const mode = select.value;
+        
+        if (mode === 'category') {
+            this.drawCategoryParetoChart(this.summaryData.categoryBreakdown);
+        } else {
+            this.drawVendorParetoChart();
+        }
+    },
+
+    drawVendorParetoChart() {
+        const ctx = document.getElementById('categoryParetoChart');
+        if (!ctx) return;
+        
+        const vouchers = this.voucherCache[this.currentYear] || [];
+        const vendorMap = {};
+        
+        vouchers.forEach(v => {
+            if (v.status !== 'Unpaid') return;
+            const payee = v.payee || 'Unknown Payee';
+            vendorMap[payee] = (vendorMap[payee] || 0) + parseFloat(v.grossAmount || 0);
+        });
+        
+        const sorted = Object.entries(vendorMap)
+            .map(([name, balance]) => ({ name, balance }))
+            .sort((a, b) => b.balance - a.balance)
+            .slice(0, 15);
+            
+        const labels = sorted.map(c => c.name);
+        const balances = sorted.map(c => c.balance);
+        const total = Object.values(vendorMap).reduce((s, v) => s + v, 0) || 1;
+        
+        let running = 0;
+        const cumPct = balances.map(v => {
+            running += v;
+            return Number(((running / total) * 100).toFixed(2));
+        });
+
+        if (this.categoryParetoChart) this.categoryParetoChart.destroy();
+        
+        this.categoryParetoChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Unpaid Vendor Debt',
+                        data: balances,
+                        backgroundColor: 'rgba(220, 53, 69, 0.65)',
+                        yAxisID: 'y'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Cumulative %',
+                        data: cumPct,
+                        borderColor: 'rgba(0, 123, 255, 1)',
+                        backgroundColor: 'rgba(0, 123, 255, 0.15)',
+                        tension: 0.25,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: {
+                        ticks: { callback: v => '₦' + Number(v).toLocaleString() }
+                    },
+                    y1: {
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        grid: { drawOnChartArea: false },
+                        ticks: { callback: v => v + '%' }
+                    }
+                }
+            }
+        });
+    },
+
+    async loadTaxPayments() {
+        const container = document.getElementById('taxPaymentsContainer');
+        if (!container) return;
+        
+        try {
+            const result = await API.getTaxPayments(this.currentYear);
+            if (result.success && result.payments) {
+                this.renderTaxPayments(result.payments);
+            } else {
+                container.innerHTML = '<p class="text-muted text-center">No remittance history found.</p>';
+            }
+        } catch (e) {
+            console.error('Error loading tax payments:', e);
+            container.innerHTML = '<p class="text-danger text-center">Error loading remittance ledger.</p>';
+        }
+    },
+
+    renderTaxPayments(payments) {
+        const container = document.getElementById('taxPaymentsContainer');
+        if (!container) return;
+
+        if (!payments || payments.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No remittance history logged.</p>';
+            return;
+        }
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Tax Type</th>
+                            <th>Period</th>
+                            <th class="text-right">Amount</th>
+                            <th>Payment Method</th>
+                            <th>Reference No.</th>
+                            <th>Bank</th>
+                            <th>Document</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        payments.forEach(p => {
+            const pDate = p.date ? new Date(p.date).toLocaleDateString('en-GB') : '-';
+            const ref = p.referenceNumber || p.reference || '-';
+            const attachment = p.attachment || p.attachmentUrl || '';
+            const attachmentMarkup = attachment 
+                ? `<a href="${attachment}" target="_blank" style="color:var(--primary-color); font-weight:600;"><i class="fas fa-paperclip"></i> View Receipt</a>` 
+                : '<span class="text-muted" style="font-size:11px;">No attachment</span>';
+
+            html += `
+                <tr>
+                    <td>${pDate}</td>
+                    <td><span class="badge badge-info" style="background-color:rgba(0,123,255,0.1); color:#007bff; border:1px solid rgba(0,123,255,0.2);">${p.taxType}</span></td>
+                    <td>${p.period || '-'}</td>
+                    <td class="text-right" style="font-variant-numeric: tabular-nums; font-weight: 600;">${Utils.formatCurrency(p.amount || 0)}</td>
+                    <td>${p.paymentMethod || '-'}</td>
+                    <td><code>${ref}</code></td>
+                    <td>${p.bank || '-'}</td>
+                    <td>${attachmentMarkup}</td>
+                </tr>
+            `;
+        });
+
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+    },
+
+    toggleChartPlaceholder(canvasId, isEmpty) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return isEmpty;
+
+        const parent = canvas.parentElement;
+        const placeholderId = `${canvasId}-placeholder`;
+        let placeholder = document.getElementById(placeholderId);
+
+        if (isEmpty) {
+            canvas.style.display = 'none';
+            if (!placeholder) {
+                placeholder = document.createElement('div');
+                placeholder.id = placeholderId;
+                placeholder.className = 'chart-empty-placeholder';
+                placeholder.innerHTML = `
+                    <i class="fas fa-chart-bar"></i>
+                    <p>No financial data available for the selected period</p>
+                `;
+                parent.appendChild(placeholder);
+            } else {
+                placeholder.style.display = 'flex';
+            }
+        } else {
+            canvas.style.display = 'block';
+            if (placeholder) {
+                placeholder.style.display = 'none';
+            }
+        }
+        return isEmpty;
+    },
+
+    queueChartRender(canvasId, renderCallback) {
+        this.pendingChartRenders[canvasId] = renderCallback;
+        if (this.lazyIntersectionObserver) {
+            const canvas = document.getElementById(canvasId);
+            if (canvas) {
+                this.lazyIntersectionObserver.observe(canvas);
+            }
+        }
+    },
+
+    setupLazyChartRendering() {
+        if (this.lazyIntersectionObserver) {
+            this.lazyIntersectionObserver.disconnect();
+        }
+
+        this.lazyIntersectionObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const canvas = entry.target;
+                    const canvasId = canvas.id;
+                    if (this.pendingChartRenders && this.pendingChartRenders[canvasId]) {
+                        const renderFn = this.pendingChartRenders[canvasId];
+                        delete this.pendingChartRenders[canvasId];
+                        this.lazyIntersectionObserver.unobserve(canvas);
+                        renderFn();
+                    }
+                }
+            });
+        }, {
+            rootMargin: '150px 0px',
+            threshold: 0.01
+        });
+
+        document.querySelectorAll('canvas').forEach(canvas => {
+            this.lazyIntersectionObserver.observe(canvas);
+        });
+    },
+
+    escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 };
 

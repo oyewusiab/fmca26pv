@@ -238,8 +238,9 @@ a:hover {
     position: fixed;
     height: 100vh;
     overflow-y: auto;
-    transition: var(--transition);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
     z-index: 1000;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
 }
 
 .sidebar-header {
@@ -354,7 +355,8 @@ a:hover {
     flex: 1;
     margin-left: 260px;
     padding: 30px;
-    transition: var(--transition);
+    transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+    background: linear-gradient(135deg, rgba(26, 95, 42, 0.01) 0%, transparent 100%);
 }
 
 .page-header {
@@ -854,12 +856,40 @@ textarea.form-control {
 }
 
 /* ==================== Responsive ==================== */
-/* Sidebar toggle button (hidden on desktop) */
+/* Sidebar toggle button */
 .menu-toggle {
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 1200;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: all 0.3s ease;
+    font-size: 18px;
     display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.menu-toggle:hover {
+    background: var(--primary-dark);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.menu-toggle:active {
+    transform: translateY(0);
 }
 
 @media (max-width: 992px) {
+    .menu-toggle {
+        display: flex !important;
+    }
     .sidebar {
         transform: translateX(-100%);
         z-index: 1100;
@@ -872,21 +902,6 @@ textarea.form-control {
     .main-content {
         margin-left: 0;
         padding-top: 70px;
-    }
-
-    .menu-toggle {
-        display: block !important;
-        position: fixed;
-        top: 15px;
-        left: 15px;
-        z-index: 1200;
-        background: var(--primary-color);
-        color: white;
-        border: none;
-        padding: 10px 15px;
-        border-radius: 5px;
-        cursor: pointer;
-        box-shadow: var(--shadow);
     }
 }
 
@@ -2004,23 +2019,133 @@ textarea.form-control {
     }
 }
 
-/* Particular column - 3 line wrap with ellipsis */
+/* Particular column - 3 line wrap with ellipsis, largest column */
 .particular-cell {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 280px;
-    white-space: normal;
-    line-height: 1.4;
-    word-break: break-word;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 3 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-width: 320px !important;
+    max-width: 500px !important;
+    white-space: normal !important;
+    line-height: 1.4 !important;
+    word-break: break-word !important;
 }
 
-/* Ensure table cell accommodates the wrapped content */
-#vouchersList table td:nth-child(5) {
-    max-width: 280px;
-    vertical-align: top;
+#vouchersList table th.particular-header,
+#vouchersList table td.particular-cell {
+    min-width: 320px !important;
+    max-width: 500px !important;
+    width: 400px !important;
+    vertical-align: middle !important;
+}
+
+/* Payee column - wider width */
+#vouchersList table th.payee-header,
+#vouchersList table td.payee-cell {
+    min-width: 180px !important;
+    max-width: 250px !important;
+    width: 210px !important;
+    vertical-align: middle !important;
+}
+
+/* Category column - 3 line wrap with ellipsis, smaller/reduced space */
+.category-cell {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 3 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: normal !important;
+    line-height: 1.4 !important;
+    word-break: break-word !important;
+}
+
+/* Table layout fixed for straight grid lines */
+#vouchersList table {
+    table-layout: fixed !important;
+    width: 100% !important;
+}
+
+#vouchersList table th,
+#vouchersList table td {
+    text-align: left !important;
+    vertical-align: middle !important;
+}
+
+/* Specific column width overrides */
+#vouchersList table th:nth-child(1),
+#vouchersList table td:nth-child(1) {
+    width: 40px !important; /* Checkbox column */
+}
+
+#vouchersList table th.sn-header,
+#vouchersList table td.sn-cell {
+    width: 50px !important; /* S/N column */
+}
+
+#vouchersList table th.voucher-no-header,
+#vouchersList table td.voucher-no-cell {
+    width: 160px !important; /* Voucher No column */
+}
+
+#vouchersList table th.payee-header,
+#vouchersList table td.payee-cell {
+    width: 180px !important; /* Payee column */
+}
+
+#vouchersList table th.particular-header,
+#vouchersList table td.particular-cell {
+    width: 320px !important; /* Particular column */
+}
+
+#vouchersList table th.amount-header,
+#vouchersList table td.amount-cell {
+    width: 120px !important; /* Gross/Net Amounts */
+    text-align: right !important;
+}
+
+#vouchersList table th.category-header,
+#vouchersList table td.category-cell {
+    width: 120px !important; /* Category column */
+}
+
+#vouchersList table th.control-no-header,
+#vouchersList table td.control-no-cell {
+    width: 110px !important; /* Control No column */
+}
+
+#vouchersList table th.status-header,
+#vouchersList table td.status-cell {
+    width: 100px !important; /* Status column */
+}
+
+#vouchersList table th.pmt-month-header,
+#vouchersList table td.pmt-month-cell {
+    width: 90px !important; /* Pmt Month column */
+}
+
+#vouchersList table th.actions-header,
+#vouchersList table td.actions-cell,
+#vouchersList table td:last-child,
+#vouchersList table th:last-child {
+    width: 110px !important; /* Actions column */
+    min-width: 110px !important;
+    max-width: 110px !important;
+}
+
+/* Action buttons wrapper for wrapping to maximum of two lines */
+.action-buttons {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    justify-content: flex-start !important;
+    max-width: 90px !important;
+}
+
+.action-buttons .btn {
+    width: auto !important;
 }
 
 /* Collapsible Filters */
@@ -3162,4 +3287,115 @@ textarea.form-control {
         transform: translateX(0);
         opacity: 1;
     }
+}
+
+/* Aged Payables & Dashboards widgets */
+.aging-bar-container {
+    margin-bottom: 15px;
+}
+
+.aging-bar-container:last-child {
+    margin-bottom: 0;
+}
+
+.aging-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: var(--text-dark);
+}
+
+.aging-bar-progress {
+    height: 12px;
+    background: #e9ecef;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+
+.aging-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.6s ease;
+}
+
+.aging-bar-fill.under-30 {
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+}
+
+.aging-bar-fill.thirty-to-sixty {
+    background: linear-gradient(135deg, #f1c40f, #f39c12);
+}
+
+.aging-bar-fill.over-60 {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+}
+
+.aging-bar-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Compliance Mini List */
+.mini-compliance-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #fff;
+    border: 1px solid #f2dede;
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.mini-compliance-item:last-child {
+    margin-bottom: 0;
+}
+
+.mini-compliance-text {
+    flex: 1;
+    color: var(--text-dark);
+}
+
+.mini-compliance-text strong {
+    color: #c0392b;
+}
+
+/* Approvals Queue List styling */
+.approvals-queue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+}
+
+.approvals-queue-item:last-child {
+    margin-bottom: 0;
+}
+
+.approvals-queue-details {
+    flex: 1;
+}
+
+.approvals-queue-details strong {
+    color: var(--text-dark);
+}
+
+.approvals-queue-amount {
+    font-weight: 700;
+    color: var(--text-dark);
+    margin-top: 2px;
+}
+
+.approvals-queue-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: 15px;
 }

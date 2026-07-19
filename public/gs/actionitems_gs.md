@@ -337,8 +337,8 @@ function buildActionItemText_(ruleKey, unit, meta) {
   if (ruleKey === ACTION_ITEM_RULES.PAID_NO_CN) {
     if (unit === ACTION_ITEM_UNITS.PAYABLE) {
       return {
-        title: "Paid Voucher Not Released to CPO",
-        message: "Voucher is marked PAID but has not been released to CPO. Please release it to CPO Unit.",
+        title: "Release Paid Voucher to CPO",
+        message: "This voucher is marked PAID but has no control number. Consider releasing the voucher to CPO Unit.",
         severity: "warning"
       };
     }
@@ -350,24 +350,24 @@ function buildActionItemText_(ruleKey, unit, meta) {
       };
     }
     return {
-      title: "Paid Voucher Awaiting Release from Payable",
-      message: "Voucher is marked PAID but has not reached CPO. Please request release from Payable Unit.",
+      title: "Request Paid Voucher from Payable",
+      message: "This voucher is marked PAID but has no control number. Consider requesting the voucher from Payable Unit.",
       severity: "info"
     };
   }
 
   if (ruleKey === ACTION_ITEM_RULES.UNPAID_NO_CN_30D) {
     return {
-      title: "Voucher Delayed in Payable Unit",
-      message: "Voucher is over 30 days old, UNPAID, and has no control number. Request it from Payable Unit for payment processing.",
+      title: "Request Voucher for Payment Processing",
+      message: "This voucher has been in Payable for more than 30 days without payment or release. Consider requesting the voucher from Payable Unit for payment processing.",
       severity: "warning"
     };
   }
 
   if (ruleKey === ACTION_ITEM_RULES.RELEASED_UNPAID_15D) {
     return {
-      title: "Released Voucher Still Marked Unpaid",
-      message: "Voucher has been released for over 15 days but status is still UNPAID. Update the voucher payment status.",
+      title: "Update Payment Status for Released Voucher",
+      message: "This voucher was released more than 15 days ago but remains UNPAID. Consider updating the payment status for this released voucher.",
       severity: "danger"
     };
   }
@@ -652,16 +652,17 @@ function syncActionItems_() {
     throw new Error("ACTION_ITEMS_LOG sheet header is invalid.");
   }
 
-  const existing = new Map();
+  const existingMap = new Map();
   for (let r = 1; r < logData.length; r++) {
     const id = logData[r][idCol - 1];
-    if (id) existing.set(id, r + 1);
+    if (id) existingMap.set(id, r);
   }
 
   const toAppend = [];
   const logLastCol = logSheet.getLastColumn();
+  
   currentItems.forEach(it => {
-    if (!existing.has(it.id)) {
+    if (!existingMap.has(it.id)) {
       const rowArr = new Array(logLastCol).fill("");
       rowArr[idCol - 1] = it.id;
       rowArr[ruleCol - 1] = it.rule;
@@ -674,31 +675,36 @@ function syncActionItems_() {
       rowArr[resolvedCol - 1] = "";
       if (resolvedByCol) rowArr[resolvedByCol - 1] = "";
       toAppend.push(rowArr);
-      return;
+    } else {
+      const idx = existingMap.get(it.id);
+      logData[idx][ruleCol - 1] = it.rule;
+      logData[idx][yearCol - 1] = it.year;
+      logData[idx][rowIndexCol - 1] = it.rowIndex;
+      logData[idx][unitCol - 1] = it.unit;
+      logData[idx][statusCol - 1] = "PENDING";
+      logData[idx][lastSeenCol - 1] = now;
+      logData[idx][resolvedCol - 1] = "";
+      if (resolvedByCol) logData[idx][resolvedByCol - 1] = "";
     }
-
-    const rowNum = existing.get(it.id);
-    logSheet.getRange(rowNum, ruleCol).setValue(it.rule);
-    logSheet.getRange(rowNum, yearCol).setValue(it.year);
-    logSheet.getRange(rowNum, rowIndexCol).setValue(it.rowIndex);
-    logSheet.getRange(rowNum, unitCol).setValue(it.unit);
-    logSheet.getRange(rowNum, statusCol).setValue("PENDING");
-    logSheet.getRange(rowNum, lastSeenCol).setValue(now);
-    logSheet.getRange(rowNum, resolvedCol).setValue("");
-    if (resolvedByCol) logSheet.getRange(rowNum, resolvedByCol).setValue("");
   });
 
-  if (toAppend.length) {
-    logSheet.getRange(logSheet.getLastRow() + 1, 1, toAppend.length, logLastCol).setValues(toAppend);
+  existingMap.forEach((idx, id) => {
+    if (activeIds.has(id)) return;
+    logData[idx][statusCol - 1] = "RESOLVED";
+    logData[idx][resolvedCol - 1] = now;
+    logData[idx][lastSeenCol - 1] = now;
+    if (resolvedByCol) logData[idx][resolvedByCol - 1] = "SYSTEM";
+  });
+
+  // Write updated logData back in a single batch setValues call
+  if (logData.length > 1) {
+    logSheet.getRange(2, 1, logData.length - 1, logLastCol).setValues(logData.slice(1));
   }
 
-  existing.forEach((rowNum, id) => {
-    if (activeIds.has(id)) return;
-    logSheet.getRange(rowNum, statusCol).setValue("RESOLVED");
-    logSheet.getRange(rowNum, resolvedCol).setValue(now);
-    logSheet.getRange(rowNum, lastSeenCol).setValue(now);
-    if (resolvedByCol) logSheet.getRange(rowNum, resolvedByCol).setValue("SYSTEM");
-  });
+  // Append new records in batch
+  if (toAppend.length > 0) {
+    logSheet.getRange(logSheet.getLastRow() + 1, 1, toAppend.length, logLastCol).setValues(toAppend);
+  }
 }
 
 /***************************************************************

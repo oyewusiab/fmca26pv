@@ -75,11 +75,19 @@ const ActionItems = {
   },
 
   async refreshFull() {
+    if (this.isLoading) {
+      console.log('Action items refresh already in progress, skipping duplicate call.');
+      return;
+    }
+    this.isLoading = true;
     await this.init();
 
     const list = document.getElementById('actionItemsList');
     const card = document.getElementById('actionItemsCard');
-    if (!list || !card) return;
+    if (!list || !card) {
+      this.isLoading = false;
+      return;
+    }
 
     list.innerHTML = `
       <div class="text-center p-4">
@@ -106,6 +114,8 @@ const ActionItems = {
       list.innerHTML = `<div class="alert alert-danger">Failed to load action items.</div>`;
       this.items = [];
       this.updateCounters();
+    } finally {
+      this.isLoading = false;
     }
   },
 
@@ -146,6 +156,8 @@ const ActionItems = {
     const pmtMonth = item.pmtMonth || '-';
     const category = item.category || 'Uncategorized';
 
+    const rowIndex = item.rowIndex;
+
     return `
       <div class="action-item-row ${severity}">
         <div class="action-item-icon-wrap ${iconClass}">
@@ -167,9 +179,12 @@ const ActionItems = {
             <span class="small-badge"><strong>Category:</strong> ${category}</span>
           </div>
         </div>
-        <div class="action-item-actions">
-          <a class="btn-view" onclick="ActionItems.handleViewAction('${String(voucher).replace(/'/g, "\\'")}')">
-            <i class="fas fa-eye"></i> View Voucher
+        <div class="action-item-actions" style="display: flex; flex-direction: column; gap: 8px;">
+          <a class="btn-view" onclick="ActionItems.handleViewAction('${String(voucher).replace(/'/g, "\\'")}')" style="display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; text-decoration: none;">
+            <i class="fas fa-eye"></i> View
+          </a>
+          <a class="btn-resolve" onclick="ActionItems.handleEditAction(${rowIndex})" style="display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; text-decoration: none; background-color: var(--primary-color, #10b981); color: white; padding: 6px 12px; border-radius: 4px; font-weight: 500;">
+            <i class="fas fa-tools"></i> Fix Discrepancy
           </a>
         </div>
       </div>
@@ -213,6 +228,11 @@ const ActionItems = {
   handleViewAction(voucherNumber) {
     const voucher = encodeURIComponent(voucherNumber || '');
     window.location.href = `vouchers.html?lookup=true&voucher=${voucher}`;
+  },
+
+  handleEditAction(rowIndex) {
+    if (!rowIndex) return;
+    window.location.href = `vouchers.html?edit=${rowIndex}`;
   },
 
   openSettings() {
@@ -322,6 +342,11 @@ function handleViewAction(voucherNumber) {
   ActionItems.handleViewAction(voucherNumber);
 }
 
+function handleEditAction(rowIndex) {
+  ActionItems.handleEditAction(rowIndex);
+}
+
 window.ActionItems = ActionItems;
 window.loadActionItemsFullPage = loadActionItemsFullPage;
 window.handleViewAction = handleViewAction;
+window.handleEditAction = handleEditAction;

@@ -10,7 +10,7 @@ export default defineConfig({
                 vouchers: resolve(__dirname, 'vouchers.html'),
                 reports: resolve(__dirname, 'reports.html'),
                 users: resolve(__dirname, 'users.html'),
-                profile: resolve(__dirname, 'profile.html'),
+                tax: resolve(__dirname, 'tax.html'),
                 auditTrail: resolve(__dirname, 'audit-trail.html'),
                 forgotPassword: resolve(__dirname, 'forgot-password.html'),
                 notifications: resolve(__dirname, 'notifications.html')
