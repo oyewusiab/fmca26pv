@@ -1,0 +1,13 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/dashboard", "destination": "/dashboard.html" },
+    { "source": "/vouchers", "destination": "/vouchers.html" },
+    { "source": "/reports", "destination": "/reports.html" },
+    { "source": "/users", "destination": "/users.html" },
+    { "source": "/tax", "destination": "/tax.html" },
+    { "source": "/audit-trail", "destination": "/audit-trail.html" },
+    { "source": "/forgot-password", "destination": "/forgot-password.html" },
+    { "source": "/notifications", "destination": "/notifications.html" }
+  ]
+}

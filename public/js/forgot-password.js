@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const res = await API.resetPasswordWithOtp(identifier, otp, newPassword);
     if (res.success) {
       Utils.showToast(res.message || 'Password reset successful', 'success');
-      window.location.href = 'index.html';
+      window.location.href = '/';
     } else {
       Utils.showToast(res.error || 'Reset failed', 'error');
     }

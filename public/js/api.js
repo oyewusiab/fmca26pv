@@ -43,6 +43,10 @@
       return `${action}:${JSON.stringify(params)}`;
     },
 
+    _isAbortError(error) {
+      return error?.name === 'AbortError' || /aborted/i.test(String(error?.message || ''));
+    },
+
     _getFromCache(key) {
       try {
         const item = localStorage.getItem(this._cachePrefix + key);
@@ -80,6 +84,11 @@
         try {
           const response = await fetch(url, { ...options, signal: controller.signal });
           const text = await response.text();
+
+          if (!response.ok) {
+            return { success: false, error: `Request failed (${response.status})` };
+          }
+
           try {
             return JSON.parse(text);
           } catch (_) {
@@ -87,7 +96,7 @@
           }
         } catch (err) {
           lastError = err;
-          if (attempt < retries) {
+          if (attempt < retries && !this._isAbortError(err)) {
             await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
             continue;
           }
@@ -95,6 +104,11 @@
           clearTimeout(timeout);
         }
       }
+
+      if (this._isAbortError(lastError)) {
+        return { success: false, error: "Request timed out or was cancelled." };
+      }
+
       throw lastError || new Error("Network error");
     },
 
@@ -182,8 +196,10 @@
 
       } catch (error) {
         this._inflightRequests.delete(this._getCacheKey(action, params));
-        console.error(`API GET error (${action}):`, error);
-        return { success: false, error: "Network error. Please check your connection." };
+        if (!this._isAbortError(error)) {
+          console.error(`API GET error (${action}):`, error);
+        }
+        return { success: false, error: this._isAbortError(error) ? "Request timed out or was cancelled." : "Network error. Please check your connection." };
       }
     },
 
@@ -228,8 +244,10 @@
 
         return result;
       } catch (error) {
-        console.error(`API POST error (${action}):`, error);
-        return { success: false, error: "Network error. Please check your connection." };
+        if (!this._isAbortError(error)) {
+          console.error(`API POST error (${action}):`, error);
+        }
+        return { success: false, error: this._isAbortError(error) ? "Request timed out or was cancelled." : "Network error. Please check your connection." };
       }
     },
 

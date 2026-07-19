@@ -129,7 +129,7 @@ const Auth = {
         }
 
         this.clearSession();
-        window.location.href = 'index.html';
+        window.location.href = '/';
     },
 
     /**
@@ -207,14 +207,14 @@ const Auth = {
      */
     async requireAuth() {
         if (!this.isLoggedIn()) {
-            window.location.href = 'index.html';
+            window.location.href = '/';
             return false;
         }
 
         // Validate session with server
         const validation = await this.validateSession();
         if (!validation.success) {
-            window.location.href = 'index.html';
+            window.location.href = '/';
             return false;
         }
 
