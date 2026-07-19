@@ -347,6 +347,9 @@ function doPost(e) {
             case 'saveActionItemSettings':
                 result = saveActionItemSettings(token, payload.settings);
                 break;
+            case 'syncActionItemsOnly':
+                result = syncActionItemsOnly(token);
+                break;
 
             // ---- PASSWORD RESET ----
             case 'requestPasswordReset':

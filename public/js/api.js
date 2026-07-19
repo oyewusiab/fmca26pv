@@ -209,7 +209,7 @@
      * @param {string} action
      * @param {Object} data
      */
-    async post(action, data = {}) {
+    async post(action, data = {}, timeoutMs = 25000) {
       try {
         const token = Auth.getToken?.();
 
@@ -228,7 +228,7 @@
             body: JSON.stringify(payload),
           },
           0,
-          25000
+          timeoutMs
         );
 
         if (result?.error && String(result.error).includes("Session expired")) {
@@ -517,8 +517,8 @@
 
     // ==================== ACTION ITEMS ====================
 
-    async getActionItems(params = {}) {
-      return await this.get("getActionItems", { ...params });
+    async getActionItems(params = {}, customTtl = null) {
+      return await this.get("getActionItems", { ...params }, customTtl);
     },
 
     async getActionItemCount(params = {}) {
@@ -526,7 +526,7 @@
     },
 
     async syncActionItemsOnly() {
-      return await this.post("syncActionItemsOnly", {});
+      return await this.post("syncActionItemsOnly", {}, 60000);
     },
 
     async getActionItemSettings() {

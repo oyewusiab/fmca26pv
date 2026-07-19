@@ -136,7 +136,7 @@ const ActionItems = {
     // ── Phase 2: Background sync → then refresh with fresh data ──
     try {
       await API.syncActionItemsOnly();
-      const res = await API.getActionItems({ ...this.buildFilters(), skipSync: true });
+      const res = await API.getActionItems({ ...this.buildFilters(), skipSync: true }, 0);
 
       // Remove sync banner
       document.getElementById('actionItemsSyncBanner')?.remove();
