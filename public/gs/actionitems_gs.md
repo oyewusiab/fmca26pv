@@ -818,7 +818,7 @@ function getActionItems(token, paramsOrUnit, statusArg) {
         duplicateTracker[voucherNoKey].push({ rowIndex, voucherNo, payee, amount, cn, category, accountType: accountTypeLabel, pmtMonth, status });
       }
 
-      const base = { year: "2026", rowIndex, voucherNo, payee, amount, cn, pmtMonth, category, accountType: accountTypeLabel, voucherStatus: status };
+      const base = { year: "2026", rowIndex, voucherNumber: voucherNo, payee, amount, cn, pmtMonth, category, accountType: accountTypeLabel, voucherStatus: status };
 
       // RULE: MISSING_DATA
       const requiredSubs = accountTypeRequirements[accountType] || [];
@@ -887,7 +887,7 @@ function getActionItems(token, paramsOrUnit, statusArg) {
           items.push({
             id: `DUPLICATE_VOUCHER:${unit}:2026:${entry.rowIndex}`,
             year: "2026", unit, rule: ACTION_ITEM_RULES.DUPLICATE_VOUCHER, rowIndex: entry.rowIndex,
-            voucherNo: entry.voucherNo, payee: entry.payee, amount: entry.amount, cn: entry.cn,
+            voucherNumber: entry.voucherNo, payee: entry.payee, amount: entry.amount, cn: entry.cn,
             pmtMonth: entry.pmtMonth, category: entry.category, accountType: entry.accountType,
             voucherStatus: entry.status, itemStatus: "PENDING", ...text
           });

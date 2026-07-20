@@ -876,8 +876,34 @@
                                 <label for="formAccountOrMail">Voucher Number <span class="required">*</span></label>
                                 <input type="text" class="form-control" id="formAccountOrMail"
                                     placeholder="Enter voucher number">
-                                <div id="formAccountOrMailWarning" class="alert alert-warning hidden" style="margin-top: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 0;">
-                                    <i class="fas fa-exclamation-triangle"></i> Warning: A voucher with this number already exists.
+                                <div id="formAccountOrMailWarning" class="duplicate-voucher-panel hidden">
+                                    <div class="duplicate-voucher-header">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        <strong>Duplicate Voucher Number Detected</strong>
+                                    </div>
+                                    <div id="duplicateVoucherDetails" class="duplicate-voucher-details"></div>
+                                    <div class="duplicate-voucher-reason">
+                                        <label for="duplicateVoucherReason">
+                                            <strong>Reason for using this voucher number again</strong>
+                                            <span class="required">*</span>
+                                        </label>
+                                        <textarea id="duplicateVoucherReason" class="form-control" rows="2"
+                                            placeholder="e.g. Revalidation, correction of earlier entry, approved duplicate, etc."
+                                            oninput="Vouchers.onDuplicateReasonChange()"></textarea>
+                                        <div id="duplicateReasonError" class="text-danger" style="font-size:12px;display:none;margin-top:4px;">
+                                            <i class="fas fa-exclamation-circle"></i> A reason is required to proceed with a duplicate voucher number.
+                                        </div>
+                                    </div>
+                                    <div class="duplicate-voucher-actions">
+                                        <button type="button" class="btn btn-sm btn-danger" id="duplicateProceedBtn"
+                                            onclick="Vouchers.confirmDuplicateProceed()" disabled>
+                                            <i class="fas fa-check"></i> Proceed with Duplicate
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-secondary"
+                                            onclick="Vouchers.cancelDuplicateProceed()">
+                                            <i class="fas fa-times"></i> Change Voucher Number
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

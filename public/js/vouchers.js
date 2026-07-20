@@ -1349,6 +1349,18 @@ const Vouchers = {
 
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
+
+    // Duplicate guard: if the duplicate panel is showing, user must confirm with a reason
+    const dupPanel = document.getElementById('formAccountOrMailWarning');
+    const isDupVisible = dupPanel && !dupPanel.classList.contains('hidden');
+    if (isDupVisible && !this._duplicateConfirmed) {
+      const err = document.getElementById('duplicateReasonError');
+      if (err) err.style.display = 'block';
+      document.getElementById('duplicateVoucherReason')?.focus();
+      Utils.showToast('Please confirm the duplicate voucher reason before saving.', 'warning');
+      return;
+    }
+
     if (!gross) return Utils.showToast('Gross amount is required', 'error');
     
     // Validate Account Type and Category
@@ -1386,7 +1398,8 @@ const Vouchers = {
       date: document.getElementById('formDate').value,
       totalGross: gross,
       oldVoucherNumber: oldVoucherNumber,
-      oldVoucherAvailable: oldVoucherChoice ? (oldVoucherChoice === 'yes' ? 'Yes' : 'No') : ''
+      oldVoucherAvailable: oldVoucherChoice ? (oldVoucherChoice === 'yes' ? 'Yes' : 'No') : '',
+      duplicateReason: this._duplicateReason || ''
     };
 
     this.showLoading(true);
@@ -3286,33 +3299,107 @@ const Vouchers = {
 
   async validateVoucherNumber() {
     const input = document.getElementById('formAccountOrMail');
-    const warning = document.getElementById('formAccountOrMailWarning');
-    if (!input || !warning) return;
+    const panel = document.getElementById('formAccountOrMailWarning');
+    const details = document.getElementById('duplicateVoucherDetails');
+    const reasonBox = document.getElementById('duplicateVoucherReason');
+    const proceedBtn = document.getElementById('duplicateProceedBtn');
+    if (!input || !panel) return;
 
     const voucherNumber = input.value.trim();
-    if (!voucherNumber) {
-      warning.classList.add('hidden');
-      return;
-    }
+
+    // Reset duplicate state
+    this._duplicateConfirmed = false;
+    this._duplicateReason = '';
+    if (reasonBox) reasonBox.value = '';
+    if (proceedBtn) proceedBtn.disabled = true;
+    panel.classList.add('hidden');
+
+    if (!voucherNumber) return;
 
     try {
       const result = await API.lookupVoucher(voucherNumber);
       if (result.success && result.found) {
-        // If editing, make sure it's not the same voucher
-        if (this.isEditMode && this.selectedVoucher && String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex)) {
-          warning.classList.add('hidden');
+        // If editing, skip if it's the same record
+        if (this.isEditMode && this.selectedVoucher &&
+            String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex)) {
           return;
         }
-        warning.classList.remove('hidden');
-        const payeeName = this.escapeHtml(result.voucher.payee || '');
-        const grossVal = Utils.formatNumber(result.voucher.grossAmount || 0);
-        warning.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Warning: A voucher with number <strong>${this.escapeHtml(voucherNumber)}</strong> already exists (Payee: ${payeeName}, Gross: ₦${grossVal}).`;
-      } else {
-        warning.classList.add('hidden');
+        const v = result.voucher;
+        if (details) {
+          details.innerHTML = `
+            <div class="duplicate-match-row">
+              <span><strong>Voucher No.:</strong> ${this.escapeHtml(v.accountOrMail || voucherNumber)}</span>
+              <span><strong>Payee:</strong> ${this.escapeHtml(v.payee || '-')}</span>
+              <span><strong>Gross Amount:</strong> ${Utils.formatCurrency(v.grossAmount || 0)}</span>
+              <span><strong>Status:</strong> ${v.status || '-'}</span>
+              <span><strong>Date:</strong> ${v.date || '-'}</span>
+            </div>
+            <p style="margin:8px 0 0;font-size:13px;color:#92400e;">
+              A voucher with this number already exists. You <strong>must</strong> provide a reason to proceed, or change the voucher number.
+            </p>
+          `;
+        }
+        panel.classList.remove('hidden');
       }
     } catch (e) {
       console.error('Error validating voucher number:', e);
     }
+  },
+
+  onDuplicateReasonChange() {
+    const reason = (document.getElementById('duplicateVoucherReason')?.value || '').trim();
+    const btn = document.getElementById('duplicateProceedBtn');
+    const err = document.getElementById('duplicateReasonError');
+    if (btn) btn.disabled = reason.length < 5;
+    if (err) err.style.display = 'none';
+    // Reset confirmation when reason changes
+    this._duplicateConfirmed = false;
+    this._duplicateReason = reason;
+  },
+
+  confirmDuplicateProceed() {
+    const reason = (document.getElementById('duplicateVoucherReason')?.value || '').trim();
+    const err = document.getElementById('duplicateReasonError');
+    if (reason.length < 5) {
+      if (err) err.style.display = 'block';
+      return;
+    }
+    this._duplicateConfirmed = true;
+    this._duplicateReason = reason;
+    // Visual feedback
+    const panel = document.getElementById('formAccountOrMailWarning');
+    if (panel) {
+      panel.style.borderColor = '#10b981';
+      panel.style.background = '#f0fdf4';
+    }
+    const btn = document.getElementById('duplicateProceedBtn');
+    if (btn) {
+      btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirmed — will proceed';
+      btn.style.background = '#10b981';
+      btn.disabled = true;
+    }
+    Utils.showToast('Duplicate confirmed. You may now save the voucher.', 'info');
+  },
+
+  cancelDuplicateProceed() {
+    const input = document.getElementById('formAccountOrMail');
+    const panel = document.getElementById('formAccountOrMailWarning');
+    const reasonBox = document.getElementById('duplicateVoucherReason');
+    const btn = document.getElementById('duplicateProceedBtn');
+    if (input) { input.value = ''; input.focus(); }
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.style.borderColor = '';
+      panel.style.background = '';
+    }
+    if (reasonBox) reasonBox.value = '';
+    if (btn) {
+      btn.innerHTML = '<i class="fas fa-check"></i> Proceed with Duplicate';
+      btn.style.background = '';
+      btn.disabled = true;
+    }
+    this._duplicateConfirmed = false;
+    this._duplicateReason = '';
   },
 
   async toggleHistoryLog() {
