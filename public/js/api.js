@@ -164,7 +164,7 @@
 
             if (result?.error && String(result.error).includes("Session expired")) {
               Auth.clearSession?.();
-              window.location.href = "index.html";
+              window.location.href = "./";
               return { success: false, error: "Session expired" };
             }
 
@@ -233,7 +233,7 @@
 
         if (result?.error && String(result.error).includes("Session expired")) {
           Auth.clearSession?.();
-          window.location.href = "index.html";
+          window.location.href = "./";
           return { success: false, error: "Session expired" };
         }
 

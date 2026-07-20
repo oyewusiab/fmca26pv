@@ -1349,14 +1349,19 @@ const Vouchers = {
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
 
-    // Duplicate guard: if the duplicate panel is showing, user must confirm with a reason
-    const dupPanel = document.getElementById('formAccountOrMailWarning');
-    const isDupVisible = dupPanel && !dupPanel.classList.contains('hidden');
-    if (isDupVisible && !this._duplicateConfirmed) {
+    // Stage 2 Duplicate Guard: if duplicate is detected and unconfirmed, reveal full panel and block save
+    if (this._detectedDuplicateVoucher && !this._duplicateConfirmed) {
+      const inlineWarn = document.getElementById('inlineDuplicateWarning');
+      const dupPanel = document.getElementById('formAccountOrMailWarning');
+      if (inlineWarn) inlineWarn.classList.add('hidden');
+      if (dupPanel) {
+        dupPanel.classList.remove('hidden');
+        dupPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
       const err = document.getElementById('duplicateReasonError');
       if (err) err.style.display = 'block';
       document.getElementById('duplicateVoucherReason')?.focus();
-      Utils.showToast('Please confirm the duplicate voucher reason before saving.', 'warning');
+      Utils.showToast('Duplicate Voucher Number Detected. Please complete the duplicate panel below to proceed.', 'warning');
       return;
     }
 
@@ -1421,6 +1426,10 @@ const Vouchers = {
         this.closeModal('voucherFormModal');
         this.selectedVoucher = null;
         this.isEditMode = false;
+        this.currentPage = 1;
+        this.sortConfig = { field: 'rowIndex', direction: 'desc' };
+        this.filters.sortBy = 'rowIndex';
+        this.filters.sortDir = 'desc';
         await this.loadVouchers();
       } else {
         Utils.showToast(result.error || 'Failed to save voucher', 'error');
@@ -2170,8 +2179,8 @@ const Vouchers = {
     this.showLoading(true);
 
     try {
-      // Required order
-      const years = ['2026', '2025', '2024', '2023', '<2023'];
+      // Release search is restricted strictly to 2026 vouchers
+      const years = ['2026'];
       let all = [];
 
       // Parallelize requests for speed
@@ -2288,19 +2297,19 @@ const Vouchers = {
 
     let html = `
       <div class="table-container">
-        <table>
+        <table class="search-results-table">
           <thead>
             <tr>
-              ${canSelect ? `<th><input type="checkbox" id="selectAll" onchange="Vouchers.toggleSelectAll()"></th>` : ''}
-              <th>Year</th>
-              <th>Voucher No.</th>
-              <th>Payee</th>
-              <th>Particular</th>
-              <th>Gross Amount</th>
-              <th>Category</th>
-              <th>Control No.</th>
-              <th>Status</th>
-              <th>Actions</th>
+              ${canSelect ? `<th style="width:40px;"><input type="checkbox" id="selectAll" onchange="Vouchers.toggleSelectAll()"></th>` : ''}
+              <th class="sn-header">Year</th>
+              <th class="voucher-no-header">Voucher No.</th>
+              <th class="payee-header">Payee</th>
+              <th class="particular-header">Particular</th>
+              <th class="amount-header" style="text-align: right;">Gross Amount</th>
+              <th class="category-header">Category</th>
+              <th class="control-no-header">Control No.</th>
+              <th class="status-header">Status</th>
+              <th class="actions-header">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -2314,7 +2323,7 @@ const Vouchers = {
       html += `
         <tr>
           ${canSelect ? `
-            <td>
+            <td style="width:40px;">
               ${is2026
             ? `<input type="checkbox" class="voucher-checkbox" value="${v.rowIndex}" onchange="Vouchers.updateSelection()">`
             : `<input type="checkbox" disabled title="Archive records are not selectable">`
@@ -2322,16 +2331,16 @@ const Vouchers = {
             </td>
           ` : ''}
 
-          <td><span class="badge ${yearBadgeClass}">${year}</span></td>
-          <td><strong>${v.accountOrMail || '-'}</strong></td>
-          <td title="${v.payee || ''}">${Utils.truncate(v.payee || '-', 20)}</td>
-          <td title="${v.particular || ''}"><div class="particular-cell">${v.particular || '-'}</div></td>
-          <td>${Utils.formatCurrency(v.grossAmount || 0)}</td>
-          <td>${v.categories || '-'}</td>
-          <td>${v.controlNumber || '-'}</td>
-          <td>${Utils.getStatusBadge(v.status || '')}</td>
+          <td class="sn-cell"><span class="badge ${yearBadgeClass}">${year}</span></td>
+          <td class="voucher-no-cell"><strong>${v.accountOrMail || '-'}</strong></td>
+          <td class="payee-cell" title="${v.payee || ''}">${Utils.truncate(v.payee || '-', 25)}</td>
+          <td class="particular-cell" title="${v.particular || ''}">${v.particular || '-'}</td>
+          <td class="amount-cell" style="text-align: right;">${Utils.formatCurrency(v.grossAmount || 0)}</td>
+          <td class="category-cell">${v.categories || '-'}</td>
+          <td class="control-no-cell">${v.controlNumber || '-'}</td>
+          <td class="status-cell">${Utils.getStatusBadge(v.status || '')}</td>
 
-          <td>
+          <td class="actions-cell">
             <div class="action-buttons">
               <button class="btn btn-sm btn-secondary"
                       onclick="Vouchers.viewVoucherByYear(${v.rowIndex}, '${year}')"
@@ -3308,48 +3317,79 @@ const Vouchers = {
 
   async validateVoucherNumber() {
     const input = document.getElementById('formAccountOrMail');
+    const inlineWarn = document.getElementById('inlineDuplicateWarning');
     const panel = document.getElementById('formAccountOrMailWarning');
     const details = document.getElementById('duplicateVoucherDetails');
     const reasonBox = document.getElementById('duplicateVoucherReason');
     const proceedBtn = document.getElementById('duplicateProceedBtn');
-    if (!input || !panel) return;
+    if (!input) return;
 
     const voucherNumber = input.value.trim();
 
-    // Reset duplicate state
-    this._duplicateConfirmed = false;
-    this._duplicateReason = '';
-    if (reasonBox) reasonBox.value = '';
-    if (proceedBtn) proceedBtn.disabled = true;
-    panel.classList.add('hidden');
+    // Reset state when voucher number changes
+    if (!this._duplicateConfirmed || this._currentDuplicateNumber !== voucherNumber.toUpperCase()) {
+      this._duplicateConfirmed = false;
+      this._duplicateReason = '';
+      this._detectedDuplicateVoucher = null;
+      if (reasonBox) reasonBox.value = '';
+      if (proceedBtn) proceedBtn.disabled = true;
+      if (panel) {
+        panel.classList.add('hidden');
+        panel.style.borderColor = '';
+        panel.style.background = '';
+      }
+    }
 
-    if (!voucherNumber) return;
+    if (!voucherNumber) {
+      if (inlineWarn) inlineWarn.classList.add('hidden');
+      if (panel) panel.classList.add('hidden');
+      return;
+    }
 
     try {
       const result = await API.lookupVoucher(voucherNumber);
       if (result.success && result.found) {
-        // If editing, skip if it's the same record
+        // If editing, skip if it's the exact same record
         if (this.isEditMode && this.selectedVoucher &&
             String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex)) {
+          if (inlineWarn) inlineWarn.classList.add('hidden');
+          if (panel) panel.classList.add('hidden');
           return;
         }
-        const v = result.voucher;
-        if (details) {
-          details.innerHTML = `
-            <div class="duplicate-match-row">
-              <span><strong>Voucher No.:</strong> ${this.escapeHtml(v.accountOrMail || voucherNumber)}</span>
-              <span><strong>Payee:</strong> ${this.escapeHtml(v.payee || '-')}</span>
-              <span><strong>Gross Amount:</strong> ${Utils.formatCurrency(v.grossAmount || 0)}</span>
-              <span><strong>Status:</strong> ${v.status || '-'}</span>
-              <span><strong>Date:</strong> ${v.date || '-'}</span>
-            </div>
-            <p style="margin:8px 0 0;font-size:13px;color:#92400e;">
-              A voucher with this number already exists. You <strong>must</strong> provide a reason to proceed, or change the voucher number.
-            </p>
-          `;
+
+        // Require exact complete match
+        const existingNo = String(result.voucher.accountOrMail || '').trim().toUpperCase();
+        if (existingNo === voucherNumber.toUpperCase()) {
+          this._detectedDuplicateVoucher = result.voucher;
+          this._currentDuplicateNumber = voucherNumber.toUpperCase();
+
+          if (details) {
+            details.innerHTML = `
+              <div class="duplicate-match-row">
+                <span><strong>Voucher No.:</strong> ${this.escapeHtml(result.voucher.accountOrMail || voucherNumber)}</span>
+                <span><strong>Payee:</strong> ${this.escapeHtml(result.voucher.payee || '-')}</span>
+                <span><strong>Gross Amount:</strong> ${Utils.formatCurrency(result.voucher.grossAmount || 0)}</span>
+                <span><strong>Status:</strong> ${result.voucher.status || '-'}</span>
+                <span><strong>Date:</strong> ${result.voucher.date || '-'}</span>
+              </div>
+              <p style="margin:8px 0 0;font-size:13px;color:#92400e;">
+                A voucher with this number already exists. You <strong>must</strong> provide a reason to proceed, or change the voucher number.
+              </p>
+            `;
+          }
+
+          // Stage 1: Show simple inline warning while typing if panel not yet confirmed
+          if (!this._duplicateConfirmed) {
+            if (inlineWarn) inlineWarn.classList.remove('hidden');
+          }
+          return;
         }
-        panel.classList.remove('hidden');
       }
+
+      // No exact match found
+      if (inlineWarn) inlineWarn.classList.add('hidden');
+      if (panel) panel.classList.add('hidden');
+      this._detectedDuplicateVoucher = null;
     } catch (e) {
       console.error('Error validating voucher number:', e);
     }
@@ -3375,7 +3415,8 @@ const Vouchers = {
     }
     this._duplicateConfirmed = true;
     this._duplicateReason = reason;
-    // Visual feedback
+
+    // Visual feedback (turn panel green & confirm button)
     const panel = document.getElementById('formAccountOrMailWarning');
     if (panel) {
       panel.style.borderColor = '#10b981';
@@ -3383,7 +3424,7 @@ const Vouchers = {
     }
     const btn = document.getElementById('duplicateProceedBtn');
     if (btn) {
-      btn.innerHTML = '<i class="fas fa-check-circle"></i> Confirmed — will proceed';
+      btn.innerHTML = '<i class="fas fa-check-circle"></i> ✅ Confirmed';
       btn.style.background = '#10b981';
       btn.disabled = true;
     }
@@ -3393,14 +3434,18 @@ const Vouchers = {
   cancelDuplicateProceed() {
     const input = document.getElementById('formAccountOrMail');
     const panel = document.getElementById('formAccountOrMailWarning');
+    const inlineWarn = document.getElementById('inlineDuplicateWarning');
     const reasonBox = document.getElementById('duplicateVoucherReason');
     const btn = document.getElementById('duplicateProceedBtn');
+
+    // Clear ONLY the voucher number input field and focus it (leave all other fields intact)
     if (input) { input.value = ''; input.focus(); }
     if (panel) {
       panel.classList.add('hidden');
       panel.style.borderColor = '';
       panel.style.background = '';
     }
+    if (inlineWarn) inlineWarn.classList.add('hidden');
     if (reasonBox) reasonBox.value = '';
     if (btn) {
       btn.innerHTML = '<i class="fas fa-check"></i> Proceed with Duplicate';
@@ -3409,6 +3454,8 @@ const Vouchers = {
     }
     this._duplicateConfirmed = false;
     this._duplicateReason = '';
+    this._detectedDuplicateVoucher = null;
+    this._currentDuplicateNumber = '';
   },
 
   async toggleHistoryLog() {
