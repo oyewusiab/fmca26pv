@@ -139,7 +139,6 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
     const start = (page - 1) * pageSize;
     const endExclusive = start + pageSize;
     let totalCount = 0;
-    const vouchers = [];
     const allMatching = [];
 
     let dateFromObj = null;
