@@ -879,35 +879,6 @@
                                 <div id="inlineDuplicateWarning" class="alert alert-warning hidden" style="margin-top: 6px; padding: 6px 12px; font-size: 13px; margin-bottom: 0;">
                                     <i class="fas fa-exclamation-triangle"></i> ⚠️ Duplicate Voucher Number Detected
                                 </div>
-                                <div id="formAccountOrMailWarning" class="duplicate-voucher-panel hidden">
-                                    <div class="duplicate-voucher-header">
-                                        <i class="fas fa-exclamation-triangle"></i>
-                                        <strong>Duplicate Voucher Number Detected</strong>
-                                    </div>
-                                    <div id="duplicateVoucherDetails" class="duplicate-voucher-details"></div>
-                                    <div class="duplicate-voucher-reason">
-                                        <label for="duplicateVoucherReason">
-                                            <strong>Reason for using this voucher number again</strong>
-                                            <span class="required">*</span>
-                                        </label>
-                                        <textarea id="duplicateVoucherReason" class="form-control" rows="2"
-                                            placeholder="e.g. Revalidation, correction of earlier entry, approved duplicate, etc."
-                                            oninput="Vouchers.onDuplicateReasonChange()"></textarea>
-                                        <div id="duplicateReasonError" class="text-danger" style="font-size:12px;display:none;margin-top:4px;">
-                                            <i class="fas fa-exclamation-circle"></i> A reason is required to proceed with a duplicate voucher number.
-                                        </div>
-                                    </div>
-                                    <div class="duplicate-voucher-actions">
-                                        <button type="button" class="btn btn-sm btn-danger" id="duplicateProceedBtn"
-                                            onclick="Vouchers.confirmDuplicateProceed()" disabled>
-                                            <i class="fas fa-check"></i> Proceed with Duplicate
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-secondary"
-                                            onclick="Vouchers.cancelDuplicateProceed()">
-                                            <i class="fas fa-times"></i> Change Voucher Number
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -1075,6 +1046,48 @@
                 <button class="btn btn-secondary" onclick="Vouchers.closeModal('assignControlModal')">Cancel</button>
                 <button class="btn btn-primary" onclick="Vouchers.assignControlNumber()">
                     <i class="fas fa-check"></i> Assign
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Duplicate Voucher Detection Modal -->
+    <div class="modal-overlay" id="duplicateVoucherModal">
+        <div class="modal" style="max-width: 580px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #d97706, #b45309); color: white;">
+                <h3 class="modal-title" style="color: white; display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-exclamation-triangle"></i> Duplicate Voucher Number Detected
+                </h3>
+                <button type="button" class="modal-close" onclick="Vouchers.closeModal('duplicateVoucherModal')" style="color: white;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="duplicateModalPanel" class="duplicate-voucher-panel" style="margin-top: 0;">
+                    <div class="duplicate-voucher-header">
+                        <i class="fas fa-file-invoice"></i>
+                        <strong>Step 1: Existing Voucher Details</strong>
+                    </div>
+                    <div id="duplicateVoucherDetails" class="duplicate-voucher-details"></div>
+                    <div class="duplicate-voucher-reason" style="padding: 12px 14px;">
+                        <label for="duplicateVoucherReason">
+                            <strong>Step 2: Reason for using this voucher number again</strong>
+                            <span class="required">*</span>
+                        </label>
+                        <textarea id="duplicateVoucherReason" class="form-control" rows="3"
+                            placeholder="e.g. Revalidation, correction of earlier entry, approved duplicate, etc."
+                            oninput="Vouchers.onDuplicateReasonChange()"></textarea>
+                        <div id="duplicateReasonError" class="text-danger" style="font-size:12px;display:none;margin-top:4px;">
+                            <i class="fas fa-exclamation-circle"></i> A reason (minimum 5 characters) is required to proceed.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; gap: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="Vouchers.cancelDuplicateProceed()">
+                    <i class="fas fa-times"></i> Change Voucher Number
+                </button>
+                <button type="button" class="btn btn-danger" id="duplicateProceedBtn"
+                    onclick="Vouchers.confirmDuplicateProceed()" disabled>
+                    <i class="fas fa-check"></i> Proceed with Duplicate
                 </button>
             </div>
         </div>

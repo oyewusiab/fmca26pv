@@ -1123,6 +1123,10 @@ const Vouchers = {
   openVoucherForm(voucher = null) {
     this.isEditMode = !!voucher;
     this.selectedVoucher = voucher;
+    this._duplicateConfirmed = false;
+    this._duplicateReason = '';
+    this._detectedDuplicateVoucher = null;
+    this._currentDuplicateNumber = '';
 
     const modal = document.getElementById('voucherFormModal');
     const title = document.getElementById('voucherFormTitle');
@@ -1139,8 +1143,9 @@ const Vouchers = {
     title.textContent = this.isEditMode ? 'Edit Voucher' : 'Create New Voucher';
     form.reset();
 
-    const warning = document.getElementById('formAccountOrMailWarning');
-    if (warning) warning.classList.add('hidden');
+    const inlineWarn = document.getElementById('inlineDuplicateWarning');
+    if (inlineWarn) inlineWarn.classList.add('hidden');
+    this.closeModal('duplicateVoucherModal');
     
     const payeeInfo = document.getElementById('payeeValidationInfo');
     if (payeeInfo) payeeInfo.classList.add('hidden');
@@ -1349,19 +1354,30 @@ const Vouchers = {
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
 
-    // Stage 2 Duplicate Guard: if duplicate is detected and unconfirmed, reveal full panel and block save
+    // Stage 2 Duplicate Guard: if exact duplicate is detected and unconfirmed, pop up full modal and block save
     if (this._detectedDuplicateVoucher && !this._duplicateConfirmed) {
-      const inlineWarn = document.getElementById('inlineDuplicateWarning');
-      const dupPanel = document.getElementById('formAccountOrMailWarning');
-      if (inlineWarn) inlineWarn.classList.add('hidden');
-      if (dupPanel) {
-        dupPanel.classList.remove('hidden');
-        dupPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const modal = document.getElementById('duplicateVoucherModal');
+      const details = document.getElementById('duplicateVoucherDetails');
+      const v = this._detectedDuplicateVoucher;
+      if (details) {
+        details.innerHTML = `
+          <div class="duplicate-match-row">
+            <span><strong>Voucher No.:</strong> ${this.escapeHtml(v.accountOrMail || '')}</span>
+            <span><strong>Payee:</strong> ${this.escapeHtml(v.payee || '-')}</span>
+            <span><strong>Gross Amount:</strong> ${Utils.formatCurrency(v.grossAmount || 0)}</span>
+            <span><strong>Status:</strong> ${v.status || '-'}</span>
+            <span><strong>Date:</strong> ${v.date || '-'}</span>
+          </div>
+          <p style="margin:8px 0 0;font-size:13px;color:#92400e;">
+            A voucher with this number already exists. You <strong>must</strong> provide a reason (minimum 5 characters) to proceed, or change the voucher number.
+          </p>
+        `;
       }
+      if (modal) modal.classList.add('active');
       const err = document.getElementById('duplicateReasonError');
-      if (err) err.style.display = 'block';
+      if (err) err.style.display = 'none';
       document.getElementById('duplicateVoucherReason')?.focus();
-      Utils.showToast('Duplicate Voucher Number Detected. Please complete the duplicate panel below to proceed.', 'warning');
+      Utils.showToast('Duplicate Voucher Number Detected. Please complete the duplicate modal options to proceed.', 'warning');
       return;
     }
 
@@ -3417,7 +3433,7 @@ const Vouchers = {
     this._duplicateReason = reason;
 
     // Visual feedback (turn panel green & confirm button)
-    const panel = document.getElementById('formAccountOrMailWarning');
+    const panel = document.getElementById('duplicateModalPanel');
     if (panel) {
       panel.style.borderColor = '#10b981';
       panel.style.background = '#f0fdf4';
@@ -3428,23 +3444,20 @@ const Vouchers = {
       btn.style.background = '#10b981';
       btn.disabled = true;
     }
-    Utils.showToast('Duplicate confirmed. You may now save the voucher.', 'info');
+    Utils.showToast('Duplicate confirmed. Click "Save Voucher" to complete saving.', 'info');
+    setTimeout(() => {
+      this.closeModal('duplicateVoucherModal');
+    }, 700);
   },
 
   cancelDuplicateProceed() {
     const input = document.getElementById('formAccountOrMail');
-    const panel = document.getElementById('formAccountOrMailWarning');
     const inlineWarn = document.getElementById('inlineDuplicateWarning');
     const reasonBox = document.getElementById('duplicateVoucherReason');
     const btn = document.getElementById('duplicateProceedBtn');
 
     // Clear ONLY the voucher number input field and focus it (leave all other fields intact)
     if (input) { input.value = ''; input.focus(); }
-    if (panel) {
-      panel.classList.add('hidden');
-      panel.style.borderColor = '';
-      panel.style.background = '';
-    }
     if (inlineWarn) inlineWarn.classList.add('hidden');
     if (reasonBox) reasonBox.value = '';
     if (btn) {
@@ -3456,6 +3469,7 @@ const Vouchers = {
     this._duplicateReason = '';
     this._detectedDuplicateVoucher = null;
     this._currentDuplicateNumber = '';
+    this.closeModal('duplicateVoucherModal');
   },
 
   async toggleHistoryLog() {
