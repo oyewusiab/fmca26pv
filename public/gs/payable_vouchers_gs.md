@@ -2643,9 +2643,15 @@ function lookupVoucher(token, voucherNumber) {
     let sheetsToSearch = [];
     
     if (yearFromVoucher) {
-      if (yearFromVoucher === '2025') {
+      if (yearFromVoucher === '2026') {
         sheetsToSearch = [
-          { name: CONFIG.SHEETS.VOUCHERS_2025, year: '2025', primary: true }
+          { name: CONFIG.SHEETS.VOUCHERS_2026, year: '2026', primary: true },
+          { name: CONFIG.SHEETS.VOUCHERS_2025, year: '2025', primary: false }
+        ];
+      } else if (yearFromVoucher === '2025') {
+        sheetsToSearch = [
+          { name: CONFIG.SHEETS.VOUCHERS_2025, year: '2025', primary: true },
+          { name: CONFIG.SHEETS.VOUCHERS_2026, year: '2026', primary: false }
         ];
       } else if (yearFromVoucher === '2024') {
         sheetsToSearch = [
@@ -2660,9 +2666,12 @@ function lookupVoucher(token, voucherNumber) {
           { name: CONFIG.SHEETS.VOUCHERS_BEFORE_2023, year: '<2023', primary: true }
         ];
       }
-    } else {
-      // No year detected, search all (most recent first)
+    }
+
+    if (sheetsToSearch.length === 0) {
+      // Fallback: search 2026 first, then older years
       sheetsToSearch = [
+        { name: CONFIG.SHEETS.VOUCHERS_2026, year: '2026', primary: true },
         { name: CONFIG.SHEETS.VOUCHERS_2025, year: '2025', primary: true },
         { name: CONFIG.SHEETS.VOUCHERS_2024, year: '2024', primary: true },
         { name: CONFIG.SHEETS.VOUCHERS_2023, year: '2023', primary: true },
