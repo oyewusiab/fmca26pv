@@ -148,7 +148,7 @@ const ActionItems = {
    */
   renderGlancePanel() {
     const rows = this.items.map(item => {
-      const voucher = item.voucherNumber || '-';
+      const voucher = String(item.voucherNumber || item.voucherNo || item.accountOrMail || '').trim() || '-';
       const payee = item.payee || '-';
       const amount = Utils.formatCurrency(item.amount || 0);
       const status = this.normalize(item.voucherStatus || item.status) || '-';
@@ -207,7 +207,7 @@ const ActionItems = {
         ? 'icon-wrap-warning'
         : 'icon-wrap-info';
 
-    const voucher = item.voucherNumber || '-';
+    const voucher = String(item.voucherNumber || item.voucherNo || item.accountOrMail || '').trim() || '-';
     const payee = item.payee || '-';
     const amount = Utils.formatCurrency(item.amount || 0);
     const year = item.year || '2026';

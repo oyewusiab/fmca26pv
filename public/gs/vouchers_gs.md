@@ -140,6 +140,7 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
     const endExclusive = start + pageSize;
     let totalCount = 0;
     const vouchers = [];
+    const allMatching = [];
 
     let dateFromObj = null;
     let dateToObj = null;
@@ -223,14 +224,66 @@ function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
         if (!searchFields.includes(term) && !numericMatch) include = false;
       }
 
-      if (!include) continue;
-
-      if (totalCount >= start && totalCount < endExclusive) {
+      if (include) {
         const rowIndex = i + 2;
-        vouchers.push(rowToVoucher(row, rowIndex, cols));
+        allMatching.push(rowToVoucher(row, rowIndex, cols));
       }
-      totalCount++;
     }
+
+    // Sort full matching dataset BEFORE taking pagination slice
+    const sortBy = String(filters.sortBy || 'rowIndex').trim();
+    const sortDir = String(filters.sortDir || 'desc').toLowerCase();
+
+    allMatching.sort((a, b) => {
+      let aVal, bVal;
+      switch (sortBy) {
+        case 'voucherNo':
+          aVal = (a.accountOrMail || '').toLowerCase();
+          bVal = (b.accountOrMail || '').toLowerCase();
+          break;
+        case 'payee':
+          aVal = (a.payee || '').toLowerCase();
+          bVal = (b.payee || '').toLowerCase();
+          break;
+        case 'grossAmount':
+          aVal = parseFloat(a.grossAmount || 0);
+          bVal = parseFloat(b.grossAmount || 0);
+          break;
+        case 'netAmount':
+          aVal = parseFloat(a.net || 0);
+          bVal = parseFloat(b.net || 0);
+          break;
+        case 'category':
+          aVal = (a.categories || '').toLowerCase();
+          bVal = (b.categories || '').toLowerCase();
+          break;
+        case 'status':
+          aVal = (a.status || '').toLowerCase();
+          bVal = (b.status || '').toLowerCase();
+          break;
+        case 'pmtMonth':
+          aVal = (a.pmtMonth || '').toLowerCase();
+          bVal = (b.pmtMonth || '').toLowerCase();
+          break;
+        case 'date':
+          aVal = a.date ? new Date(a.date).getTime() : 0;
+          bVal = b.date ? new Date(b.date).getTime() : 0;
+          break;
+        case 'rowIndex':
+        default:
+          aVal = Number(a.rowIndex || 0);
+          bVal = Number(b.rowIndex || 0);
+          break;
+      }
+      if (typeof aVal === 'string') {
+        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      } else {
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+    });
+
+    totalCount = allMatching.length;
+    const vouchers = allMatching.slice(start, endExclusive);
 
     const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
 
@@ -731,7 +784,7 @@ function createVoucher(token, voucher) {
     }
 
     // Check for duplicate VOUCHER NUMBER (Account/Ref No.)
-    if (voucher.accountOrMail && voucher.accountOrMail.trim()) {
+    if (voucher.accountOrMail && voucher.accountOrMail.trim() && !voucher.allowDuplicate && !voucher.duplicateReason) {
       const data = sheet.getDataRange().getValues();
       const newVN = voucher.accountOrMail.trim().toUpperCase();
       
@@ -943,7 +996,7 @@ function updateVoucher(token, rowIndex, voucher) {
     }
 
     // Check for duplicate VOUCHER NUMBER (Account/Ref No.)
-    if (voucher.accountOrMail && voucher.accountOrMail.trim()) {
+    if (voucher.accountOrMail && voucher.accountOrMail.trim() && !voucher.allowDuplicate && !voucher.duplicateReason) {
       const data = sheet.getDataRange().getValues();
       const newVN = voucher.accountOrMail.trim().toUpperCase();
       

@@ -550,6 +550,11 @@ const Vouchers = {
       }
     }
 
+    if (this.sortConfig && this.sortConfig.field) {
+      this.filters.sortBy = this.sortConfig.field;
+      this.filters.sortDir = this.sortConfig.direction || 'desc';
+    }
+
     try {
       const result = await API.getVouchers('2026', this.filters, this.currentPage, this.pageSize);
       if (requestId !== this._loadSeq) return;
@@ -562,15 +567,6 @@ const Vouchers = {
       this.vouchers = result.vouchers || [];
       this.totalCount = result.totalCount || 0;
       this.totalPages = result.totalPages || 0;
-
-      this.vouchers.sort((a, b) => {
-        const ar = Number(a?.rowIndex || 0);
-        const br = Number(b?.rowIndex || 0);
-        if (br !== ar) return br - ar;
-        const ad = a?.date ? new Date(a.date).getTime() : 0;
-        const bd = b?.date ? new Date(b.date).getTime() : 0;
-        return bd - ad;
-      });
 
       // Save to client-side cache
       try {
@@ -792,7 +788,10 @@ const Vouchers = {
       this.sortConfig.field = field;
       this.sortConfig.direction = field === 'grossAmount' || field === 'netAmount' ? 'desc' : 'asc';
     }
-    this.renderVoucherList();
+    this.filters.sortBy = this.sortConfig.field;
+    this.filters.sortDir = this.sortConfig.direction;
+    this.currentPage = 1;
+    this.loadVouchers();
   },
 
   getActionButtons(voucher) {
@@ -1399,6 +1398,7 @@ const Vouchers = {
       totalGross: gross,
       oldVoucherNumber: oldVoucherNumber,
       oldVoucherAvailable: oldVoucherChoice ? (oldVoucherChoice === 'yes' ? 'Yes' : 'No') : '',
+      allowDuplicate: this._duplicateConfirmed || false,
       duplicateReason: this._duplicateReason || ''
     };
 
@@ -2878,8 +2878,17 @@ const Vouchers = {
     document.getElementById('formPayee')?.addEventListener('change', () => this.handlePayeeChange());
     document.getElementById('formPayee')?.addEventListener('input', () => this.handlePayeeChange());
 
-    // Duplicate check listener
-    document.getElementById('formAccountOrMail')?.addEventListener('change', () => this.validateVoucherNumber());
+    // Real-time duplicate check listener with 300ms debounce
+    let validateTimer = null;
+    const triggerValidate = () => {
+      if (validateTimer) clearTimeout(validateTimer);
+      validateTimer = setTimeout(() => this.validateVoucherNumber(), 300);
+    };
+    const voucherInput = document.getElementById('formAccountOrMail');
+    if (voucherInput) {
+      voucherInput.addEventListener('input', triggerValidate);
+      voucherInput.addEventListener('change', () => this.validateVoucherNumber());
+    }
   },
 
   async saveStatus() {

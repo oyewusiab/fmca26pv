@@ -351,6 +351,14 @@ const Notifications = {
       const safeMessage = this.escapeHtml(notification.message || '');
       const safeTime = this.escapeHtml(Utils.formatDateTime(notification.timestamp));
 
+      // Extract or read voucher number if present
+      let rawVoucher = notification.voucherNumber || notification.voucherNo || notification.accountOrMail || '';
+      if (!rawVoucher) {
+        const match = (notification.title + ' ' + notification.message).match(/(?:FMCA\/[A-Za-z0-9\/-]+|PV\/[A-Za-z0-9\/-]+|voucher\s*(?:no\.?|number|#)?\s*([A-Za-z0-9\/-]{4,}))/i);
+        if (match) rawVoucher = match[1] || match[0];
+      }
+      const safeVoucher = rawVoucher ? this.escapeHtml(String(rawVoucher).trim()) : '';
+
       html += `
         <div class="notification-item ${typeClass} ${readClass}" data-row="${rowIndex}" ${notification.link ? `style="cursor: pointer;" onclick="Notifications.handleNotificationClick(${rowIndex}, '${notification.link}')"` : ''}>
           <div class="notification-icon">
@@ -359,7 +367,14 @@ const Notifications = {
           <div class="notification-content">
             <div class="notification-title">${safeTitle}</div>
             <div class="notification-message">${safeMessage}</div>
-            <div class="notification-time"><i class="fas fa-clock"></i> ${safeTime}</div>
+            ${safeVoucher ? `
+              <div class="notification-voucher-tag" style="margin-top: 6px;">
+                <span class="small-badge" style="background:#e0e7ff;color:#3730a3;font-weight:600;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:12px;">
+                  <i class="fas fa-file-invoice"></i> <strong>Voucher Number:</strong> ${safeVoucher}
+                </span>
+              </div>
+            ` : ''}
+            <div class="notification-time" style="margin-top: 4px;"><i class="fas fa-clock"></i> ${safeTime}</div>
           </div>
           <div class="notification-actions" onclick="event.stopPropagation();">
             ${!isRead ? `
