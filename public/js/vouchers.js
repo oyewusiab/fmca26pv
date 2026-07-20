@@ -230,9 +230,16 @@ const Vouchers = {
     const editRow = urlParams.get('edit');
     if (editRow) this.editVoucher(parseInt(editRow, 10));
 
+    // Action item deep-link: jump to and highlight a specific voucher
+    const highlightVoucher = urlParams.get('highlight');
+    const highlightRow = urlParams.get('row');
+    if (highlightVoucher || highlightRow) {
+      this._pendingHighlight = { voucher: highlightVoucher, row: highlightRow ? parseInt(highlightRow, 10) : null };
+    }
+
     const filter = urlParams.get('filter');
     if (filter) {
-      const map = { pending: 'Pending Deletion', unpaid: 'Unpaid', paid: 'Paid' };
+      const map = { pending: 'Pending Deletion', pending_delete: 'Pending Deletion', unpaid: 'Unpaid', paid: 'Paid' };
       if (map[filter]) {
         const statusFilter = document.getElementById('statusFilter');
         if (statusFilter) statusFilter.value = map[filter];
@@ -240,6 +247,35 @@ const Vouchers = {
         this.currentPage = 1;
         this.loadVouchers();
       }
+    }
+  },
+
+  /**
+   * After the table renders, scroll to and highlight the row matching _pendingHighlight.
+   * Called from renderVoucherList() after the DOM is built.
+   */
+  scrollToHighlightedRow() {
+    if (!this._pendingHighlight) return;
+    const { voucher, row } = this._pendingHighlight;
+
+    let targetRow = null;
+    if (row) {
+      targetRow = document.querySelector(`tr[data-row="${row}"]`);
+    }
+    if (!targetRow && voucher) {
+      // Find by voucher number cell text
+      document.querySelectorAll('td.voucher-no-cell').forEach(td => {
+        if (td.textContent.trim().includes(voucher)) {
+          targetRow = td.closest('tr');
+        }
+      });
+    }
+
+    if (targetRow) {
+      targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetRow.classList.add('row-highlight');
+      setTimeout(() => targetRow.classList.remove('row-highlight'), 3000);
+      this._pendingHighlight = null;
     }
   },
 
@@ -616,10 +652,10 @@ const Vouchers = {
             <th class="particular-header">Particular</th>
             <th class="sortable amount-header" onclick="Vouchers.updateSort('grossAmount')">Gross Amount ${sortIcon('grossAmount')}</th>
             <th class="sortable amount-header" onclick="Vouchers.updateSort('netAmount')">Net Amount ${sortIcon('netAmount')}</th>
-            <th class="category-header">Category</th>
+            <th class="sortable category-header" onclick="Vouchers.updateSort('category')">Category ${sortIcon('category')}</th>
             <th class="control-no-header">Control No.</th>
-            <th class="status-header">Status</th>
-            <th class="pmt-month-header">Pmt Month</th>
+            <th class="sortable status-header" onclick="Vouchers.updateSort('status')">Status ${sortIcon('status')}</th>
+            <th class="sortable pmt-month-header" onclick="Vouchers.updateSort('pmtMonth')">Pmt Month ${sortIcon('pmtMonth')}</th>
             <th class="actions-header">Actions</th>
         </tr>
     `;
@@ -685,6 +721,11 @@ const Vouchers = {
     }
 
     this.renderPagination();
+
+    // Deep-link: scroll to highlighted row after DOM settles
+    if (this._pendingHighlight) {
+      requestAnimationFrame(() => this.scrollToHighlightedRow());
+    }
   },
 
   updateSelection() {
@@ -715,6 +756,18 @@ const Vouchers = {
         case 'netAmount':
           aVal = parseFloat((a.grossAmount || 0) - ((a.vat || 0) + (a.wht || 0) + (a.stampDuty || 0)));
           bVal = parseFloat((b.grossAmount || 0) - ((b.vat || 0) + (b.wht || 0) + (b.stampDuty || 0)));
+          break;
+        case 'category':
+          aVal = (a.categories || '').toLowerCase();
+          bVal = (b.categories || '').toLowerCase();
+          break;
+        case 'status':
+          aVal = (a.status || '').toLowerCase();
+          bVal = (b.status || '').toLowerCase();
+          break;
+        case 'pmtMonth':
+          aVal = (a.pmtMonth || '').toLowerCase();
+          bVal = (b.pmtMonth || '').toLowerCase();
           break;
         case 'date':
         default:

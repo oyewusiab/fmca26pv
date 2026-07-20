@@ -134,7 +134,69 @@ const ActionItems = {
       return;
     }
 
-    list.innerHTML = this.items.map((item) => this.renderRow(item)).join('');
+    // ── Glance summary panel ──
+    const glanceHtml = this.renderGlancePanel();
+
+    // ── Detailed rows ──
+    const rowsHtml = this.items.map((item) => this.renderRow(item)).join('');
+    list.innerHTML = glanceHtml + rowsHtml;
+  },
+
+  /**
+   * Compact summary table — all affected vouchers at a glance.
+   * Collapsed by default, expandable with one click.
+   */
+  renderGlancePanel() {
+    const rows = this.items.map(item => {
+      const voucher = item.voucherNumber || '-';
+      const payee = item.payee || '-';
+      const amount = Utils.formatCurrency(item.amount || 0);
+      const status = this.normalize(item.voucherStatus || item.status) || '-';
+      const sev = this.normalize(item.severity).toLowerCase() || 'info';
+      const sevBadge = sev === 'danger' ? 'badge-danger' : sev === 'warning' ? 'badge-warning' : 'badge-info';
+      const ri = item.rowIndex;
+      const vEnc = String(voucher).replace(/'/g, "\\'");
+      return `
+        <tr>
+          <td><strong>${voucher}</strong></td>
+          <td>${Utils.truncate(payee, 28)}</td>
+          <td style="text-align:right">${amount}</td>
+          <td><span class="status-badge ${sevBadge}">${this.normalize(item.rule || '')}</span></td>
+          <td>${status}</td>
+          <td style="white-space:nowrap">
+            <a onclick="ActionItems.handleViewAction('${vEnc}',${ri})" style="cursor:pointer;color:var(--primary-color,#10b981);font-weight:600;margin-right:8px;text-decoration:none;"><i class="fas fa-eye"></i></a>
+            <a onclick="ActionItems.handleEditAction(${ri},'${vEnc}')" style="cursor:pointer;color:#e67e22;font-weight:600;text-decoration:none;"><i class="fas fa-tools"></i></a>
+          </td>
+        </tr>`;
+    }).join('');
+
+    return `
+      <div class="action-glance-panel" id="actionGlancePanel">
+        <div class="action-glance-header" onclick="ActionItems.toggleGlance()">
+          <span><i class="fas fa-table" style="margin-right:6px;"></i><strong>Vouchers Needing Attention</strong> &mdash; ${this.items.length} item${this.items.length !== 1 ? 's' : ''}</span>
+          <span id="glanceToggleIcon" style="font-size:12px;opacity:0.7;"><i class="fas fa-chevron-down"></i> Show at a Glance</span>
+        </div>
+        <div class="action-glance-body" id="actionGlanceBody" style="display:none;">
+          <div style="overflow-x:auto;">
+            <table class="glance-table">
+              <thead><tr><th>Voucher No.</th><th>Payee</th><th>Amount</th><th>Issue</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  toggleGlance() {
+    const body = document.getElementById('actionGlanceBody');
+    const icon = document.getElementById('glanceToggleIcon');
+    if (!body) return;
+    const isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : 'block';
+    if (icon) icon.innerHTML = isOpen
+      ? '<i class="fas fa-chevron-down"></i> Show at a Glance'
+      : '<i class="fas fa-chevron-up"></i> Hide';
   },
 
   renderRow(item) {
@@ -148,15 +210,14 @@ const ActionItems = {
     const voucher = item.voucherNumber || '-';
     const payee = item.payee || '-';
     const amount = Utils.formatCurrency(item.amount || 0);
-    const unit = this.normalize(item.unit) || '-';
     const year = item.year || '2026';
-    const voucherStatus = this.normalize(item.status) || '-';
+    const voucherStatus = this.normalize(item.voucherStatus || item.status) || '-';
     const itemStatus = this.normalize(item.itemStatus) || '-';
     const accountType = item.accountType || 'Unspecified';
-    const pmtMonth = item.pmtMonth || '-';
+    const pmtMonth = item.pmtMonth;
     const category = item.category || 'Uncategorized';
-
     const rowIndex = item.rowIndex;
+    const vEnc = String(voucher).replace(/'/g, "\\'");
 
     return `
       <div class="action-item-row ${severity}">
@@ -167,23 +228,22 @@ const ActionItems = {
           <div class="action-item-title">${item.title || 'Action required'}</div>
           <div class="action-item-msg">${item.message || ''}</div>
           <div class="action-item-badges">
-            <span class="small-badge"><strong>Voucher:</strong> ${voucher}</span>
+            <span class="small-badge"><strong>Voucher Number:</strong> ${voucher}</span>
             <span class="small-badge"><strong>Payee:</strong> ${payee}</span>
             <span class="small-badge"><strong>Amount:</strong> ${amount}</span>
             <span class="small-badge"><strong>Year:</strong> ${year}</span>
-            <span class="small-badge"><strong>Unit:</strong> ${unit}</span>
             <span class="small-badge"><strong>Voucher Status:</strong> ${voucherStatus}</span>
             <span class="small-badge"><strong>Item Status:</strong> ${itemStatus}</span>
             <span class="small-badge"><strong>Account Type:</strong> ${accountType}</span>
-            <span class="small-badge"><strong>PMT Month:</strong> ${pmtMonth}</span>
+            ${pmtMonth ? `<span class="small-badge"><strong>PMT Month:</strong> ${pmtMonth}</span>` : ''}
             <span class="small-badge"><strong>Category:</strong> ${category}</span>
           </div>
         </div>
-        <div class="action-item-actions" style="display: flex; flex-direction: column; gap: 8px;">
-          <a class="btn-view" onclick="ActionItems.handleViewAction('${String(voucher).replace(/'/g, "\\'")}')" style="display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; text-decoration: none;">
+        <div class="action-item-actions">
+          <a class="btn-view" onclick="ActionItems.handleViewAction('${vEnc}',${rowIndex})" title="Jump to this voucher">
             <i class="fas fa-eye"></i> View
           </a>
-          <a class="btn-resolve" onclick="ActionItems.handleEditAction(${rowIndex})" style="display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; text-decoration: none; background-color: var(--primary-color, #10b981); color: white; padding: 6px 12px; border-radius: 4px; font-weight: 500;">
+          <a class="btn-resolve" onclick="ActionItems.handleEditAction(${rowIndex},'${vEnc}')" title="Edit to fix this voucher">
             <i class="fas fa-tools"></i> Fix Discrepancy
           </a>
         </div>
@@ -225,14 +285,19 @@ const ActionItems = {
     }
   },
 
-  handleViewAction(voucherNumber) {
-    const voucher = encodeURIComponent(voucherNumber || '');
-    window.location.href = `vouchers.html?lookup=true&voucher=${voucher}`;
+  handleViewAction(voucherNumber, rowIndex) {
+    const params = new URLSearchParams();
+    if (voucherNumber && voucherNumber !== '-') params.set('highlight', voucherNumber);
+    if (rowIndex) params.set('row', rowIndex);
+    window.location.href = `vouchers.html?${params.toString()}`;
   },
 
-  handleEditAction(rowIndex) {
+  handleEditAction(rowIndex, voucherNumber) {
     if (!rowIndex) return;
-    window.location.href = `vouchers.html?edit=${rowIndex}`;
+    const params = new URLSearchParams();
+    params.set('edit', rowIndex);
+    if (voucherNumber && voucherNumber !== '-') params.set('highlight', voucherNumber);
+    window.location.href = `vouchers.html?${params.toString()}`;
   },
 
   openSettings() {
