@@ -625,11 +625,6 @@ function getAuditTrail(token, limit, offset) {
     const session = getSession(token);
     if (!session) return { success: false, error: 'Session expired' };
 
-    // ADMIN ONLY
-    if (session.role !== CONFIG.ROLES.ADMIN) {
-      return { success: false, error: 'Unauthorized' };
-    }
-
     limit = parseInt(limit, 10);
     offset = parseInt(offset, 10);
 
@@ -727,11 +722,6 @@ function getAuditTrail(token, limit, offset) {
   try {
     const session = getSession(token);
     if (!session) return { success: false, error: 'Session expired' };
-
-    // ADMIN ONLY
-    if (session.role !== CONFIG.ROLES.ADMIN) {
-      return { success: false, error: 'Unauthorized' };
-    }
 
     limit = parseInt(limit, 10);
     offset = parseInt(offset, 10);
@@ -3866,6 +3856,17 @@ function getPendingDeletions(token) {
       
       if (status === 'PENDING DELETION') {
         const voucher = rowToVoucher(data[i], i + 2, cols);
+        try {
+          const note = sheet.getRange(i + 2, cols.STATUS).getNote();
+          if (note) {
+            const parts = note.split('|');
+            parts.forEach(p => {
+              if (p.startsWith('REASON:')) voucher.deletionReason = p.substring(7).trim();
+              if (p.startsWith('REQUESTED_BY:')) voucher.requestedBy = p.substring(13).trim();
+              if (p.startsWith('ORIGINAL_STATUS:')) voucher.originalStatus = p.substring(16).trim();
+            });
+          }
+        } catch (e) {}
         pendingVouchers.push(voucher);
       }
     }

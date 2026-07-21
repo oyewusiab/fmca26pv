@@ -1912,10 +1912,28 @@ const Vouchers = {
         return;
       }
       voucher = r.voucher;
+    } else {
+      voucher = this.pendingDeletions.find(x => x.rowIndex === rowIndex) ||
+        this.vouchers.find(x => x.rowIndex === rowIndex);
+      if (!voucher) {
+        Utils.showToast('Voucher not found', 'error');
+        return;
+      }
     }
 
-    // Then continue with your existing code
-    const confirmed = await Utils.confirm('Approve permanent deletion? This cannot be undone.', 'Approve Deletion');
+    const delReason = voucher.deletionReason || 'No reason specified';
+    const reqByInfo = voucher.requestedBy ? `\nRequested By: ${voucher.requestedBy}` : '';
+
+    const confirmed = await Utils.confirm(
+      `Approve permanent deletion of this voucher?\n\n` +
+      `• Voucher No.: ${voucher.accountOrMail || '-'}\n` +
+      `• Payee: ${voucher.payee || '-'}\n` +
+      `• Gross Amount: ${Utils.formatCurrency(voucher.grossAmount || 0)}` +
+      `${reqByInfo}\n` +
+      `• Deletion Reason: "${delReason}"\n\n` +
+      `⚠️ WARNING: This action is permanent and cannot be undone!`,
+      'Approve Permanent Deletion'
+    );
     if (!confirmed) return;
 
     this.showLoading(true);
@@ -2061,6 +2079,8 @@ const Vouchers = {
               <th>Voucher No.</th>
               <th>Payee</th>
               <th>Amount</th>
+              <th>Requested By</th>
+              <th>Reason for Deletion</th>
               <th>Control No.</th>
               <th>Actions</th>
             </tr>
@@ -2070,17 +2090,21 @@ const Vouchers = {
 
     this.pendingDeletions.forEach(v => {
       const isReleased = v.controlNumber && String(v.controlNumber).trim() !== '';
+      const reasonText = v.deletionReason || 'No reason provided';
+      const reqBy = v.requestedBy || '-';
       html += `
         <tr>
-          <td><strong>${v.accountOrMail || '-'}</strong></td>
-          <td title="${v.payee || ''}">${Utils.truncate(v.payee || '', 25)}</td>
+          <td><strong>${this.escapeHtml(v.accountOrMail || '-')}</strong></td>
+          <td title="${this.escapeHtml(v.payee || '')}">${Utils.truncate(v.payee || '', 20)}</td>
           <td>${Utils.formatCurrency(v.grossAmount || 0)}</td>
+          <td><span style="font-size:12px; color:#555;">${this.escapeHtml(reqBy)}</span></td>
+          <td style="max-width: 250px; word-break: break-word;"><strong style="color: #92400e;">${this.escapeHtml(reasonText)}</strong></td>
           <td>${v.controlNumber || '-'} ${isReleased ? '<span class="badge badge-pending">Released</span>' : ''}</td>
           <td>
             <div class="action-buttons">
-              <button class="btn btn-sm btn-success" onclick="Vouchers.approveDelete(${v.rowIndex})"><i class="fas fa-check"></i> Approve</button>
-              <button class="btn btn-sm btn-warning" onclick="Vouchers.rejectDelete(${v.rowIndex})"><i class="fas fa-times"></i> Reject</button>
-              <button class="btn btn-sm btn-secondary" onclick="Vouchers.viewVoucher(${v.rowIndex})"><i class="fas fa-eye"></i> View</button>
+              <button class="btn btn-sm btn-success" onclick="Vouchers.approveDelete(${v.rowIndex})" title="Review & Approve"><i class="fas fa-check"></i> Approve</button>
+              <button class="btn btn-sm btn-warning" onclick="Vouchers.rejectDelete(${v.rowIndex})" title="Reject"><i class="fas fa-times"></i> Reject</button>
+              <button class="btn btn-sm btn-secondary" onclick="Vouchers.viewVoucher(${v.rowIndex})" title="View Details"><i class="fas fa-eye"></i> View</button>
             </div>
           </td>
         </tr>
@@ -3501,37 +3525,46 @@ const Vouchers = {
     try {
       const result = await API.getAuditTrail(500, 0);
       if (result.success && result.records) {
+        const vNo = (this.selectedVoucher.accountOrMail || '').trim().toLowerCase();
+        const vRow = String(this.selectedVoucher.rowIndex || '');
+
         const filtered = result.records.filter(r => {
-          const isVoucherSheet = String(r.sheet).toLowerCase() === 'vouchers';
-          const matchesRow = String(r.rowIndex) === String(this.selectedVoucher.rowIndex);
-          const matchesVoucherNo = this.selectedVoucher.accountOrMail && 
-            r.description && String(r.description).includes(this.selectedVoucher.accountOrMail);
+          const sheetName = String(r.sheet || '').toLowerCase();
+          const isVoucherSheet = sheetName.includes('voucher') || sheetName.includes('2026');
+          
+          const matchesRow = String(r.targetRow || r.rowIndex || '') === vRow;
+          const desc = String(r.description || '').toLowerCase();
+          const details = String(r.details || '').toLowerCase();
+          const matchesVoucherNo = vNo && (desc.includes(vNo) || details.includes(vNo));
+          
           return isVoucherSheet && (matchesRow || matchesVoucherNo);
         });
 
         if (filtered.length === 0) {
-          recordsDiv.innerHTML = '<p class="text-muted text-center" style="padding: 10px; margin: 0;">No historical changes logged for this voucher.</p>';
+          recordsDiv.innerHTML = '<p class="text-muted text-center" style="padding: 10px; margin: 0;">No historical changes logged for this voucher yet.</p>';
         } else {
           let html = '<div class="history-timeline" style="font-size: 13px; line-height: 1.5; padding: 5px;">';
           filtered.forEach(r => {
-            let badgeBg = '#fff3cd', badgeColor = '#856404';
-            if (r.action === 'CREATE') {
-              badgeBg = '#d4edda';
-              badgeColor = '#155724';
-            } else if (r.action === 'DELETE') {
-              badgeBg = '#f8d7da';
-              badgeColor = '#721c24';
+            let badgeBg = '#e2e8f0', badgeColor = '#334155';
+            const act = String(r.action || '').toUpperCase();
+            if (act.includes('CREATE')) {
+              badgeBg = '#dcfce7'; badgeColor = '#15803d';
+            } else if (act.includes('DELETE') || act.includes('REJECT')) {
+              badgeBg = '#fee2e2'; badgeColor = '#b91c1c';
+            } else if (act.includes('UPDATE') || act.includes('RELEASE')) {
+              badgeBg = '#e0f2fe'; badgeColor = '#0369a1';
             }
+
             html += `
               <div class="history-item" style="border-left: 2px solid var(--primary, #1a5f2a); padding-left: 12px; margin-bottom: 12px; position: relative;">
                 <div class="history-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--primary, #1a5f2a); position: absolute; left: -5px; top: 6px;"></div>
                 <div style="display: flex; justify-content: space-between; color: var(--text-muted, #666); font-size: 11px;">
-                  <span><strong>${this.escapeHtml(r.name || r.email || 'System')}</strong> (${this.escapeHtml(r.role || 'User')})</span>
-                  <span>${this.escapeHtml(r.timestamp || '')}</span>
+                  <span><strong>${this.escapeHtml(r.name || r.email || r.user || 'System')}</strong> (${this.escapeHtml(r.role || 'User')})</span>
+                  <span>${this.escapeHtml(r.timestamp || r.date || '')}</span>
                 </div>
                 <div style="margin-top: 4px; color: var(--text-color, #333);">
-                  <span class="badge" style="background-color: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-right: 5px;">${this.escapeHtml(r.action)}</span>
-                  ${this.escapeHtml(r.description || '')}
+                  <span class="badge" style="background-color: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-right: 5px;">${this.escapeHtml(r.action || 'LOG')}</span>
+                  ${this.escapeHtml(r.description || r.details || '')}
                 </div>
               </div>
             `;
