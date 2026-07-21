@@ -8,6 +8,9 @@ const Users = {
     users: [],
     selectedUser: null,
     isEditMode: false,
+    currentPage: 1,
+    itemsPerPage: 10,
+    credentialsData: null,
     
     /**
      * Initialize users page
@@ -28,11 +31,24 @@ const Users = {
         // Setup sidebar
         this.setupSidebar();
         
+        // Populate filter roles
+        this.setupRoleFilters();
+
         // Load users
         await this.loadUsers();
         
         // Setup event listeners
         this.setupEventListeners();
+    },
+
+    setupRoleFilters() {
+        const filterRole = document.getElementById('filterRole');
+        if (filterRole && CONFIG.ROLES) {
+            filterRole.innerHTML = '<option value="">All Roles</option>';
+            Object.values(CONFIG.ROLES).forEach(role => {
+                filterRole.innerHTML += `<option value="${role}">${role}</option>`;
+            });
+        }
     },
     
     /**
@@ -78,6 +94,17 @@ const Users = {
             });
         });
     },
+
+    onEmailInput() {
+        if (this.isEditMode) return;
+        const email = (document.getElementById('formEmail')?.value || '').trim();
+        const usernameInput = document.getElementById('formUsername');
+        if (email && usernameInput && (!usernameInput.value || usernameInput.dataset.autoDerived === 'true')) {
+            const prefix = email.split('@')[0] || '';
+            usernameInput.value = prefix.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+            usernameInput.dataset.autoDerived = 'true';
+        }
+    },
     
     /**
      * Load users from backend
@@ -89,7 +116,7 @@ const Users = {
             const result = await API.getUsers();
             
             if (result.success) {
-                this.users = result.users;
+                this.users = result.users || [];
                 this.renderUsersList();
             } else {
                 Utils.showToast(result.error || 'Failed to load users', 'error');
@@ -103,73 +130,140 @@ const Users = {
     },
     
     /**
+     * Filter users based on search & dropdowns
+     */
+    filterUsers() {
+        this.currentPage = 1;
+        this.renderUsersList();
+    },
+
+    changeItemsPerPage() {
+        const select = document.getElementById('itemsPerPage');
+        if (select) {
+            this.itemsPerPage = parseInt(select.value, 10) || 10;
+            this.currentPage = 1;
+            this.renderUsersList();
+        }
+    },
+
+    goToPage(page) {
+        this.currentPage = page;
+        this.renderUsersList();
+    },
+    
+    /**
      * Render users list
      */
     renderUsersList() {
         const container = document.getElementById('usersList');
         if (!container) return;
         
-        // Get search term
-        const searchTerm = document.getElementById('searchUsers')?.value.toLowerCase() || '';
+        const searchTerm = (document.getElementById('searchUsers')?.value || '').toLowerCase().trim();
+        const statusFilter = (document.getElementById('filterStatus')?.value || '').toLowerCase();
+        const roleFilter = (document.getElementById('filterRole')?.value || '').toLowerCase();
         
         // Filter users
-        let filteredUsers = this.users;
-        if (searchTerm) {
-            filteredUsers = this.users.filter(user => 
-                user.name.toLowerCase().includes(searchTerm) ||
-                user.email.toLowerCase().includes(searchTerm) ||
-                user.role.toLowerCase().includes(searchTerm)
-            );
-        }
+        let filtered = this.users.filter(user => {
+            const name = String(user.name || '').toLowerCase();
+            const email = String(user.email || '').toLowerCase();
+            const username = String(user.username || '').toLowerCase();
+            const role = String(user.role || '').toLowerCase();
+            const dept = String(user.department || '').toLowerCase();
+            const isActive = user.active === true || user.active === 'TRUE' || user.active === 'true';
+
+            // Text search
+            if (searchTerm) {
+                const matchesText = name.includes(searchTerm) ||
+                                    email.includes(searchTerm) ||
+                                    username.includes(searchTerm) ||
+                                    role.includes(searchTerm) ||
+                                    dept.includes(searchTerm);
+                if (!matchesText) return false;
+            }
+
+            // Status filter
+            if (statusFilter === 'active' && !isActive) return false;
+            if (statusFilter === 'inactive' && isActive) return false;
+
+            // Role filter
+            if (roleFilter && role !== roleFilter) return false;
+
+            return true;
+        });
         
         // Update count
-        document.getElementById('userCount').textContent = `${filteredUsers.length} user(s)`;
-        
-        if (filteredUsers.length === 0) {
-            container.innerHTML = Components.getEmptyState('No users found', 'fa-users');
+        document.getElementById('userCount').textContent = `${filtered.length} user(s) found`;
+
+        if (filtered.length === 0) {
+            container.innerHTML = Components.getEmptyState('No users match the criteria', 'fa-users');
+            document.getElementById('usersPaginationContainer').innerHTML = '';
             return;
         }
+
+        // Pagination slice
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / this.itemsPerPage);
+        if (this.currentPage > totalPages) this.currentPage = Math.max(1, totalPages);
+
+        const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+        const paginatedUsers = filtered.slice(startIndex, startIndex + this.itemsPerPage);
         
         let html = `
             <div class="table-container">
                 <table>
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Email</th>
+                            <th>User Profile</th>
+                            <th>Email & Username</th>
+                            <th>Department & Contact</th>
                             <th>Role</th>
                             <th>Status</th>
-                            <th>Actions</th>
+                            <th style="text-align: right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
         `;
         
-        filteredUsers.forEach(user => {
-            const statusBadge = user.active === true || user.active === 'TRUE' || user.active === 'true'
+        paginatedUsers.forEach(user => {
+            const isActive = user.active === true || user.active === 'TRUE' || user.active === 'true';
+            const statusBadge = isActive
                 ? '<span class="badge badge-paid">Active</span>'
                 : '<span class="badge badge-cancelled">Inactive</span>';
+
+            const roleClass = (user.role || '').toLowerCase().replace(/\s+/g, '-');
+            const deptText = user.department || '-';
+            const phoneText = user.phone || '';
+            const usernameText = user.username ? `@${user.username}` : '';
             
             html += `
                 <tr>
                     <td>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <div class="user-avatar-small">${Utils.getInitials(user.name)}</div>
-                            <strong>${user.name}</strong>
+                            <div>
+                                <strong>${Utils.escapeHtml(user.name)}</strong>
+                            </div>
                         </div>
                     </td>
-                    <td>${user.email}</td>
-                    <td><span class="role-badge role-${user.role.toLowerCase().replace(/\s+/g, '-')}">${user.role}</span></td>
-                    <td>${statusBadge}</td>
                     <td>
-                        <div class="action-buttons">
-                            <button class="btn btn-sm btn-primary" onclick="Users.editUser(${user.rowIndex})" title="Edit">
+                        <div>${Utils.escapeHtml(user.email)}</div>
+                        ${usernameText ? `<div style="font-size:11px; color:#666;">${Utils.escapeHtml(usernameText)}</div>` : ''}
+                    </td>
+                    <td>
+                        <div>${Utils.escapeHtml(deptText)}</div>
+                        ${phoneText ? `<div style="font-size:11px; color:#666;"><i class="fas fa-phone-alt" style="font-size:10px;"></i> ${Utils.escapeHtml(phoneText)}</div>` : ''}
+                    </td>
+                    <td><span class="role-badge role-${roleClass}">${Utils.escapeHtml(user.role)}</span></td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align: right;">
+                        <div class="action-buttons" style="justify-content: flex-end;">
+                            <button class="btn btn-sm btn-primary" onclick="Users.editUser(${user.rowIndex})" title="Edit User">
                                 <i class="fas fa-edit"></i>
                             </button>
                             <button class="btn btn-sm btn-secondary" onclick="Users.resetPassword(${user.rowIndex})" title="Reset Password">
                                 <i class="fas fa-key"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger" onclick="Users.deleteUser(${user.rowIndex})" title="Delete">
+                            <button class="btn btn-sm btn-danger" onclick="Users.deleteUser(${user.rowIndex})" title="Delete User">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -180,13 +274,23 @@ const Users = {
         
         html += '</tbody></table></div>';
         container.innerHTML = html;
-    },
-    
-    /**
-     * Filter users based on search
-     */
-    filterUsers() {
-        this.renderUsersList();
+
+        // Render pagination
+        const pageContainer = document.getElementById('usersPaginationContainer');
+        if (pageContainer) {
+            if (totalPages > 1) {
+                pageContainer.innerHTML = Components.getPagination(this.currentPage, totalPages, totalItems);
+                // Attach click handlers
+                pageContainer.querySelectorAll('.pagination-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const targetPage = parseInt(e.currentTarget.dataset.page, 10);
+                        if (targetPage) this.goToPage(targetPage);
+                    });
+                });
+            } else {
+                pageContainer.innerHTML = '';
+            }
+        }
     },
     
     /**
@@ -200,7 +304,7 @@ const Users = {
         const title = document.getElementById('userFormTitle');
         const form = document.getElementById('userForm');
         
-        title.textContent = this.isEditMode ? 'Edit User' : 'Add New User';
+        title.textContent = this.isEditMode ? 'Edit User Profile' : 'Add New User';
         form.reset();
         
         // Populate role dropdown
@@ -210,13 +314,34 @@ const Users = {
             roleSelect.innerHTML += `<option value="${role}">${role}</option>`;
         });
         
+        const activeCheck = document.getElementById('formActive');
+        const selfNotice = document.getElementById('selfEditNotice');
+        const currentUser = Auth.getUser();
+
         if (user) {
             document.getElementById('formName').value = user.name || '';
             document.getElementById('formEmail').value = user.email || '';
+            document.getElementById('formUsername').value = user.username || '';
+            document.getElementById('formDepartment').value = user.department || '';
+            document.getElementById('formPhone').value = user.phone || '';
             document.getElementById('formRole').value = user.role || '';
-            document.getElementById('formActive').checked = user.active === true || user.active === 'TRUE' || user.active === 'true';
+            activeCheck.checked = user.active === true || user.active === 'TRUE' || user.active === 'true';
+
+            // Self edit protection
+            if (currentUser && user.email && user.email.toLowerCase() === currentUser.email.toLowerCase()) {
+                activeCheck.disabled = true;
+                roleSelect.disabled = true;
+                if (selfNotice) selfNotice.classList.remove('hidden');
+            } else {
+                activeCheck.disabled = false;
+                roleSelect.disabled = false;
+                if (selfNotice) selfNotice.classList.add('hidden');
+            }
         } else {
-            document.getElementById('formActive').checked = true;
+            activeCheck.checked = true;
+            activeCheck.disabled = false;
+            roleSelect.disabled = false;
+            if (selfNotice) selfNotice.classList.add('hidden');
         }
         
         modal.classList.add('active');
@@ -242,16 +367,31 @@ const Users = {
             form.reportValidity();
             return;
         }
+
+        const name = document.getElementById('formName').value.trim();
+        const email = document.getElementById('formEmail').value.trim();
+        let username = document.getElementById('formUsername').value.trim();
+        const department = document.getElementById('formDepartment').value;
+        const phone = document.getElementById('formPhone').value.trim();
+        const role = document.getElementById('formRole').value;
+        const active = document.getElementById('formActive').checked;
         
+        if (!username && email) {
+            username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        }
+
         const userData = {
-            name: document.getElementById('formName').value.trim(),
-            email: document.getElementById('formEmail').value.trim(),
-            role: document.getElementById('formRole').value,
-            active: document.getElementById('formActive').checked
+            name,
+            email,
+            username,
+            department,
+            phone,
+            role,
+            active
         };
         
-        if (!userData.name || !userData.email || !userData.role) {
-            Utils.showToast('Please fill all required fields', 'error');
+        if (!userData.name || !userData.email || !userData.role || !userData.username) {
+            Utils.showToast('Please fill all required fields (Name, Email, Username, Role)', 'error');
             return;
         }
         
@@ -270,6 +410,18 @@ const Users = {
                 Utils.showToast(result.message || 'User saved successfully', 'success');
                 this.closeModal('userFormModal');
                 await this.loadUsers();
+
+                // On new user creation, present credentials modal
+                if (!this.isEditMode) {
+                    this.showCredentialsModal({
+                        name: userData.name,
+                        email: userData.email,
+                        username: userData.username,
+                        role: userData.role,
+                        password: 'Welcome123',
+                        message: 'New user account created successfully! Provide these credentials to the staff member:'
+                    });
+                }
             } else {
                 Utils.showToast(result.error || 'Failed to save user', 'error');
             }
@@ -289,7 +441,7 @@ const Users = {
         if (!user) return;
         
         const confirm = await Utils.confirm(
-            `Reset password for ${user.name}?\n\nThe password will be reset to: Welcome123`,
+            `Reset password for ${user.name}?\n\nThe temporary password will be set to: Welcome123`,
             'Reset Password'
         );
         
@@ -302,6 +454,14 @@ const Users = {
             
             if (result.success) {
                 Utils.showToast(result.message || 'Password reset successfully', 'success');
+                this.showCredentialsModal({
+                    name: user.name,
+                    email: user.email,
+                    username: user.username || user.email.split('@')[0],
+                    role: user.role,
+                    password: 'Welcome123',
+                    message: `Password reset successfully for ${user.name}. Here are the temporary credentials:`
+                });
             } else {
                 Utils.showToast(result.error || 'Failed to reset password', 'error');
             }
@@ -311,6 +471,65 @@ const Users = {
         }
         
         this.showLoading(false);
+    },
+
+    showCredentialsModal(data) {
+        this.credentialsData = data;
+        const modal = document.getElementById('credentialsModal');
+        const msg = document.getElementById('credentialsMessage');
+        const credName = document.getElementById('credName');
+        const credEmail = document.getElementById('credEmail');
+        const credUsername = document.getElementById('credUsername');
+        const credRole = document.getElementById('credRole');
+        const credPass = document.getElementById('credPassword');
+
+        if (!modal) return;
+
+        if (msg) msg.textContent = data.message || 'User login details:';
+        if (credName) credName.textContent = data.name || '-';
+        if (credEmail) credEmail.textContent = data.email || '-';
+        if (credUsername) credUsername.textContent = data.username || '-';
+        if (credRole) credRole.textContent = data.role || '-';
+        if (credPass) credPass.textContent = data.password || 'Welcome123';
+
+        modal.classList.add('active');
+    },
+
+    copyCredentials() {
+        if (!this.credentialsData) return;
+        const d = this.credentialsData;
+        const text = `PAYABLE VOUCHER 2026 LOGIN CREDENTIALS:\n` +
+                     `Name: ${d.name}\n` +
+                     `Email: ${d.email}\n` +
+                     `Username: ${d.username}\n` +
+                     `Role: ${d.role}\n` +
+                     `Temporary Password: ${d.password}\n\n` +
+                     `Please change your password upon logging in.`;
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                Utils.showToast('Credentials copied to clipboard!', 'success');
+            }).catch(() => {
+                this.fallbackCopyText(text);
+            });
+        } else {
+            this.fallbackCopyText(text);
+        }
+    },
+
+    fallbackCopyText(text) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            Utils.showToast('Credentials copied to clipboard!', 'success');
+        } catch (err) {
+            Utils.showToast('Failed to copy text', 'error');
+        }
+        document.body.removeChild(textArea);
     },
     
     /**

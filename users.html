@@ -96,10 +96,22 @@
 
             <!-- Search and Filter Bar -->
             <div class="card mb-2">
-                <div class="card-body" style="display: flex; gap: 15px; align-items: center;">
-                    <div style="flex: 1;">
+                <div class="card-body" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                    <div style="flex: 2; min-width: 220px;">
                         <input type="text" class="form-control" id="searchUsers" 
-                               placeholder="Search by name, email or role...">
+                               placeholder="Search by name, email, username, department or role...">
+                    </div>
+                    <div style="flex: 1; min-width: 140px;">
+                        <select class="form-control" id="filterStatus" onchange="Users.filterUsers()">
+                            <option value="">All Statuses</option>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1; min-width: 180px;">
+                        <select class="form-control" id="filterRole" onchange="Users.filterUsers()">
+                            <option value="">All Roles</option>
+                        </select>
                     </div>
                     <div>
                         <button class="btn btn-secondary" onclick="Users.loadUsers()">
@@ -109,9 +121,18 @@
                 </div>
             </div>
 
-            <!-- User Count -->
-            <div style="margin-bottom: 15px; color: var(--text-muted);">
+            <!-- User Count & Items per page -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; color: var(--text-muted);">
                 <span id="userCount">Loading...</span>
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                    <label for="itemsPerPage" style="margin: 0;">Show:</label>
+                    <select class="form-control" id="itemsPerPage" style="width: auto; padding: 2px 8px; height: auto;" onchange="Users.changeItemsPerPage()">
+                        <option value="10" selected>10 per page</option>
+                        <option value="25">25 per page</option>
+                        <option value="50">50 per page</option>
+                        <option value="1000">All</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Users List -->
@@ -120,6 +141,9 @@
                     <p class="text-muted text-center">Loading users...</p>
                 </div>
             </div>
+
+            <!-- Pagination Container -->
+            <div id="usersPaginationContainer" style="margin-top: 15px;"></div>
 
             <!-- Role Legend -->
             <div class="card mt-2">
@@ -174,10 +198,9 @@
                 </div>
             </div>
 
-
     <!-- User Form Modal -->
     <div class="modal-overlay" id="userFormModal">
-        <div class="modal" style="max-width: 500px;">
+        <div class="modal" style="max-width: 520px;">
             <div class="modal-header">
                 <h3 class="modal-title" id="userFormTitle">Add New User</h3>
                 <button class="modal-close" onclick="Users.closeModal('userFormModal')">&times;</button>
@@ -193,7 +216,34 @@
                     <div class="form-group">
                         <label for="formEmail">Email Address <span class="required">*</span></label>
                         <input type="email" class="form-control" id="formEmail" required
-                               placeholder="Enter email address">
+                               placeholder="Enter email address" oninput="Users.onEmailInput()">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="formUsername">Username <span class="required">*</span></label>
+                        <input type="text" class="form-control" id="formUsername" required
+                               placeholder="e.g. john.doe">
+                        <small class="text-muted">Used for alternative login</small>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div class="form-group">
+                            <label for="formDepartment">Department / Unit</label>
+                            <select class="form-control" id="formDepartment">
+                                <option value="">Select Department</option>
+                                <option value="Payable Unit">Payable Unit</option>
+                                <option value="Audit Unit">Audit Unit</option>
+                                <option value="Central Processing Office (CPO)">Central Processing Office (CPO)</option>
+                                <option value="Directorate of Finance & Accounts (DFA)">Directorate of Finance & Accounts (DFA)</option>
+                                <option value="Tax & Revenue Unit">Tax & Revenue Unit</option>
+                                <option value="Administration">Administration</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="formPhone">Phone Number</label>
+                            <input type="text" class="form-control" id="formPhone" placeholder="e.g. +234 801 234 5678">
+                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -208,12 +258,15 @@
                             <input type="checkbox" id="formActive" checked>
                             <label for="formActive" style="margin: 0; font-weight: normal;">Active Account</label>
                         </div>
+                        <div id="selfEditNotice" class="text-warning hidden" style="font-size: 12px; margin-top: 5px;">
+                            <i class="fas fa-exclamation-triangle"></i> You cannot deactivate or change the role of your own active Admin account.
+                        </div>
                     </div>
                     
                     <div class="alert alert-info" style="font-size: 12px;">
                         <i class="fas fa-info-circle"></i>
-                        New users will receive the default password: <strong>Welcome123</strong><br>
-                        They should change it on first login.
+                        New users will receive the default temporary password: <strong>Welcome123</strong><br>
+                        They will be prompted to change it on first login.
                     </div>
                 </form>
             </div>
@@ -221,6 +274,39 @@
                 <button class="btn btn-secondary" onclick="Users.closeModal('userFormModal')">Cancel</button>
                 <button class="btn btn-primary" onclick="Users.saveUser()">
                     <i class="fas fa-save"></i> Save User
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Credentials Modal -->
+    <div class="modal-overlay" id="credentialsModal">
+        <div class="modal" style="max-width: 480px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, var(--primary-color), #0d3c16); color: white;">
+                <h3 class="modal-title" style="color: white; display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-key"></i> User Temporary Credentials
+                </h3>
+                <button type="button" class="modal-close" onclick="Users.closeModal('credentialsModal')" style="color: white;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-2" id="credentialsMessage">Account credentials setup successfully:</p>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: var(--radius-sm); border: 1px dashed var(--primary-color);">
+                    <p style="margin-bottom: 6px;"><strong>Name:</strong> <span id="credName"></span></p>
+                    <p style="margin-bottom: 6px;"><strong>Email:</strong> <span id="credEmail"></span></p>
+                    <p style="margin-bottom: 6px;"><strong>Username:</strong> <span id="credUsername"></span></p>
+                    <p style="margin-bottom: 6px;"><strong>Role:</strong> <span id="credRole"></span></p>
+                    <p style="margin-bottom: 0;"><strong>Temporary Password:</strong> <span id="credPassword" style="font-family: monospace; font-size: 15px; background: #fee2e2; color: #b91c1c; padding: 2px 8px; border-radius: 4px; font-weight: bold;">Welcome123</span></p>
+                </div>
+                <div class="alert alert-info mt-2" style="font-size: 12px; margin-bottom: 0;">
+                    <i class="fas fa-info-circle"></i> Copy and share these credentials securely with the user.
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button type="button" class="btn btn-secondary" onclick="Users.copyCredentials()">
+                    <i class="fas fa-copy"></i> Copy Credentials
+                </button>
+                <button type="button" class="btn btn-primary" onclick="Users.closeModal('credentialsModal')">
+                    Done
                 </button>
             </div>
         </div>

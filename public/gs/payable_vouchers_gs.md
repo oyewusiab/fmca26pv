@@ -1327,9 +1327,9 @@ function createUser(token, user) {
       return { success: false, error: 'Name, email, and role are required' };
     }
 
-    // Username required (as you requested)
+    // Auto-derive username if missing
     if (!user.username || !String(user.username).trim()) {
-      return { success: false, error: 'Username is required' };
+      user.username = normalizedEmail.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
     }
 
     // Validate role
@@ -1380,13 +1380,16 @@ function createUser(token, user) {
       true                              // ACTIVE
     ];
 
-    // If you already added new columns, append them:
+    // Append extended columns:
     if (CONFIG.USER_COLUMNS.USERNAME) newRow.push(String(user.username).trim());
     if (CONFIG.USER_COLUMNS.PHONE) newRow.push(String(user.phone || '').trim());
     if (CONFIG.USER_COLUMNS.DEPARTMENT) newRow.push(String(user.department || '').trim());
     if (CONFIG.USER_COLUMNS.UPDATED_AT) newRow.push(new Date());
 
     sheet.appendRow(newRow);
+
+    // Log Audit
+    logAudit(session, 'CREATE_USER', 'Created user account ' + normalizedEmail + ' (' + user.role + ')', CONFIG.SHEETS.USERS, sheet.getLastRow());
 
     return {
       success: true,
@@ -1437,8 +1440,19 @@ function updateUser(token, rowIndex, user) {
     
     // Get current data
     const currentData = sheet.getRange(rowIndex, 1, 1, 5).getValues()[0];
+    const userEmail = String(currentData[CONFIG.USER_COLUMNS.EMAIL - 1] || '');
+
+    // Prevent Admin from deactivating or demoting their own logged-in account
+    if (userEmail.toLowerCase() === session.email.toLowerCase()) {
+      if (user.active === false || user.active === 'false') {
+        return { success: false, error: 'You cannot deactivate your own active Admin account.' };
+      }
+      if (user.role && user.role !== CONFIG.ROLES.ADMIN) {
+        return { success: false, error: 'You cannot change your own role away from Admin.' };
+      }
+    }
     
-    // Update fields (keep password unchanged unless explicitly provided)
+    // Update fields
     if (user.name) {
       sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.NAME).setValue(user.name.trim());
     }
@@ -1471,29 +1485,47 @@ function updateUser(token, rowIndex, user) {
     if (user.active !== undefined) {
       sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.ACTIVE).setValue(user.active);
     }
+
+    if (user.department !== undefined && CONFIG.USER_COLUMNS.DEPARTMENT) {
+      sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.DEPARTMENT).setValue(String(user.department || '').trim());
+    }
+
+    if (user.phone !== undefined && CONFIG.USER_COLUMNS.PHONE) {
+      sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.PHONE).setValue(String(user.phone || '').trim());
+    }
+
+    if (user.username !== undefined && CONFIG.USER_COLUMNS.USERNAME) {
+      const usernameLower = String(user.username || '').trim().toLowerCase();
+      if (usernameLower) {
+        const data = sheet.getDataRange().getValues();
+        for (let i = 1; i < data.length; i++) {
+          if (i + 1 !== rowIndex) {
+            const existingUsername = String(data[i][CONFIG.USER_COLUMNS.USERNAME - 1] || '').trim().toLowerCase();
+            if (existingUsername && existingUsername === usernameLower) {
+              return { success: false, error: 'Username already exists. Choose another.' };
+            }
+          }
+        }
+        sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.USERNAME).setValue(user.username.trim());
+      }
+    }
     
     // Reset password if requested
     if (user.resetPassword) {
       const defaultPassword = 'Welcome123';
       const hashedPassword = hashPassword(defaultPassword);
       sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.PASSWORD).setValue(hashedPassword);
+
+      logAudit(session, 'RESET_PASSWORD', 'Reset password for user ' + userEmail, CONFIG.SHEETS.USERS, rowIndex);
+
       return { 
         success: true, 
         message: 'User updated. Password reset to: ' + defaultPassword 
       };
     }
-
-    if (user.username !== undefined) {
-      const usernameLower = normalizeUsername_(user.username);
-      if (!usernameLower) return { success: false, error: 'Username is required' };
-
-      if (isUsernameTaken_(sheet, usernameLower, rowIndex)) {
-        return { success: false, error: 'Username already exists. Choose another.' };
-      }
-
-      sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.USERNAME).setValue(user.username.trim());
-    }
     
+    logAudit(session, 'UPDATE_USER', 'Updated user profile for ' + userEmail, CONFIG.SHEETS.USERS, rowIndex);
+
     return { success: true, message: 'User updated successfully' };
     
   } catch (error) {
@@ -1539,6 +1571,8 @@ function deleteUser(token, rowIndex) {
     
     // Delete the row
     sheet.deleteRow(rowIndex);
+
+    logAudit(session, 'DELETE_USER', 'Deleted user account ' + userEmail, CONFIG.SHEETS.USERS, rowIndex);
     
     return { success: true, message: 'User deleted successfully' };
     
