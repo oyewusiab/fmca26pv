@@ -1367,9 +1367,9 @@ function createUser(token, user) {
       }
     }
 
-    // Default password
-    const defaultPassword = 'Welcome123';
-    const hashedPassword = hashPassword(defaultPassword);
+    // Password to assign
+    const assignedPassword = String(user.customPassword || user.password || 'Welcome123').trim();
+    const hashedPassword = hashPassword(assignedPassword);
 
     // Build row (append-only safe)
     const newRow = [
@@ -1391,14 +1391,29 @@ function createUser(token, user) {
     // Log Audit
     logAudit(session, 'CREATE_USER', 'Created user account ' + normalizedEmail + ' (' + user.role + ')', CONFIG.SHEETS.USERS, sheet.getLastRow());
 
+    // Send email notification if enabled
+    let emailSent = false;
+    if (user.sendEmail !== false) {
+      emailSent = sendUserCredentialEmail_(
+        normalizedEmail,
+        user.name,
+        user.username,
+        user.role,
+        assignedPassword,
+        user.requirePasswordChange !== false
+      );
+    }
+
     return {
       success: true,
-      message: 'User created successfully. Default password is: ' + defaultPassword,
+      message: 'User created successfully.' + (emailSent ? ' Login details sent to ' + normalizedEmail : ' Default password: ' + assignedPassword),
+      emailSent: emailSent,
       user: {
         name: String(user.name).trim(),
         email: normalizedEmail,
         username: String(user.username).trim(),
-        role: user.role
+        role: user.role,
+        assignedPassword: assignedPassword
       }
     };
 
@@ -1438,9 +1453,12 @@ function updateUser(token, rowIndex, user) {
       return { success: false, error: 'User not found' };
     }
     
-    // Get current data
-    const currentData = sheet.getRange(rowIndex, 1, 1, 5).getValues()[0];
+    // Get current row data
+    const currentData = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const targetName = String(currentData[CONFIG.USER_COLUMNS.NAME - 1] || '');
     const userEmail = String(currentData[CONFIG.USER_COLUMNS.EMAIL - 1] || '');
+    const targetRole = String(currentData[CONFIG.USER_COLUMNS.ROLE - 1] || '');
+    const targetUsername = CONFIG.USER_COLUMNS.USERNAME ? String(currentData[CONFIG.USER_COLUMNS.USERNAME - 1] || '') : '';
 
     // Prevent Admin from deactivating or demoting their own logged-in account
     if (userEmail.toLowerCase() === session.email.toLowerCase()) {
@@ -1510,17 +1528,37 @@ function updateUser(token, rowIndex, user) {
       }
     }
     
-    // Reset password if requested
-    if (user.resetPassword) {
-      const defaultPassword = 'Welcome123';
-      const hashedPassword = hashPassword(defaultPassword);
+    // Reset or Assign custom password if requested
+    if (user.resetPassword || user.customPassword || user.password) {
+      const assignedPassword = String(user.customPassword || user.password || 'Welcome123').trim();
+      const hashedPassword = hashPassword(assignedPassword);
       sheet.getRange(rowIndex, CONFIG.USER_COLUMNS.PASSWORD).setValue(hashedPassword);
 
-      logAudit(session, 'RESET_PASSWORD', 'Reset password for user ' + userEmail, CONFIG.SHEETS.USERS, rowIndex);
+      logAudit(session, 'RESET_PASSWORD', 'Assigned password for user ' + userEmail, CONFIG.SHEETS.USERS, rowIndex);
+
+      // Send email if requested
+      let emailSent = false;
+      if (user.sendEmail !== false) {
+        const targetEmail = user.email || userEmail;
+        const recipientName = user.name || targetName;
+        const recipientRole = user.role || targetRole;
+        const recipientUsername = user.username || targetUsername || targetEmail.split('@')[0];
+
+        emailSent = sendUserCredentialEmail_(
+          targetEmail,
+          recipientName,
+          recipientUsername,
+          recipientRole,
+          assignedPassword,
+          user.requirePasswordChange === true
+        );
+      }
 
       return { 
         success: true, 
-        message: 'User updated. Password reset to: ' + defaultPassword 
+        message: 'Password assigned successfully.' + (emailSent ? ' Email notification sent to user.' : ''),
+        assignedPassword: assignedPassword,
+        emailSent: emailSent
       };
     }
     
@@ -5569,5 +5607,61 @@ function generateDebtProfileExcel(token, requestId) {
     return { success: true, downloadUrl: ss.getUrl(), message: 'Comprehensive Analytical Excel report generated successfully.' };
   } catch (e) {
     return { success: false, error: 'Excel Generation failed: ' + e.message };
+  }
+}
+
+/**
+ * Helper function to send email with user credentials
+ */
+function sendUserCredentialEmail_(toEmail, userName, username, role, tempPassword, requirePasswordChange) {
+  try {
+    if (!toEmail || !toEmail.includes('@')) return false;
+
+    const appName = "FMCA PAYABLE VOUCHER SYSTEM 2026";
+    const loginUrl = "https://fmca26pv.vercel.app";
+    const subject = "🔐 Your Account Access Credentials - " + appName;
+    
+    const changeNotice = requirePasswordChange
+      ? '<p style="color: #b91c1c; font-weight: bold; margin-top: 15px;">⚠️ Security Notice: You will be required to change this password upon your first login.</p>'
+      : '<p style="color: #15803d; margin-top: 15px;">You can sign in directly using the assigned password above.</p>';
+
+    const htmlBody = 
+      '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; color: #1e293b;">' +
+        '<div style="background: linear-gradient(135deg, #1a5f2a, #0d3c16); color: white; padding: 20px; text-align: center;">' +
+          '<h2 style="margin: 0; font-size: 20px;">Federal Medical Centre, Azare</h2>' +
+          '<p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 14px;">Payable Voucher System 2026</p>' +
+        '</div>' +
+        '<div style="padding: 24px; background: #ffffff;">' +
+          '<p>Hello <strong>' + (userName || 'Staff Member') + '</strong>,</p>' +
+          '<p>Your account access credentials have been configured by the System Administrator. Below are your account details:</p>' +
+          
+          '<div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; padding: 16px; margin: 20px 0;">' +
+            '<p style="margin: 0 0 8px 0;"><strong>Email Address:</strong> ' + toEmail + '</p>' +
+            '<p style="margin: 0 0 8px 0;"><strong>Username:</strong> ' + (username || '-') + '</p>' +
+            '<p style="margin: 0 0 8px 0;"><strong>Assigned Role:</strong> ' + (role || 'User') + '</p>' +
+            '<p style="margin: 0;"><strong>Assigned Password:</strong> <span style="font-family: monospace; font-size: 16px; background: #fee2e2; color: #b91c1c; padding: 3px 8px; border-radius: 4px; font-weight: bold;">' + tempPassword + '</span></p>' +
+          '</div>' +
+          
+          changeNotice +
+
+          '<div style="text-align: center; margin: 25px 0 15px 0;">' +
+            '<a href="' + loginUrl + '" style="background-color: #1a5f2a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Sign In to Portal</a>' +
+          '</div>' +
+          '<p style="font-size: 12px; color: #64748b; text-align: center;">Or copy this link to your browser: <a href="' + loginUrl + '">' + loginUrl + '</a></p>' +
+        '</div>' +
+        '<div style="background: #f1f5f9; padding: 12px; text-align: center; font-size: 11px; color: #64748b;">' +
+          'This is an automated notification from FMCA Payable Voucher System 2026.' +
+        '</div>' +
+      '</div>';
+
+    MailApp.sendEmail({
+      to: toEmail,
+      subject: subject,
+      htmlBody: htmlBody
+    });
+    return true;
+  } catch (e) {
+    console.log("Failed to send credential email to " + toEmail + ": " + e.message);
+    return false;
   }
 }

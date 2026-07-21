@@ -444,42 +444,95 @@ const Users = {
     },
     
     /**
-     * Reset user password
+     * Open Reset / Assign Password modal
      */
-    async resetPassword(rowIndex) {
+    resetPassword(rowIndex) {
         const user = this.users.find(u => u.rowIndex === rowIndex);
         if (!user) return;
         
-        const confirm = await Utils.confirm(
-            `Reset password for ${user.name}?\n\nThe temporary password will be set to: Welcome123`,
-            'Reset Password'
-        );
+        this.selectedUser = user;
+
+        const modal = document.getElementById('resetPasswordModal');
+        const nameSpan = document.getElementById('resetUserName');
+        const emailSpan = document.getElementById('resetUserEmail');
+        const typeSelect = document.getElementById('resetPasswordType');
+        const customGroup = document.getElementById('customPasswordGroup');
+        const customPass = document.getElementById('resetCustomPassword');
+        const requireCheck = document.getElementById('resetRequireChange');
+        const sendCheck = document.getElementById('resetSendEmail');
+
+        if (nameSpan) nameSpan.textContent = user.name || '-';
+        if (emailSpan) emailSpan.textContent = user.email || '-';
+        if (typeSelect) typeSelect.value = 'default';
+        if (customGroup) customGroup.classList.add('hidden');
+        if (customPass) customPass.value = '';
+        if (requireCheck) requireCheck.checked = false; // Default: user does not need to force change if Admin assigns
+        if (sendCheck) sendCheck.checked = true; // Send to user mailbox by default
+
+        if (modal) modal.classList.add('active');
+    },
+
+    onPasswordTypeChange() {
+        const typeSelect = document.getElementById('resetPasswordType');
+        const customGroup = document.getElementById('customPasswordGroup');
+        if (typeSelect && customGroup) {
+            if (typeSelect.value === 'custom') {
+                customGroup.classList.remove('hidden');
+            } else {
+                customGroup.classList.add('hidden');
+            }
+        }
+    },
+
+    async submitPasswordReset() {
+        if (!this.selectedUser) return;
         
-        if (!confirm) return;
-        
+        const typeSelect = document.getElementById('resetPasswordType')?.value || 'default';
+        const customPass = (document.getElementById('resetCustomPassword')?.value || '').trim();
+        const requireChange = document.getElementById('resetRequireChange')?.checked || false;
+        const sendEmail = document.getElementById('resetSendEmail')?.checked !== false;
+
+        if (typeSelect === 'custom' && !customPass) {
+            Utils.showToast('Please enter a custom password', 'error');
+            return;
+        }
+
+        const passwordToUse = typeSelect === 'custom' ? customPass : 'Welcome123';
+
         this.showLoading(true);
-        
+
         try {
-            const result = await API.updateUser(rowIndex, { resetPassword: true });
-            
+            const result = await API.updateUser(this.selectedUser.rowIndex, {
+                resetPassword: true,
+                customPassword: passwordToUse,
+                requirePasswordChange: requireChange,
+                sendEmail: sendEmail
+            });
+
             if (result.success) {
-                Utils.showToast(result.message || 'Password reset successfully', 'success');
+                this.closeModal('resetPasswordModal');
+                
+                const emailNotice = result.emailSent
+                    ? ` Credentials sent directly to ${this.selectedUser.email}`
+                    : '';
+                Utils.showToast((result.message || 'Password assigned successfully.') + emailNotice, 'success');
+
                 this.showCredentialsModal({
-                    name: user.name,
-                    email: user.email,
-                    username: user.username || user.email.split('@')[0],
-                    role: user.role,
-                    password: 'Welcome123',
-                    message: `Password reset successfully for ${user.name}. Here are the temporary credentials:`
+                    name: this.selectedUser.name,
+                    email: this.selectedUser.email,
+                    username: this.selectedUser.username || this.selectedUser.email.split('@')[0],
+                    role: this.selectedUser.role,
+                    password: passwordToUse,
+                    message: `Password configured for ${this.selectedUser.name}.${result.emailSent ? ' An email has also been sent to their mailbox.' : ''}`
                 });
             } else {
-                Utils.showToast(result.error || 'Failed to reset password', 'error');
+                Utils.showToast(result.error || 'Failed to assign password', 'error');
             }
         } catch (error) {
-            console.error('Reset password error:', error);
-            Utils.showToast('Error resetting password', 'error');
+            console.error('Password reset error:', error);
+            Utils.showToast('Error assigning password', 'error');
         }
-        
+
         this.showLoading(false);
     },
 
