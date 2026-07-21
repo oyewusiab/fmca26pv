@@ -431,8 +431,12 @@ function doPost(e) {
             case 'updateTaxSchedule':
                 result = updateTaxSchedule(token, payload.scheduleId, payload.updates);
                 break;
-            case 'getTaxCompliance':
-                result = getTaxCompliance(token, payload.year);
+            // VOUCHER COMMENTS
+            case 'addVoucherComments':
+                result = addVoucherComments(token, payload.voucherNumbers, payload.commentText);
+                break;
+            case 'getVoucherComments':
+                result = getVoucherComments(token, payload.voucherNo);
                 break;
 
             default:
