@@ -98,6 +98,14 @@ const Reports = {
             return;
         }
 
+        const isAuditUnit = user && (user.role === CONFIG.ROLES.AUDIT_UNIT);
+        if (isAuditUnit) {
+            const requestsBtn = document.querySelector('.tab-btn[data-tab="requests"]');
+            if (requestsBtn) requestsBtn.style.display = 'none';
+            const requestsSection = document.getElementById('officialDebtProfileSection');
+            if (requestsSection) requestsSection.style.display = 'none';
+        }
+
         this.setupSidebar();
         this.setupEventListeners();
         await this.loadSystemConfig();
@@ -1843,13 +1851,6 @@ const Reports = {
                 <div class="stat-value">${Utils.formatNumber(stats.revalidatedVouchers)}</div>
                 <div class="stat-subvalue">Old number present or marked available</div>
             </div>
-
-            <!-- Revalidated Without Old Voucher Number -->
-            <div class="stat-card">
-                <div class="stat-label">Revalidated (No Old Voucher No.)</div>
-                <div class="stat-value">${Utils.formatNumber(stats.revalidatedWithoutOldNumber || 0)}</div>
-                <div class="stat-subvalue">Old number not available</div>
-            </div>
         `;
     },
 
@@ -2492,8 +2493,7 @@ const Reports = {
         csv += `Total Debt,${s.totalDebt}\n`;
         csv += `Average Payment Rate (%),${s.averagePaymentPercent}\n`;
         csv += `Revalidated Vouchers (Count),${s.revalidatedVouchers}\n`;
-        csv += `Revalidated Criteria,OLD VOUCHER NUMBER present OR OLD VOUCHER NO AVAILABLE? = YES\n`;
-        csv += `Revalidated (No Old Voucher No.),${s.revalidatedWithoutOldNumber || 0}\n\n`;
+        csv += `Revalidated Criteria,OLD VOUCHER NUMBER present OR OLD VOUCHER NO AVAILABLE? = YES\n\n`;
 
         // CATEGORY BREAKDOWN
         csv += 'CATEGORY BREAKDOWN\n';
@@ -3118,6 +3118,11 @@ const Reports = {
     },
 
     changeTab(tabName) {
+        const user = Auth.getUser();
+        if (user && user.role === CONFIG.ROLES.AUDIT_UNIT && tabName === 'requests') {
+            tabName = 'summary';
+        }
+
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.classList.remove('active');
             if (btn.getAttribute('data-tab') === tabName) {

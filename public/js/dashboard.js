@@ -178,7 +178,7 @@ const Dashboard = {
             this.applyMasking();
 
             await this.loadPendingActions();
-
+            await this.renderRecentMentions();
         } catch (error) {
             console.error('Dashboard load error:', error);
             Utils.showToast('Error loading dashboard.', 'error');
@@ -565,6 +565,47 @@ const Dashboard = {
 
         html += '</div>';
         container.innerHTML = html;
+    },
+
+    async renderRecentMentions() {
+        const container = document.getElementById('recentMentionsWidget');
+        if (!container) return;
+
+        try {
+            const result = await API.getNotifications(false);
+            if (result.success) {
+                const mentions = (result.notifications || []).filter(n => 
+                    n.type === 'mention' || 
+                    String(n.title || '').includes('Mentioned') || 
+                    String(n.message || '').includes('commented')
+                ).slice(0, 5);
+
+                if (mentions.length === 0) {
+                    container.innerHTML = `<p class="text-muted text-center" style="margin: 10px 0; font-size: 13px;">No recent mentions or tagged comments.</p>`;
+                    return;
+                }
+
+                let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                mentions.forEach(m => {
+                    const safeTitle = (Utils.escapeHtml || (s => s))(m.title || '');
+                    const safeMsg = (Utils.escapeHtml || (s => s))(m.message || '');
+                    html += `
+                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #0284c7; padding: 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                            <div>
+                                <strong style="font-size: 13px; color: #0f172a;"><i class="fas fa-comment text-primary"></i> ${safeTitle}</strong>
+                                <div style="font-size: 12px; color: #475569; margin-top: 2px;">${safeMsg}</div>
+                            </div>
+                            <a href="${m.link || 'vouchers.html'}" class="btn btn-sm btn-primary" style="white-space: nowrap;"><i class="fas fa-arrow-right"></i> View</a>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+            }
+        } catch (e) {
+            console.error('renderRecentMentions error:', e);
+            if (container) container.innerHTML = `<p class="text-muted text-center">No recent mentions.</p>`;
+        }
     }
 };
 

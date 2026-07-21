@@ -727,6 +727,187 @@ const Vouchers = {
   updateSelection() {
     const checked = document.querySelectorAll('.voucher-checkbox:checked');
     this.selectedVouchers = Array.from(checked).map(cb => parseInt(cb.value, 10));
+
+    const bulkBar = document.getElementById('bulkActionBar');
+    const countSpan = document.getElementById('selectedVoucherCount');
+    if (bulkBar && countSpan) {
+      if (this.selectedVouchers.length > 0) {
+        countSpan.textContent = this.selectedVouchers.length;
+        bulkBar.classList.remove('hidden');
+      } else {
+        bulkBar.classList.add('hidden');
+      }
+    }
+  },
+
+  clearSelection() {
+    this.selectedVouchers = [];
+    document.querySelectorAll('.voucher-checkbox').forEach(cb => cb.checked = false);
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) selectAll.checked = false;
+    this.updateSelection();
+  },
+
+  openBatchCommentModal() {
+    if (!this.selectedVouchers || this.selectedVouchers.length === 0) {
+      Utils.showToast('No vouchers selected', 'warning');
+      return;
+    }
+
+    const modal = document.getElementById('batchCommentModal');
+    const countSpan = document.getElementById('batchCommentTargetCount');
+    const textInput = document.getElementById('batchCommentText');
+
+    if (countSpan) countSpan.textContent = this.selectedVouchers.length;
+    if (textInput) textInput.value = '';
+
+    if (modal) modal.classList.add('active');
+  },
+
+  appendTagToBatch(tag) {
+    const textInput = document.getElementById('batchCommentText');
+    if (textInput) {
+      const current = textInput.value;
+      if (current && !current.endsWith(' ')) {
+        textInput.value += ' ' + tag + ' ';
+      } else {
+        textInput.value += tag + ' ';
+      }
+      textInput.focus();
+    }
+  },
+
+  async submitBatchComment() {
+    if (!this.selectedVouchers || this.selectedVouchers.length === 0) {
+      Utils.showToast('No vouchers selected', 'error');
+      return;
+    }
+
+    const textInput = document.getElementById('batchCommentText');
+    const commentText = textInput ? textInput.value.trim() : '';
+
+    if (!commentText) {
+      Utils.showToast('Please enter a comment message', 'error');
+      return;
+    }
+
+    const selectedVoucherNumbers = this.selectedVouchers.map(rowIndex => {
+      const v = this.vouchers.find(x => x.rowIndex === rowIndex);
+      return v ? v.accountOrMail : null;
+    }).filter(Boolean);
+
+    if (selectedVoucherNumbers.length === 0) {
+      Utils.showToast('Selected vouchers could not be identified', 'error');
+      return;
+    }
+
+    this.showLoading(true);
+
+    try {
+      const result = await API.addVoucherComments(selectedVoucherNumbers, commentText);
+      if (result.success) {
+        Utils.showToast(result.message || 'Batch comment posted successfully!', 'success');
+        this.closeModal('batchCommentModal');
+        this.clearSelection();
+      } else {
+        Utils.showToast(result.error || 'Failed to post batch comment', 'error');
+      }
+    } catch (e) {
+      console.error('submitBatchComment error:', e);
+      Utils.showToast('Error posting batch comment', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  },
+
+  appendTagToSingle(tag) {
+    const textInput = document.getElementById('singleCommentText');
+    if (textInput) {
+      const current = textInput.value;
+      if (current && !current.endsWith(' ')) {
+        textInput.value += ' ' + tag + ' ';
+      } else {
+        textInput.value += tag + ' ';
+      }
+      textInput.focus();
+    }
+  },
+
+  async submitSingleComment(voucherNo) {
+    const textInput = document.getElementById('singleCommentText');
+    const commentText = textInput ? textInput.value.trim() : '';
+
+    if (!commentText) {
+      Utils.showToast('Please enter a comment message', 'error');
+      return;
+    }
+
+    this.showLoading(true);
+
+    try {
+      const result = await API.addVoucherComments([voucherNo], commentText);
+      if (result.success) {
+        Utils.showToast(result.message || 'Comment posted successfully!', 'success');
+        if (textInput) textInput.value = '';
+        await this.renderVoucherComments(voucherNo);
+      } else {
+        Utils.showToast(result.error || 'Failed to post comment', 'error');
+      }
+    } catch (e) {
+      console.error('submitSingleComment error:', e);
+      Utils.showToast('Error posting comment', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  },
+
+  async renderVoucherComments(voucherNo) {
+    const container = document.getElementById('voucherCommentsList');
+    const countBadge = document.getElementById('commentCountBadge');
+
+    if (!container) return;
+
+    try {
+      const result = await API.getVoucherComments(voucherNo);
+      if (result.success) {
+        const comments = result.comments || [];
+        if (countBadge) countBadge.textContent = `${comments.length} Comment(s)`;
+
+        if (comments.length === 0) {
+          container.innerHTML = `<p class="text-muted text-center" style="margin: 10px 0; font-size: 13px;">No comments yet. Start a discussion above!</p>`;
+          return;
+        }
+
+        let html = '';
+        comments.forEach(c => {
+          // Format @mentions in text
+          let formattedText = this.escapeHtml(c.commentText || '');
+          formattedText = formattedText.replace(/@([\w.-]+)/gi, '<span class="badge" style="background:#dbeafe; color:#1e40af; border:none; padding:1px 5px; font-size:11px;">@$1</span>');
+
+          const roleClass = (c.authorRole || '').toLowerCase().replace(/\s+/g, '-');
+
+          html += `
+            <div style="background: white; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div class="user-avatar-small" style="width: 24px; height: 24px; font-size: 10px;">${Utils.getInitials(c.authorName)}</div>
+                  <strong>${this.escapeHtml(c.authorName)}</strong>
+                  <span class="role-badge role-${roleClass}" style="font-size: 10px; padding: 2px 6px;">${this.escapeHtml(c.authorRole)}</span>
+                </div>
+                <span class="text-muted" style="font-size: 11px;"><i class="far fa-clock"></i> ${Utils.formatDateTime(c.timestamp)}</span>
+              </div>
+              <div style="font-size: 13px; color: #334155; line-height: 1.4; white-space: pre-wrap;">${formattedText}</div>
+            </div>
+          `;
+        });
+
+        container.innerHTML = html;
+        container.scrollTop = container.scrollHeight;
+      }
+    } catch (e) {
+      console.error('renderVoucherComments error:', e);
+      if (container) container.innerHTML = `<p class="text-danger text-center" style="margin: 10px 0; font-size: 12px;">Failed to load comments</p>`;
+    }
   },
 
   getSortedVouchers() {
@@ -1077,10 +1258,44 @@ const Vouchers = {
         <div id="payeeUnpaidContainer" class="payee-unpaid-warning" style="display:none;">
            <!-- Content loaded asynchronously -->
         </div>
+
+        <!-- Comments & Discussion Section -->
+        <div class="detail-section no-print" style="margin-top: 20px;">
+          <div class="detail-section-title" style="display: flex; align-items: center; justify-content: space-between;">
+            <span><i class="fas fa-comments text-primary"></i> Comments & Discussion</span>
+            <span class="badge badge-info" id="commentCountBadge">0 Comments</span>
+          </div>
+          
+          <div id="voucherCommentsList" style="max-height: 250px; overflow-y: auto; padding: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-sm); margin-bottom: 12px;">
+            <p class="text-muted text-center" style="margin: 10px 0; font-size: 13px;">Loading comments...</p>
+          </div>
+
+          <!-- Add Comment Form -->
+          <div style="background: #ffffff; padding: 12px; border: 1px solid #e2e8f0; border-radius: var(--radius-sm);">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; align-items: center;">
+              <span class="text-muted" style="font-size: 11px; font-weight: 600;">Quick Tags:</span>
+              <button type="button" class="badge" style="cursor: pointer; background: #e0e7ff; color: #3730a3; border:none;" onclick="Vouchers.appendTagToSingle('@all')">@all</button>
+              <button type="button" class="badge" style="cursor: pointer; background: #fef3c7; color: #92400e; border:none;" onclick="Vouchers.appendTagToSingle('@audit')">@audit</button>
+              <button type="button" class="badge" style="cursor: pointer; background: #dcfce7; color: #166534; border:none;" onclick="Vouchers.appendTagToSingle('@tax')">@tax</button>
+              <button type="button" class="badge" style="cursor: pointer; background: #e0f2fe; color: #075985; border:none;" onclick="Vouchers.appendTagToSingle('@cpo')">@cpo</button>
+              <button type="button" class="badge" style="cursor: pointer; background: #f3e8ff; color: #6b21a8; border:none;" onclick="Vouchers.appendTagToSingle('@payablehead')">@payablehead</button>
+              <button type="button" class="badge" style="cursor: pointer; background: #fae8ff; color: #86198f; border:none;" onclick="Vouchers.appendTagToSingle('@payablestaff')">@payablestaff</button>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <textarea class="form-control" id="singleCommentText" rows="2" style="font-size: 13px;" placeholder="Add a comment... Use @audit, @tax, @all, or @username to tag team members"></textarea>
+              <button type="button" class="btn btn-primary" style="white-space: nowrap; height: fit-content;" onclick="Vouchers.submitSingleComment('${voucher.accountOrMail}')">
+                <i class="fas fa-paper-plane"></i> Comment
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
     modal.classList.add('active');
+
+    // Load voucher comments asynchronously
+    this.renderVoucherComments(voucher.accountOrMail);
 
     // Load unpaid stats asynchronously (non-blocking)
     this.loadPayeeUnpaidStats(voucher.payee);

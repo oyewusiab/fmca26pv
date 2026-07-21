@@ -601,6 +601,19 @@
       return await this.post('updateMyProfile', { profile });
     };
   }
+
+  // Voucher Comments
+  if (!API.addVoucherComments) {
+    API.addVoucherComments = async function (voucherNumbers, commentText) {
+      return await this.post('addVoucherComments', { voucherNumbers, commentText });
+    };
+  }
+
+  if (!API.getVoucherComments) {
+    API.getVoucherComments = async function (voucherNo) {
+      return await this.get('getVoucherComments', { voucherNo });
+    };
+  }
 })();
 
 // ==================== UTILS (SAFE MERGE) ====================

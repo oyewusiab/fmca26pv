@@ -308,6 +308,7 @@ const Notifications = {
       const isRead = Boolean(notification.read);
       if (readFilter === 'UNREAD' && isRead) return false;
       if (readFilter === 'READ' && !isRead) return false;
+      if (readFilter === 'MENTIONS' && notification.type !== 'mention' && !String(notification.title || '').includes('Mentioned') && !String(notification.message || '').includes('commented')) return false;
 
       if (query) {
         const title = (notification.title || '').toLowerCase();

@@ -166,6 +166,14 @@ function doGet(e) {
                 result = getNotifications(params.token, params.onlyUnread === 'true');
                 break;
 
+            // ---- VOUCHER COMMENTS ----
+            case 'addVoucherComments':
+                result = addVoucherComments(params.token, params.voucherNumbers, params.commentText);
+                break;
+            case 'getVoucherComments':
+                result = getVoucherComments(params.token, params.voucherNo);
+                break;
+
             // ---- AUDIT ----
             case 'getAuditTrail':
                 result = getAuditTrail(params.token, parseInt(params.limit) || 50, parseInt(params.offset) || 0);
@@ -5663,5 +5671,200 @@ function sendUserCredentialEmail_(toEmail, userName, username, role, tempPasswor
   } catch (e) {
     console.log("Failed to send credential email to " + toEmail + ": " + e.message);
     return false;
+  }
+}
+
+/**
+ * Add comment to single or multiple vouchers with @mention notifications
+ */
+function addVoucherComments(token, voucherNumbers, commentText) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (!commentText || !String(commentText).trim()) {
+      return { success: false, error: 'Comment text cannot be empty' };
+    }
+
+    let list = [];
+    if (Array.isArray(voucherNumbers)) {
+      list = voucherNumbers;
+    } else if (typeof voucherNumbers === 'string' && voucherNumbers.trim()) {
+      try {
+        list = JSON.parse(voucherNumbers);
+      } catch (e) {
+        list = [voucherNumbers];
+      }
+    }
+
+    if (!list || list.length === 0) {
+      return { success: false, error: 'No valid voucher numbers provided' };
+    }
+
+    const cleanText = String(commentText).trim();
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    
+    // Get or create VOUCHER_COMMENTS sheet
+    let commentSheet = ss.getSheetByName('VOUCHER_COMMENTS');
+    if (!commentSheet) {
+      commentSheet = ss.insertSheet('VOUCHER_COMMENTS');
+      commentSheet.appendRow(['COMMENT_ID', 'VOUCHER_NO', 'ROW_INDEX', 'AUTHOR_NAME', 'AUTHOR_EMAIL', 'AUTHOR_ROLE', 'COMMENT_TEXT', 'MENTIONS', 'CREATED_AT']);
+      commentSheet.getRange(1, 1, 1, 9).setFontWeight('bold').setBackground('#f3f3f3');
+    }
+
+    // Parse @mentions
+    const tagMatches = cleanText.match(/@([\w.-]+)/gi) || [];
+    const uniqueTags = Array.from(new Set(tagMatches.map(t => t.toLowerCase())));
+
+    // Resolve tagged emails
+    const targetEmails = new Set();
+    if (uniqueTags.length > 0) {
+      let usersSheet = ss.getSheetByName(CONFIG.SHEETS.USERS);
+      let userData = usersSheet ? usersSheet.getDataRange().getValues() : [];
+
+      uniqueTags.forEach(tag => {
+        const tagClean = tag.replace('@', '').toLowerCase();
+        
+        // @all tag
+        if (tagClean === 'all') {
+          for (let i = 1; i < userData.length; i++) {
+            const uEmail = String(userData[i][CONFIG.USER_COLUMNS.EMAIL - 1] || '').trim().toLowerCase();
+            if (uEmail) targetEmails.add(uEmail);
+          }
+          return;
+        }
+
+        // Role tags
+        let targetRole = null;
+        if (['puhead', 'payablehead', 'payableunithead'].includes(tagClean)) targetRole = CONFIG.ROLES.PAYABLE_HEAD;
+        else if (['pustaff', 'payablestaff', 'payableunitstaff'].includes(tagClean)) targetRole = CONFIG.ROLES.PAYABLE_STAFF;
+        else if (['cpo'].includes(tagClean)) targetRole = CONFIG.ROLES.CPO;
+        else if (['audit', 'auditunit'].includes(tagClean)) targetRole = CONFIG.ROLES.AUDIT_UNIT;
+        else if (['tax', 'taxunit', 'tustaff'].includes(tagClean)) targetRole = CONFIG.ROLES.TAX_UNIT;
+        else if (['dfa', 'ddfa'].includes(tagClean)) targetRole = CONFIG.ROLES.DDFA_DFA;
+        else if (['admin'].includes(tagClean)) targetRole = CONFIG.ROLES.ADMIN;
+
+        if (targetRole) {
+          for (let i = 1; i < userData.length; i++) {
+            const uRole = String(userData[i][CONFIG.USER_COLUMNS.ROLE - 1] || '');
+            const uEmail = String(userData[i][CONFIG.USER_COLUMNS.EMAIL - 1] || '').trim().toLowerCase();
+            if (uRole === targetRole && uEmail) targetEmails.add(uEmail);
+          }
+          return;
+        }
+
+        // User / email / username tags
+        for (let i = 1; i < userData.length; i++) {
+          const uEmail = String(userData[i][CONFIG.USER_COLUMNS.EMAIL - 1] || '').trim().toLowerCase();
+          const uName = String(userData[i][CONFIG.USER_COLUMNS.NAME - 1] || '').trim().toLowerCase();
+          const uUsername = CONFIG.USER_COLUMNS.USERNAME ? String(userData[i][CONFIG.USER_COLUMNS.USERNAME - 1] || '').trim().toLowerCase() : '';
+
+          if (uEmail === tagClean || uUsername === tagClean || uEmail.split('@')[0] === tagClean) {
+            if (uEmail) targetEmails.add(uEmail);
+          }
+        }
+      });
+    }
+
+    // Do not notify self
+    targetEmails.delete(String(session.email).toLowerCase().trim());
+
+    // Get or create NOTIFICATIONS sheet
+    let notifSheet = ss.getSheetByName('NOTIFICATIONS');
+    if (!notifSheet) {
+      notifSheet = ss.insertSheet('NOTIFICATIONS');
+      notifSheet.appendRow(['TIMESTAMP', 'USER_EMAIL', 'TITLE', 'MESSAGE', 'LINK', 'TYPE', 'READ']);
+    }
+
+    const timestamp = new Date();
+
+    // Insert comments & notifications
+    list.forEach(vNo => {
+      const voucherStr = String(vNo).trim();
+      const commentId = 'CMT_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+
+      commentSheet.appendRow([
+        commentId,
+        voucherStr,
+        '',
+        session.name || session.email,
+        session.email,
+        session.role,
+        cleanText,
+        JSON.stringify(uniqueTags),
+        timestamp
+      ]);
+
+      // Create notification for tagged users
+      targetEmails.forEach(recipEmail => {
+        const notifTitle = '💬 Mentioned in Voucher Comment: ' + voucherStr;
+        const notifMsg = (session.name || session.email) + ' commented: "' + (cleanText.length > 70 ? cleanText.substring(0, 70) + '...' : cleanText) + '"';
+        const notifLink = 'vouchers.html?voucher=' + encodeURIComponent(voucherStr);
+
+        notifSheet.appendRow([
+          timestamp,
+          recipEmail,
+          notifTitle,
+          notifMsg,
+          notifLink,
+          'mention',
+          false
+        ]);
+      });
+    });
+
+    return {
+      success: true,
+      message: 'Comment posted on ' + list.length + ' voucher(s).' + (targetEmails.size > 0 ? ' Notifications sent to ' + targetEmails.size + ' user(s).' : ''),
+      count: list.length,
+      notifiedUsersCount: targetEmails.size
+    };
+  } catch (error) {
+    return { success: false, error: 'Failed to post comment: ' + error.message };
+  }
+}
+
+/**
+ * Get comments for a specific voucher
+ */
+function getVoucherComments(token, voucherNo) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (!voucherNo) return { success: true, comments: [] };
+
+    const cleanVNo = String(voucherNo).trim().toLowerCase();
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    const commentSheet = ss.getSheetByName('VOUCHER_COMMENTS');
+
+    if (!commentSheet || commentSheet.getLastRow() <= 1) {
+      return { success: true, comments: [] };
+    }
+
+    const data = commentSheet.getRange(2, 1, commentSheet.getLastRow() - 1, 9).getValues();
+    const comments = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const rowVNo = String(row[1] || '').trim().toLowerCase();
+
+      if (rowVNo === cleanVNo) {
+        comments.push({
+          commentId: row[0],
+          voucherNo: row[1],
+          authorName: row[3] || 'Staff Member',
+          authorEmail: row[4] || '',
+          authorRole: row[5] || 'User',
+          commentText: row[6] || '',
+          mentions: row[7] ? (typeof row[7] === 'string' ? JSON.parse(row[7] || '[]') : row[7]) : [],
+          timestamp: row[8]
+        });
+      }
+    }
+
+    return { success: true, comments: comments };
+  } catch (error) {
+    return { success: false, error: 'Failed to load comments: ' + error.message };
   }
 }

@@ -700,6 +700,21 @@
                 <div class="card-body hidden" id="pendingDeletionsList"></div>
             </div>
 
+            <!-- Bulk Selection Action Bar -->
+            <div class="card mb-2 hidden" id="bulkActionBar" style="background: #e0f2fe; border: 1px solid #0284c7; padding: 10px 15px; border-radius: var(--radius-sm); align-items: center; justify-content: space-between; display: flex; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <strong style="color: #0369a1;"><i class="fas fa-check-square"></i> <span id="selectedVoucherCount">0</span> voucher(s) selected</strong>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-sm btn-primary" onclick="Vouchers.openBatchCommentModal()">
+                        <i class="fas fa-comment-dots"></i> Add Batch Comment
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="Vouchers.clearSelection()">
+                        Clear Selection
+                    </button>
+                </div>
+            </div>
+
             <div style="margin-bottom: 15px; color: var(--text-muted);">
                 <span id="voucherCount">Loading...</span>
             </div>
@@ -1381,6 +1396,43 @@
                 <button class="btn btn-secondary" onclick="Vouchers.closeModal('rejectDeleteModal')">Cancel</button>
                 <button class="btn btn-warning" onclick="Vouchers.submitRejectDelete()">
                     <i class="fas fa-times"></i> Reject Request
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Comment Modal -->
+    <div class="modal-overlay" id="batchCommentModal">
+        <div class="modal" style="max-width: 520px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, var(--primary-color), #0d3c16); color: white;">
+                <h3 class="modal-title" style="color: white; display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-comment-dots"></i> Add Batch Comment
+                </h3>
+                <button type="button" class="modal-close" onclick="Vouchers.closeModal('batchCommentModal')" style="color: white;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info mb-2" style="font-size: 12px;">
+                    <i class="fas fa-info-circle"></i> Posting comment to <strong><span id="batchCommentTargetCount">0</span> selected vouchers</strong>.<br>
+                    Use <strong>@all</strong>, <strong>@audit</strong>, <strong>@tax</strong>, <strong>@cpo</strong>, <strong>@payablehead</strong>, or <strong>@payablestaff</strong> to notify team members.
+                </div>
+                <div class="form-group">
+                    <label for="batchCommentText">Comment Message <span class="required">*</span></label>
+                    <textarea class="form-control" id="batchCommentText" rows="4" placeholder="e.g., @audit @tax Please review supporting documentation for these vouchers..."></textarea>
+                </div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;" class="mt-1">
+                    <span class="text-muted" style="font-size: 11px;">Quick Tags:</span>
+                    <button type="button" class="badge" style="cursor: pointer; background: #e0e7ff; color: #3730a3; border:none;" onclick="Vouchers.appendTagToBatch('@all')">@all</button>
+                    <button type="button" class="badge" style="cursor: pointer; background: #fef3c7; color: #92400e; border:none;" onclick="Vouchers.appendTagToBatch('@audit')">@audit</button>
+                    <button type="button" class="badge" style="cursor: pointer; background: #dcfce7; color: #166534; border:none;" onclick="Vouchers.appendTagToBatch('@tax')">@tax</button>
+                    <button type="button" class="badge" style="cursor: pointer; background: #e0f2fe; color: #075985; border:none;" onclick="Vouchers.appendTagToBatch('@cpo')">@cpo</button>
+                    <button type="button" class="badge" style="cursor: pointer; background: #f3e8ff; color: #6b21a8; border:none;" onclick="Vouchers.appendTagToBatch('@payablehead')">@payablehead</button>
+                    <button type="button" class="badge" style="cursor: pointer; background: #fae8ff; color: #86198f; border:none;" onclick="Vouchers.appendTagToBatch('@payablestaff')">@payablestaff</button>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button type="button" class="btn btn-secondary" onclick="Vouchers.closeModal('batchCommentModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="Vouchers.submitBatchComment()">
+                    <i class="fas fa-paper-plane"></i> Submit Batch Comment
                 </button>
             </div>
         </div>
