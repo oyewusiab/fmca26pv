@@ -703,6 +703,18 @@
       return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     };
 
+  Utils.escapeHtml =
+    Utils.escapeHtml ||
+    function (str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    };
+
   Utils.debounce =
     Utils.debounce ||
     function (func, wait = 300) {

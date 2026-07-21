@@ -151,6 +151,16 @@ const Users = {
         this.renderUsersList();
     },
     
+    escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    },
+
     /**
      * Render users list
      */
@@ -241,20 +251,20 @@ const Users = {
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <div class="user-avatar-small">${Utils.getInitials(user.name)}</div>
                             <div>
-                                <strong>${Utils.escapeHtml(user.name)}</strong>
+                                <strong>${this.escapeHtml(user.name)}</strong>
                             </div>
                         </div>
                     </td>
                     <td>
-                        <div>${Utils.escapeHtml(user.email)}</div>
-                        ${usernameText ? `<div style="font-size:11px; color:#666;">${Utils.escapeHtml(usernameText)}</div>` : ''}
+                        <div>${this.escapeHtml(user.email)}</div>
+                        ${usernameText ? `<div style="font-size:11px; color:#666;">${this.escapeHtml(usernameText)}</div>` : ''}
                     </td>
                     <td>
-                        <div>${Utils.escapeHtml(deptText)}</div>
-                        ${phoneText ? `<div style="font-size:11px; color:#666;"><i class="fas fa-phone-alt" style="font-size:10px;"></i> ${Utils.escapeHtml(phoneText)}</div>` : ''}
+                        <div>${this.escapeHtml(deptText)}</div>
+                        ${phoneText ? `<div style="font-size:11px; color:#666;"><i class="fas fa-phone-alt" style="font-size:10px;"></i> ${this.escapeHtml(phoneText)}</div>` : ''}
                     </td>
-                    <td><span class="role-badge role-${roleClass}">${Utils.escapeHtml(user.role)}</span></td>
-                    <td>${statusBadge}</td>
+                    <td><span class="role-badge role-${roleClass}">${this.escapeHtml(user.role)}</span></td>
+                    <td>${statusBadge}</td>`;
                     <td style="text-align: right;">
                         <div class="action-buttons" style="justify-content: flex-end;">
                             <button class="btn btn-sm btn-primary" onclick="Users.editUser(${user.rowIndex})" title="Edit User">
