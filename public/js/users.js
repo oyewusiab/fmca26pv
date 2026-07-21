@@ -264,7 +264,7 @@ const Users = {
                         ${phoneText ? `<div style="font-size:11px; color:#666;"><i class="fas fa-phone-alt" style="font-size:10px;"></i> ${this.escapeHtml(phoneText)}</div>` : ''}
                     </td>
                     <td><span class="role-badge role-${roleClass}">${this.escapeHtml(user.role)}</span></td>
-                    <td>${statusBadge}</td>`;
+                    <td>${statusBadge}</td>
                     <td style="text-align: right;">
                         <div class="action-buttons" style="justify-content: flex-end;">
                             <button class="btn btn-sm btn-primary" onclick="Users.editUser(${user.rowIndex})" title="Edit User">
