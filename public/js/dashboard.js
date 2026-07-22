@@ -178,7 +178,6 @@ const Dashboard = {
             this.applyMasking();
 
             await this.loadPendingActions();
-            await this.renderRecentMentions();
         } catch (error) {
             console.error('Dashboard load error:', error);
             Utils.showToast('Error loading dashboard.', 'error');
@@ -477,18 +476,27 @@ const Dashboard = {
         // Fetch all 3 sources concurrently — none triggers a spreadsheet scan
         const [actionRes, notifRes, deletionRes] = await Promise.allSettled([
             API.getActionItemCount({ status: 'PENDING' }),
-            API.getNotifications(true),
+            API.getNotifications(false),
             isApprover ? API.getPendingDeletions() : Promise.resolve({ success: true, vouchers: [] })
         ]);
 
         const actionCount = actionRes.status === 'fulfilled' && actionRes.value?.success
             ? (actionRes.value.count || 0) : 0;
-        const unreadCount = notifRes.status === 'fulfilled' && notifRes.value?.success
-            ? (notifRes.value.unreadCount || 0) : 0;
+        
+        const notifList = (notifRes.status === 'fulfilled' && notifRes.value?.success && Array.isArray(notifRes.value.notifications))
+            ? notifRes.value.notifications
+            : [];
+
+        const unreadMentions = notifList.filter(n => !n.read && (n.type === 'mention' || String(n.title || '').includes('Mentioned') || String(n.message || '').includes('commented')));
+        const unreadOthers = notifList.filter(n => !n.read && !(n.type === 'mention' || String(n.title || '').includes('Mentioned') || String(n.message || '').includes('commented')));
+
+        const mentionCount = unreadMentions.length;
+        const otherNotifCount = unreadOthers.length;
+
         const deletionCount = deletionRes.status === 'fulfilled' && deletionRes.value?.success
             ? (deletionRes.value.vouchers?.length || 0) : 0;
 
-        const totalCount = actionCount + unreadCount + deletionCount;
+        const totalCount = actionCount + mentionCount + otherNotifCount + deletionCount;
 
         // Update badge
         const badge = document.getElementById('pendingActionsTotalBadge');
@@ -535,16 +543,30 @@ const Dashboard = {
               </div>`;
         }
 
-        // ── Unread Notifications row ──
-        if (unreadCount > 0) {
+        // ── Mentions & Tagged Comments row ──
+        if (mentionCount > 0) {
+            html += `
+              <div class="pending-action-row info" style="border-left: 4px solid #0284c7;">
+                <div class="pending-action-icon" style="color: #0284c7;"><i class="fas fa-comment-dots"></i></div>
+                <div class="pending-action-content">
+                  <div class="pending-action-title">Mentions & tagged comments</div>
+                  <div class="pending-action-desc">${mentionCount} unread comment${mentionCount !== 1 ? 's' : ''} tagging your account.</div>
+                </div>
+                <div class="pending-action-count info" style="background: #e0f2fe; color: #0369a1;">${mentionCount > 99 ? '99+' : mentionCount}</div>
+                <a href="notifications.html" class="pending-action-link">View Discussions <i class="fas fa-arrow-right"></i></a>
+              </div>`;
+        }
+
+        // ── Other Unread Notifications row ──
+        if (otherNotifCount > 0) {
             html += `
               <div class="pending-action-row info">
                 <div class="pending-action-icon"><i class="fas fa-bell"></i></div>
                 <div class="pending-action-content">
                   <div class="pending-action-title">Unread notifications</div>
-                  <div class="pending-action-desc">${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''} await your review.</div>
+                  <div class="pending-action-desc">${otherNotifCount} unread notification${otherNotifCount !== 1 ? 's' : ''} await your review.</div>
                 </div>
-                <div class="pending-action-count info">${unreadCount > 99 ? '99+' : unreadCount}</div>
+                <div class="pending-action-count info">${otherNotifCount > 99 ? '99+' : otherNotifCount}</div>
                 <a href="notifications.html" class="pending-action-link">View <i class="fas fa-arrow-right"></i></a>
               </div>`;
         }
@@ -565,47 +587,6 @@ const Dashboard = {
 
         html += '</div>';
         container.innerHTML = html;
-    },
-
-    async renderRecentMentions() {
-        const container = document.getElementById('recentMentionsWidget');
-        if (!container) return;
-
-        try {
-            const result = await API.getNotifications(false);
-            if (result.success) {
-                const mentions = (result.notifications || []).filter(n => 
-                    n.type === 'mention' || 
-                    String(n.title || '').includes('Mentioned') || 
-                    String(n.message || '').includes('commented')
-                ).slice(0, 5);
-
-                if (mentions.length === 0) {
-                    container.innerHTML = `<p class="text-muted text-center" style="margin: 10px 0; font-size: 13px;">No recent mentions or tagged comments.</p>`;
-                    return;
-                }
-
-                let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
-                mentions.forEach(m => {
-                    const safeTitle = (Utils.escapeHtml || (s => s))(m.title || '');
-                    const safeMsg = (Utils.escapeHtml || (s => s))(m.message || '');
-                    html += `
-                        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #0284c7; padding: 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-                            <div>
-                                <strong style="font-size: 13px; color: #0f172a;"><i class="fas fa-comment text-primary"></i> ${safeTitle}</strong>
-                                <div style="font-size: 12px; color: #475569; margin-top: 2px;">${safeMsg}</div>
-                            </div>
-                            <a href="${m.link || 'vouchers.html'}" class="btn btn-sm btn-primary" style="white-space: nowrap;"><i class="fas fa-arrow-right"></i> View</a>
-                        </div>
-                    `;
-                });
-                html += '</div>';
-                container.innerHTML = html;
-            }
-        } catch (e) {
-            console.error('renderRecentMentions error:', e);
-            if (container) container.innerHTML = `<p class="text-muted text-center">No recent mentions.</p>`;
-        }
     }
 };
 

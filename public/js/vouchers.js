@@ -1569,6 +1569,17 @@ const Vouchers = {
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
 
+    // In edit mode, if detected duplicate is the same voucher being edited, clear it
+    if (this.isEditMode && this.selectedVoucher && this._detectedDuplicateVoucher) {
+      const detectedNo = String(this._detectedDuplicateVoucher.accountOrMail || '').trim().toUpperCase();
+      const originalNo = String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase();
+      const detectedRow = String(this._detectedDuplicateVoucher.rowIndex || '');
+      const originalRow = String(this.selectedVoucher.rowIndex || '');
+      if (detectedRow === originalRow || detectedNo === originalNo) {
+        this._detectedDuplicateVoucher = null;
+      }
+    }
+
     // Stage 2 Duplicate Guard: if exact duplicate is detected and unconfirmed, pop up full modal and block save
     if (this._detectedDuplicateVoucher && !this._duplicateConfirmed) {
       const modal = document.getElementById('duplicateVoucherModal');
@@ -3606,9 +3617,12 @@ const Vouchers = {
       if (result.success && result.found) {
         // If editing, skip if it's the exact same record
         if (this.isEditMode && this.selectedVoucher &&
-            String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex)) {
+            (String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex) ||
+             (result.voucher.accountOrMail && this.selectedVoucher.accountOrMail &&
+              String(result.voucher.accountOrMail).trim().toUpperCase() === String(this.selectedVoucher.accountOrMail).trim().toUpperCase()))) {
           if (inlineWarn) inlineWarn.classList.add('hidden');
           if (panel) panel.classList.add('hidden');
+          this._detectedDuplicateVoucher = null;
           return;
         }
 

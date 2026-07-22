@@ -976,13 +976,15 @@ function updateVoucher(token, rowIndex, voucher) {
       }
     }
     
+    const targetRowIndex = parseInt(rowIndex, 10);
+    
     // Check for duplicate OLD VOUCHER NUMBER (excluding current row)
     if (voucher.oldVoucherNumber && voucher.oldVoucherNumber.trim()) {
       const data = sheet.getDataRange().getValues();
       const newOldVN = voucher.oldVoucherNumber.trim().toUpperCase();
       
       for (let i = 1; i < data.length; i++) {
-        if (i + 1 === rowIndex) continue; // Skip current row
+        if (i + 1 === targetRowIndex) continue; // Skip current row
         
         const existingOldVN = String(data[i][cols.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
         if (existingOldVN === newOldVN) {
@@ -1000,7 +1002,7 @@ function updateVoucher(token, rowIndex, voucher) {
       const newVN = voucher.accountOrMail.trim().toUpperCase();
       
       for (let i = 1; i < data.length; i++) {
-        if (i + 1 === rowIndex) continue; // Skip current row
+        if (i + 1 === targetRowIndex) continue; // Skip current row
         
         const existingVN = String(data[i][cols.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
         if (existingVN === newVN) {
