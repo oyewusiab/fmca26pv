@@ -156,8 +156,32 @@ const Dashboard = {
         }
     },
 
+    parseDateFlexible(value) {
+        if (!value) return null;
+        if (value instanceof Date) return value;
+        const d = new Date(value);
+        if (!isNaN(d.getTime())) return d;
+
+        const m = String(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (!m) return null;
+
+        const a = parseInt(m[1], 10);
+        const b = parseInt(m[2], 10);
+        const yyyy = parseInt(m[3], 10);
+        const hh = parseInt(m[4] || '0', 10);
+        const mm = parseInt(m[5] || '0', 10);
+        const ss = parseInt(m[6] || '0', 10);
+
+        let day = a, month = b;
+        if (a <= 12 && b <= 12) { day = a; month = b; }
+        else if (a <= 12 && b > 12) { month = a; day = b; }
+
+        const out = new Date(yyyy, month - 1, day, hh, mm, ss);
+        return isNaN(out.getTime()) ? null : out;
+    },
+
     applyAccountFilter() {
-        if (this.selectedAccountFilter === 'ALL' || !this.rawVouchers || this.rawVouchers.length === 0) {
+        if (!this.rawVouchers || this.rawVouchers.length === 0) {
             if (this.stats) {
                 this.renderStats(this.stats.stats || this.stats);
                 this.renderCategoryBreakdown(this.stats.categoryBreakdown);
@@ -168,8 +192,9 @@ const Dashboard = {
             return;
         }
 
-        const mode = this.selectedAccountFilter; // 'CAPITAL' or 'OTHERS'
+        const mode = this.selectedAccountFilter || 'ALL';
         const filteredVouchers = (this.rawVouchers || []).filter(v => {
+            if (mode === 'ALL') return true;
             const accountType = String(v.accountType || '').trim().toLowerCase();
             const isCapital = accountType === 'capital' || accountType === 'cap';
             return mode === 'CAPITAL' ? isCapital : !isCapital;
@@ -215,8 +240,8 @@ const Dashboard = {
                 let dateVal = v.createdAt || v.date;
                 let ageInDays = 999;
                 if (dateVal) {
-                    const d = new Date(dateVal);
-                    if (!isNaN(d.getTime())) {
+                    const d = this.parseDateFlexible(dateVal);
+                    if (d && !isNaN(d.getTime())) {
                         ageInDays = Math.floor((now.getTime() - d.getTime()) / (24 * 60 * 60 * 1000));
                     }
                 }
@@ -289,8 +314,8 @@ const Dashboard = {
                 if (foundIdx >= 0) monthIdx = foundIdx;
             }
             if (monthIdx === null && (v.createdAt || v.date)) {
-                const d = new Date(v.createdAt || v.date);
-                if (!isNaN(d.getTime())) monthIdx = d.getMonth();
+                const d = this.parseDateFlexible(v.createdAt || v.date);
+                if (d && !isNaN(d.getTime())) monthIdx = d.getMonth();
             }
             if (monthIdx !== null && monthMap[monthIdx]) {
                 const gross = parseFloat(v.grossAmount || 0);
@@ -303,13 +328,42 @@ const Dashboard = {
 
         // Recent Vouchers
         const sorted = [...vouchers].sort((a, b) => {
-            const dA = new Date(a.createdAt || a.date || 0).getTime();
-            const dB = new Date(b.createdAt || b.date || 0).getTime();
-            return dB - dA;
+            const dA = this.parseDateFlexible(a.createdAt || a.date);
+            const dB = this.parseDateFlexible(b.createdAt || b.date);
+            const tA = dA ? dA.getTime() : 0;
+            const tB = dB ? dB.getTime() : 0;
+            return tB - tA;
         });
         const recentVouchers = sorted.slice(0, 10);
 
         return { summary, categoryBreakdown, monthlyBreakdown, recentVouchers, aging };
+    },
+
+    async loadAllVouchers(year = '2026') {
+        const all = [];
+        try {
+            const firstRes = await API.getVouchers(year, null, 1, 200);
+            if (firstRes && firstRes.success) {
+                all.push(...(firstRes.vouchers || []));
+                const totalPages = firstRes.totalPages || 1;
+
+                if (totalPages > 1) {
+                    const promises = [];
+                    for (let p = 2; p <= totalPages; p++) {
+                        promises.push(API.getVouchers(year, null, p, 200));
+                    }
+                    const results = await Promise.all(promises);
+                    results.forEach(res => {
+                        if (res && res.success && res.vouchers) {
+                            all.push(...res.vouchers);
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Vouchers fetch error for dashboard:', e);
+        }
+        return all;
     },
 
     // ---------- DATA LOADING ----------
@@ -326,9 +380,9 @@ const Dashboard = {
         this.showLoading(true);
 
         try {
-            const [result, vouchersRes] = await Promise.all([
+            const [result, allVouchers] = await Promise.all([
                 API.getDashboardStats(),
-                API.getVouchers ? API.getVouchers('2026', null, 1, 500) : Promise.resolve(null)
+                this.loadAllVouchers('2026')
             ]);
 
             if (result && result.success) {
@@ -336,10 +390,7 @@ const Dashboard = {
                 sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(result));
             }
 
-            if (vouchersRes && vouchersRes.success) {
-                this.rawVouchers = vouchersRes.vouchers || [];
-            }
-
+            this.rawVouchers = allVouchers || [];
             this.applyAccountFilter();
 
             await this.loadPendingActions();
