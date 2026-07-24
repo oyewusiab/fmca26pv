@@ -68,6 +68,13 @@
                     <p class="page-subtitle">Overview of Payment Vouchers for 2026</p>
                 </div>
                 <div style="display:flex; gap:8px; align-items:center;">
+                    <!-- Account Filter Dropdown -->
+                    <select class="form-control" id="dashboardAccountFilter" style="width: auto; height: 38px; font-weight: 500; border-color: rgba(26, 95, 42, 0.3);">
+                        <option value="ALL" selected>Account: All (Default)</option>
+                        <option value="CAPITAL">Account: Capital</option>
+                        <option value="OTHERS">Account: Others (RFA, TSA, OHD, etc.)</option>
+                    </select>
+
                     <!-- Eye icon to show/hide figures -->
                     <button class="btn btn-secondary" id="maskToggleBtn" title="Show figures">
                         <i class="fas fa-eye"></i>

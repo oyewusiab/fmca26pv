@@ -39,6 +39,8 @@ const Reports = {
     currentAccountTypeRows: [],
     accountTypeFilters: { accountType: 'ALL', subAccountType: 'ALL' },
     expandedAccountTypeGroups: new Set(),
+    selectedAccounts: new Set(['ALL']),
+    defaultAccountTypes: ['Capital', 'Liquid Oxygen', 'RFA', 'TSA', 'Project', 'OHD'],
 
     // Unified Chart Colors System
     THEME: {
@@ -299,6 +301,7 @@ const Reports = {
                 this.loadHistoricalReports(),
                 this.checkDebtProfileStatus()
             ]);
+            this.populateAccountMultiSelectOptions();
         } catch (error) {
             console.error('Error loading reports:', error);
             Utils.showToast('Error loading reports', 'error');
@@ -3149,14 +3152,151 @@ const Reports = {
         });
     },
 
-    async applyDateFilter() {
+    /**
+     * Account Multi-Select Filter logic
+     */
+    toggleAccountDropdown(e) {
+        if (e) e.stopPropagation();
+        const dropdown = document.getElementById('accountMultiSelectDropdown');
+        if (!dropdown) return;
+        
+        const isShow = dropdown.classList.contains('show');
+        if (isShow) {
+            dropdown.classList.remove('show');
+        } else {
+            dropdown.classList.add('show');
+            const closeOnOutsideClick = (evt) => {
+                const container = document.getElementById('accountMultiSelectContainer');
+                if (container && !container.contains(evt.target)) {
+                    dropdown.classList.remove('show');
+                    document.removeEventListener('click', closeOnOutsideClick);
+                }
+            };
+            setTimeout(() => {
+                document.addEventListener('click', closeOnOutsideClick);
+            }, 0);
+        }
+    },
+
+    getAvailableAccountTypes() {
+        const typesSet = new Set(this.defaultAccountTypes || []);
+        if (this.systemConfig?.accountTypes) {
+            Object.keys(this.systemConfig.accountTypes).forEach(t => {
+                if (t) typesSet.add(t);
+            });
+        }
+        const vouchers = this.voucherCache[this.currentYear] || [];
+        vouchers.forEach(v => {
+            if (v.accountType) typesSet.add(v.accountType);
+        });
+        return Array.from(typesSet);
+    },
+
+    populateAccountMultiSelectOptions() {
+        const container = document.getElementById('accountMultiSelectOptions');
+        if (!container) return;
+
+        const available = this.getAvailableAccountTypes();
+        const isAllSelected = !this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0;
+
+        let html = `
+            <label class="account-option-item">
+                <input type="checkbox" value="ALL" ${isAllSelected ? 'checked' : ''} onchange="Reports.handleAccountCheckboxChange('ALL', this.checked)">
+                <strong>All Accounts (Default)</strong>
+            </label>
+        `;
+
+        available.forEach(type => {
+            const isChecked = !isAllSelected && this.selectedAccounts.has(type);
+            const safeType = this.escapeHtml(type);
+            html += `
+                <label class="account-option-item">
+                    <input type="checkbox" value="${safeType}" ${isChecked ? 'checked' : ''} onchange="Reports.handleAccountCheckboxChange('${safeType.replace(/'/g, "\\'")}', this.checked)">
+                    <span>${safeType}</span>
+                </label>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.updateAccountMultiSelectButtonLabel();
+    },
+
+    handleAccountCheckboxChange(accountKey, isChecked) {
+        if (!this.selectedAccounts) this.selectedAccounts = new Set(['ALL']);
+
+        if (accountKey === 'ALL') {
+            this.selectedAccounts = new Set(['ALL']);
+        } else {
+            this.selectedAccounts.delete('ALL');
+            if (isChecked) {
+                this.selectedAccounts.add(accountKey);
+            } else {
+                this.selectedAccounts.delete(accountKey);
+            }
+            if (this.selectedAccounts.size === 0) {
+                this.selectedAccounts.add('ALL');
+            }
+        }
+
+        this.populateAccountMultiSelectOptions();
+        this.applyDateAndAccountFilter();
+    },
+
+    selectAllAccounts() {
+        this.selectedAccounts = new Set(['ALL']);
+        this.populateAccountMultiSelectOptions();
+        this.applyDateAndAccountFilter();
+    },
+
+    clearAllAccounts() {
+        this.selectedAccounts = new Set(['ALL']);
+        this.populateAccountMultiSelectOptions();
+        this.applyDateAndAccountFilter();
+    },
+
+    updateAccountMultiSelectButtonLabel() {
+        const labelEl = document.getElementById('accountMultiSelectLabel');
+        if (!labelEl) return;
+
+        if (!this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0) {
+            labelEl.textContent = 'Account: All';
+        } else {
+            const arr = Array.from(this.selectedAccounts);
+            if (arr.length === 1) {
+                labelEl.textContent = `Account: ${arr[0]}`;
+            } else if (arr.length === 2) {
+                labelEl.textContent = `Account: ${arr[0]}, ${arr[1]}`;
+            } else {
+                labelEl.textContent = `Account: ${arr[0]}, ${arr[1]} (+${arr.length - 2})`;
+            }
+        }
+    },
+
+    isVoucherMatchingAccountFilter(v) {
+        if (!this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0) {
+            return true;
+        }
+
+        const vType = String(v?.accountType || '').trim();
+        const vSubType = String(v?.subAccountType || '').trim();
+        const selectedArr = Array.from(this.selectedAccounts);
+
+        for (const target of selectedArr) {
+            const targetLower = target.toLowerCase();
+            if (vType.toLowerCase() === targetLower) return true;
+            if (vSubType && vSubType.toLowerCase() === targetLower) return true;
+            if ((targetLower === 'ohd' || targetLower === 'overhead') && 
+                (vType.toLowerCase() === 'ohd' || vType.toLowerCase() === 'overhead')) {
+                return true;
+            }
+        }
+
+        return false;
+    },
+
+    async applyDateAndAccountFilter() {
         const fromDate = document.getElementById('reportDateFrom')?.value;
         const toDate = document.getElementById('reportDateTo')?.value;
-
-        if (!fromDate && !toDate) {
-            Utils.showToast('Please select at least one date boundary', 'warning');
-            return;
-        }
 
         this.showLoading(true);
 
@@ -3170,26 +3310,42 @@ const Reports = {
 
             const vouchers = (this.voucherCache[this.currentYear] || []).filter(v => {
                 const vDate = this.parseDateFlexible(v.createdAt || v.date);
-                if (!vDate) return false;
-                const t = vDate.getTime();
-                return t >= start && t <= end;
+                if (vDate) {
+                    const t = vDate.getTime();
+                    if (t < start || t > end) return false;
+                }
+                return this.isVoucherMatchingAccountFilter(v);
             });
 
             const statusLabel = document.getElementById('dateFilterStatus');
             if (statusLabel) {
-                const formattedFrom = fromDate ? new Date(fromDate).toLocaleDateString('en-GB') : 'Start';
-                const formattedTo = toDate ? new Date(toDate).toLocaleDateString('en-GB') : 'End';
-                statusLabel.textContent = `Showing range: ${formattedFrom} to ${formattedTo} (${vouchers.length} vouchers)`;
+                const parts = [];
+                if (fromDate || toDate) {
+                    const formattedFrom = fromDate ? new Date(fromDate).toLocaleDateString('en-GB') : 'Start';
+                    const formattedTo = toDate ? new Date(toDate).toLocaleDateString('en-GB') : 'End';
+                    parts.push(`Date: ${formattedFrom} to ${formattedTo}`);
+                } else {
+                    parts.push('Full year');
+                }
+                if (!this.selectedAccounts.has('ALL') && this.selectedAccounts.size > 0) {
+                    parts.push(`Accounts: ${Array.from(this.selectedAccounts).join(', ')}`);
+                }
+                statusLabel.textContent = `Showing filter: ${parts.join(' | ')} (${vouchers.length} vouchers)`;
             }
 
             this.rebuildReportData(vouchers);
-            Utils.showToast('Date range filter applied successfully', 'success');
+            this.applyVoucherAnalytics(vouchers);
         } catch (error) {
-            console.error('Error applying date filter:', error);
-            Utils.showToast('Failed to apply date filter', 'error');
+            console.error('Error applying filters:', error);
+            Utils.showToast('Failed to apply filters', 'error');
         } finally {
             this.showLoading(false);
         }
+    },
+
+    async applyDateFilter() {
+        await this.applyDateAndAccountFilter();
+        Utils.showToast('Date range filter applied successfully', 'success');
     },
 
     clearDateFilter() {
@@ -3198,12 +3354,7 @@ const Reports = {
         if (fromInput) fromInput.value = '';
         if (toInput) toInput.value = '';
 
-        const statusLabel = document.getElementById('dateFilterStatus');
-        if (statusLabel) {
-            statusLabel.textContent = 'Showing full year summary';
-        }
-
-        this.loadYearSummary();
+        this.applyDateAndAccountFilter();
         Utils.showToast('Date filter cleared', 'info');
     },
 
@@ -3403,9 +3554,11 @@ const Reports = {
 
         vouchers = vouchers.filter(v => {
             const vDate = this.parseDateFlexible(v.createdAt || v.date);
-            if (!vDate) return false;
-            const t = vDate.getTime();
-            return t >= start && t <= end;
+            if (vDate) {
+                const t = vDate.getTime();
+                if (t < start || t > end) return false;
+            }
+            return this.isVoucherMatchingAccountFilter(v);
         });
 
         let filtered = [];

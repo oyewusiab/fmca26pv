@@ -5,6 +5,8 @@
 
 const Dashboard = {
     stats: null,
+    rawVouchers: null,
+    selectedAccountFilter: 'ALL',
     permissions: null,
     masked: true,
     maskTimeout: null,
@@ -73,7 +75,16 @@ const Dashboard = {
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => this.loadDashboardData());
-          }
+        }
+
+        // Account Filter
+        const accountFilterSelect = document.getElementById('dashboardAccountFilter');
+        if (accountFilterSelect) {
+            accountFilterSelect.addEventListener('change', (e) => {
+                this.selectedAccountFilter = e.target.value;
+                this.applyAccountFilter();
+            });
+        }
 
         // Primary button setup
         this.setupPrimaryButtons();
@@ -100,7 +111,7 @@ const Dashboard = {
         }
     },
 
-    // ---------- MASKING ----------
+    // ---------- MASKING & ACCOUNT FILTERING ----------
 
     initMasking() {
         this.masked = true;
@@ -131,13 +142,7 @@ const Dashboard = {
     },
 
     applyMasking() {
-        if (this.stats) {
-            this.renderStats(this.stats.stats || this.stats);
-            this.renderCategoryBreakdown(this.stats.categoryBreakdown);
-            this.renderMonthlyBreakdown(this.stats.monthlyBreakdown);
-            this.renderRecentVouchers(this.stats.recentVouchers);
-            this.renderAgedPayables(this.stats.aging);
-        }
+        this.applyAccountFilter();
 
         const btn = document.getElementById('maskToggleBtn');
         if (btn) {
@@ -151,6 +156,162 @@ const Dashboard = {
         }
     },
 
+    applyAccountFilter() {
+        if (this.selectedAccountFilter === 'ALL' || !this.rawVouchers || this.rawVouchers.length === 0) {
+            if (this.stats) {
+                this.renderStats(this.stats.stats || this.stats);
+                this.renderCategoryBreakdown(this.stats.categoryBreakdown);
+                this.renderMonthlyBreakdown(this.stats.monthlyBreakdown);
+                this.renderRecentVouchers(this.stats.recentVouchers);
+                this.renderAgedPayables(this.stats.aging);
+            }
+            return;
+        }
+
+        const mode = this.selectedAccountFilter; // 'CAPITAL' or 'OTHERS'
+        const filteredVouchers = (this.rawVouchers || []).filter(v => {
+            const accountType = String(v.accountType || '').trim().toLowerCase();
+            const isCapital = accountType === 'capital' || accountType === 'cap';
+            return mode === 'CAPITAL' ? isCapital : !isCapital;
+        });
+
+        const computed = this.computeDashboardFromVouchers(filteredVouchers);
+        this.renderStats(computed.summary);
+        this.renderCategoryBreakdown(computed.categoryBreakdown);
+        this.renderMonthlyBreakdown(computed.monthlyBreakdown);
+        this.renderRecentVouchers(computed.recentVouchers);
+        this.renderAgedPayables(computed.aging);
+    },
+
+    computeDashboardFromVouchers(vouchers) {
+        let totalPaidAmount = 0, paidVouchers = 0;
+        let totalUnpaidAmount = 0, unpaidVouchers = 0;
+        let totalCancelledAmount = 0, cancelledVouchers = 0;
+        let totalProcessedContractSum = 0, revalidatedVouchers = 0;
+
+        const now = new Date();
+        const aging = {
+            under30: { amount: 0, count: 0 },
+            thirtyToSixty: { amount: 0, count: 0 },
+            overSixty: { amount: 0, count: 0 }
+        };
+
+        vouchers.forEach(v => {
+            const gross = parseFloat(v.grossAmount || 0);
+            const contract = parseFloat(v.contractSum || 0);
+            const status = String(v.status || '').trim();
+
+            if (v.oldVoucherNumber || String(v.oldVoucherAvailable).toLowerCase() === 'yes') {
+                revalidatedVouchers++;
+            }
+
+            if (status === 'Paid') {
+                totalPaidAmount += gross;
+                paidVouchers++;
+            } else if (status === 'Unpaid' || status === 'Pending Deletion') {
+                totalUnpaidAmount += gross;
+                unpaidVouchers++;
+
+                let dateVal = v.createdAt || v.date;
+                let ageInDays = 999;
+                if (dateVal) {
+                    const d = new Date(dateVal);
+                    if (!isNaN(d.getTime())) {
+                        ageInDays = Math.floor((now.getTime() - d.getTime()) / (24 * 60 * 60 * 1000));
+                    }
+                }
+                if (ageInDays <= 30) {
+                    aging.under30.amount += gross;
+                    aging.under30.count++;
+                } else if (ageInDays <= 60) {
+                    aging.thirtyToSixty.amount += gross;
+                    aging.thirtyToSixty.count++;
+                } else {
+                    aging.overSixty.amount += gross;
+                    aging.overSixty.count++;
+                }
+            } else if (status === 'Cancelled') {
+                totalCancelledAmount += gross;
+                cancelledVouchers++;
+            }
+
+            if (contract) totalProcessedContractSum += contract;
+        });
+
+        const totalVouchersRaised = vouchers.length;
+        const totalDebt = totalUnpaidAmount;
+        const averagePaymentPercent = (totalPaidAmount + totalUnpaidAmount > 0)
+            ? Math.round((totalPaidAmount / (totalPaidAmount + totalUnpaidAmount)) * 100)
+            : 0;
+
+        const summary = {
+            totalVouchersRaised,
+            totalPaidAmount,
+            paidVouchers,
+            totalUnpaidAmount,
+            unpaidVouchers,
+            totalCancelledAmount,
+            cancelledVouchers,
+            totalProcessedContractSum,
+            totalDebt,
+            averagePaymentPercent,
+            revalidatedVouchers
+        };
+
+        // Category breakdown
+        const catMap = {};
+        vouchers.forEach(v => {
+            const cat = v.categories || 'Uncategorized';
+            if (!catMap[cat]) {
+                catMap[cat] = { category: cat, vouchersRaised: 0, amountPaid: 0, balance: 0 };
+            }
+            const gross = parseFloat(v.grossAmount || 0);
+            catMap[cat].vouchersRaised++;
+            if (v.status === 'Paid') catMap[cat].amountPaid += gross;
+            else if (v.status === 'Unpaid') catMap[cat].balance += gross;
+        });
+        const categoryBreakdown = Object.values(catMap).map(c => {
+            const total = c.amountPaid + c.balance;
+            c.percentagePaid = total > 0 ? parseFloat(((c.amountPaid / total) * 100).toFixed(2)) : 0;
+            return c;
+        });
+
+        // Monthly breakdown
+        const monthMap = {};
+        const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        MONTHS.forEach((m, idx) => {
+            monthMap[idx] = { month: m, count: 0, paidAmount: 0, unpaidAmount: 0 };
+        });
+        vouchers.forEach(v => {
+            let monthIdx = null;
+            if (v.pmtMonth) {
+                const foundIdx = MONTHS.findIndex(m => m.toLowerCase() === String(v.pmtMonth).toLowerCase());
+                if (foundIdx >= 0) monthIdx = foundIdx;
+            }
+            if (monthIdx === null && (v.createdAt || v.date)) {
+                const d = new Date(v.createdAt || v.date);
+                if (!isNaN(d.getTime())) monthIdx = d.getMonth();
+            }
+            if (monthIdx !== null && monthMap[monthIdx]) {
+                const gross = parseFloat(v.grossAmount || 0);
+                monthMap[monthIdx].count++;
+                if (v.status === 'Paid') monthMap[monthIdx].paidAmount += gross;
+                else if (v.status === 'Unpaid') monthMap[monthIdx].unpaidAmount += gross;
+            }
+        });
+        const monthlyBreakdown = Object.values(monthMap);
+
+        // Recent Vouchers
+        const sorted = [...vouchers].sort((a, b) => {
+            const dA = new Date(a.createdAt || a.date || 0).getTime();
+            const dB = new Date(b.createdAt || b.date || 0).getTime();
+            return dB - dA;
+        });
+        const recentVouchers = sorted.slice(0, 10);
+
+        return { summary, categoryBreakdown, monthlyBreakdown, recentVouchers, aging };
+    },
+
     // ---------- DATA LOADING ----------
 
     async loadDashboardData() {
@@ -158,24 +319,28 @@ const Dashboard = {
         const cached = sessionStorage.getItem('pv2026_dashboard_stats');
         if (cached) {
             this.stats = JSON.parse(cached);
-            this.applyMasking();
+            this.applyAccountFilter();
             this.loadPendingActions();
         }
 
         this.showLoading(true);
 
         try {
-            const result = await API.getDashboardStats();
+            const [result, vouchersRes] = await Promise.all([
+                API.getDashboardStats(),
+                API.getVouchers ? API.getVouchers('2026', null, 1, 500) : Promise.resolve(null)
+            ]);
 
-            if (!result.success) {
-                Utils.showToast(result.error || 'Failed to load dashboard data', 'error');
-                this.showLoading(false);
-                return;
+            if (result && result.success) {
+                this.stats = result;
+                sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(result));
             }
 
-            this.stats = result;
-            sessionStorage.setItem('pv2026_dashboard_stats', JSON.stringify(result));
-            this.applyMasking();
+            if (vouchersRes && vouchersRes.success) {
+                this.rawVouchers = vouchersRes.vouchers || [];
+            }
+
+            this.applyAccountFilter();
 
             await this.loadPendingActions();
         } catch (error) {
