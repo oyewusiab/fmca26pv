@@ -2367,13 +2367,6 @@ const Reports = {
                 });
             });
         }
-                        totalAmount: 0,
-                        paidAmount: 0,
-                        unpaidAmount: 0
-                    };
-                }
-            });
-        });
 
         const configuredBaseOrder = this.getConfiguredAccountTypes();
         const baseOrderIndex = {};
