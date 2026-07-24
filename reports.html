@@ -258,6 +258,34 @@
             height: 15px;
             accent-color: var(--primary-color, #1a5f2a);
         }
+        .report-info-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: var(--text-muted, #6c757d);
+            margin-left: 8px;
+            cursor: pointer;
+            transition: color 0.2s ease, transform 0.2s ease;
+            vertical-align: middle;
+        }
+        .report-info-icon:hover {
+            color: var(--primary-color, #1a5f2a);
+            transform: scale(1.18);
+        }
+        .sortable-th {
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s ease;
+        }
+        .sortable-th:hover {
+            background-color: rgba(26, 95, 42, 0.08) !important;
+        }
+        .sort-indicator {
+            font-size: 11px;
+            margin-left: 4px;
+            color: var(--primary-color, #1a5f2a);
+        }
     </style>
 </head>
 <body>
@@ -541,52 +569,60 @@
 
             <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
-                    <i class="fas fa-tachometer-alt"></i> Analytics
+                    <i class="fas fa-tachometer-alt"></i> Voucher Value Spotlight
+                    <i class="fas fa-question-circle report-info-icon" title="Statistical distribution metrics showing peak single voucher value, mean expenditure, and 50th percentile median amount for active filters."></i>
                 </h2>
                 <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                    <div class="stat-card" id="largestVoucher">
-                        <div class="stat-label">-</div>
+                    <div class="stat-card">
+                        <div class="stat-label">Largest Single Voucher</div>
+                        <div class="stat-value" id="spotlightLargestVoucher">-</div>
+                        <div class="stat-subvalue">Peak single payment</div>
                     </div>
-                    <div class="stat-card" id="avgVoucher">
-                        <div class="stat-label">-</div>
+                    <div class="stat-card">
+                        <div class="stat-label">Average Voucher Value</div>
+                        <div class="stat-value" id="spotlightAvgVoucher">-</div>
+                        <div class="stat-subvalue">Mean expenditure</div>
                     </div>
-                    <div class="stat-card" id="paymentRate">
-                        <div class="stat-label">-</div>
+                    <div class="stat-card">
+                        <div class="stat-label">Median Voucher Value (P50)</div>
+                        <div class="stat-value" id="spotlightMedianVoucher">-</div>
+                        <div class="stat-subvalue">50th percentile</div>
                     </div>
                 </div>
             </div>
 
             <div class="report-section tab-section-summary">
-    <h2 class="report-section-title">
-        <i class="fas fa-chart-pie"></i> Status Distribution
-    </h2>
+                <h2 class="report-section-title">
+                    <i class="fas fa-chart-pie"></i> Status Distribution
+                    <i class="fas fa-question-circle report-info-icon" title="Visual charts illustrating the proportion of Paid, Unpaid, and Cancelled vouchers by volume count and total monetary value."></i>
+                </h2>
 
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div class="card">
-        <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-hashtag"></i> By Count</h3>
-            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusCountChart', 'Status_By_Count')">
-            <i class="fas fa-download"></i> PNG
-            </button>
-        </div>
-        <div class="card-body">
-            <canvas id="statusCountChart" height="160"></canvas>
-        </div>
-        </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-hashtag"></i> By Count</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusCountChart', 'Status_By_Count')">
+                                <i class="fas fa-download"></i> PNG
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="statusCountChart" height="160"></canvas>
+                        </div>
+                    </div>
 
-        <div class="card">
-        <div class="card-header">
-            <h3 class="card-title"><i class="fas fa-naira-sign"></i> By Amount</h3>
-            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusAmountChart', 'Status_By_Amount')">
-            <i class="fas fa-download"></i> PNG
-            </button>
-        </div>
-        <div class="card-body">
-            <canvas id="statusAmountChart" height="160"></canvas>
-        </div>
-        </div>
-    </div>
-    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-naira-sign"></i> By Amount</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusAmountChart', 'Status_By_Amount')">
+                                <i class="fas fa-download"></i> PNG
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="statusAmountChart" height="160"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Category Breakdown Section -->
             <div class="report-section tab-section-expense" id="cardCategoryBreakdown">
@@ -594,6 +630,7 @@
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-th-list"></i> Category Breakdown
+                            <i class="fas fa-question-circle report-info-icon" title="Tabular breakdown of expenditure across categories. Sorted alphabetically by default. Click any column header to re-sort."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('categoryTable', 'Category_Breakdown')">
                             <i class="fas fa-file-excel"></i> Export
@@ -611,24 +648,57 @@
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-university"></i> Account Type Breakdown
+                            <i class="fas fa-question-circle report-info-icon" title="Hierarchical breakdown by funding source accounts and sub-accounts. Select multiple Account Types or Sub Account Types to isolate specific funds."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('accountTypeTable', 'Account_Type_Breakdown')">
                             <i class="fas fa-file-excel"></i> Export
                         </button>
                     </div>
                     <div class="card-body" style="padding-bottom: 0;">
-                        <div class="form-row" style="margin-bottom: 0;">
-                            <div class="form-group">
-                                <label for="accountTypeFilter">Account Type</label>
-                                <select class="form-control" id="accountTypeFilter">
-                                    <option value="ALL">All Account Types</option>
-                                </select>
+                        <div class="form-row" style="margin-bottom: 0; display: flex; gap: 15px; flex-wrap: wrap;">
+                            <div class="form-group" style="flex: 1; min-width: 240px; margin-bottom: 10px;">
+                                <label style="font-weight: 600; font-size: 12px; color: var(--text-dark);">Account Type(s)</label>
+                                <div class="account-multiselect-container" id="accTypeMultiSelectContainer" style="width: 100%;">
+                                    <button type="button" class="account-multiselect-btn" id="accTypeMultiSelectBtn" onclick="Reports.toggleAccTypeDropdown(event)" style="width: 100%;">
+                                        <span><i class="fas fa-university" style="color: var(--primary-color); margin-right: 6px;"></i> <span id="accTypeMultiSelectLabel">Account Type: All</span></span>
+                                        <i class="fas fa-chevron-down" style="font-size: 10px; color: #888;"></i>
+                                    </button>
+                                    <div class="account-multiselect-dropdown" id="accTypeMultiSelectDropdown" style="width: 100%;">
+                                        <div class="account-multiselect-header">
+                                            <span>Account Types</span>
+                                            <div>
+                                                <button type="button" onclick="Reports.selectAllAccTypes()">Select All</button>
+                                                <span style="color: #ccc; margin: 0 4px;">|</span>
+                                                <button type="button" onclick="Reports.clearAllAccTypes()">Reset</button>
+                                            </div>
+                                        </div>
+                                        <div class="account-multiselect-options" id="accTypeMultiSelectOptions">
+                                            <!-- Populated dynamically -->
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="subAccountTypeFilter">Sub Account Type</label>
-                                <select class="form-control" id="subAccountTypeFilter">
-                                    <option value="ALL">All Sub Account Types</option>
-                                </select>
+                            <div class="form-group" style="flex: 1; min-width: 240px; margin-bottom: 10px;">
+                                <label style="font-weight: 600; font-size: 12px; color: var(--text-dark);">Sub Account Type(s)</label>
+                                <div class="account-multiselect-container" id="subAccTypeMultiSelectContainer" style="width: 100%;">
+                                    <button type="button" class="account-multiselect-btn" id="subAccTypeMultiSelectBtn" onclick="Reports.toggleSubAccTypeDropdown(event)" style="width: 100%;">
+                                        <span><i class="fas fa-tags" style="color: var(--primary-color); margin-right: 6px;"></i> <span id="subAccTypeMultiSelectLabel">Sub-Type: All</span></span>
+                                        <i class="fas fa-chevron-down" style="font-size: 10px; color: #888;"></i>
+                                    </button>
+                                    <div class="account-multiselect-dropdown" id="subAccTypeMultiSelectDropdown" style="width: 100%;">
+                                        <div class="account-multiselect-header">
+                                            <span>Sub Account Types</span>
+                                            <div>
+                                                <button type="button" onclick="Reports.selectAllSubAccTypes()">Select All</button>
+                                                <span style="color: #ccc; margin: 0 4px;">|</span>
+                                                <button type="button" onclick="Reports.clearAllSubAccTypes()">Reset</button>
+                                            </div>
+                                        </div>
+                                        <div class="account-multiselect-options" id="subAccTypeMultiSelectOptions">
+                                            <!-- Populated dynamically -->
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -915,8 +985,33 @@
             <!-- Official Debt Profile Report Section (New) -->
             <div class="report-section tab-section-requests" id="officialDebtProfileSection">
                 <h2 class="report-section-title">
-                    <i class="fas fa-file-invoice"></i> Official Debt Profile Report 2026
+                    <i class="fas fa-file-invoice"></i> Official Debt Profile Management & Requests
+                    <i class="fas fa-question-circle report-info-icon" title="Executive hub for generating, requesting approval, reviewing, editing, and exporting formal Debt Profile Reports."></i>
                 </h2>
+                
+                <!-- Debt Profile KPI Summary Bar -->
+                <div class="stats-grid mb-4" id="debtProfileKpiBar" style="grid-template-columns: repeat(4, 1fr); gap: 15px;">
+                    <div class="stat-card" style="padding: 14px 16px;">
+                        <div class="stat-label"><i class="fas fa-file-invoice text-primary"></i> Saved Debt Profiles</div>
+                        <div class="stat-value" id="debtKpiTotal">0</div>
+                        <div class="stat-subvalue">Total formal reports</div>
+                    </div>
+                    <div class="stat-card paid" style="padding: 14px 16px;">
+                        <div class="stat-label"><i class="fas fa-check-circle text-success"></i> Approved Profiles</div>
+                        <div class="stat-value text-success" id="debtKpiApproved">0</div>
+                        <div class="stat-subvalue">Ready for export</div>
+                    </div>
+                    <div class="stat-card unpaid" style="padding: 14px 16px;">
+                        <div class="stat-label"><i class="fas fa-clock text-warning"></i> Pending Requests</div>
+                        <div class="stat-value text-warning" id="debtKpiPending">0</div>
+                        <div class="stat-subvalue">Awaiting DFA/DDFA approval</div>
+                    </div>
+                    <div class="stat-card info" style="padding: 14px 16px;">
+                        <div class="stat-label"><i class="fas fa-calendar-check text-info"></i> Last Report Date</div>
+                        <div class="stat-value" id="debtKpiLastDate" style="font-size: 15px;">-</div>
+                        <div class="stat-subvalue">Most recent formal report</div>
+                    </div>
+                </div>
                 
                 <!-- Saved Reports Selector -->
                 <div class="card mb-4" id="historicalReportsCard">

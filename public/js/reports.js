@@ -37,10 +37,13 @@ const Reports = {
     reportDepartmentChart: null,
     systemConfig: null,
     currentAccountTypeRows: [],
-    accountTypeFilters: { accountType: 'ALL', subAccountType: 'ALL' },
+    accountTypeFilters: { accountTypes: new Set(['ALL']), subAccountTypes: new Set(['ALL']) },
     expandedAccountTypeGroups: new Set(),
     selectedAccounts: new Set(['ALL']),
     defaultAccountTypes: ['Capital', 'Liquid Oxygen', 'RFA', 'TSA', 'Project', 'OHD'],
+    categorySortField: 'category',
+    categorySortDir: 'asc',
+    currentCategoryBreakdown: [],
 
     // Unified Chart Colors System
     THEME: {
@@ -1319,6 +1322,21 @@ const Reports = {
 
     renderVoucherValueCards(stats) {
         const container = document.getElementById('voucherValueCards');
+        const largestEl = document.getElementById('spotlightLargestVoucher');
+        const avgEl = document.getElementById('spotlightAvgVoucher');
+        const medianEl = document.getElementById('spotlightMedianVoucher');
+
+        if (stats && stats.amounts && stats.amounts.length > 0) {
+            const largest = Math.max(...stats.amounts);
+            if (largestEl) largestEl.textContent = Utils.formatCurrency(largest);
+            if (avgEl) avgEl.textContent = Utils.formatCurrency(stats.average || 0);
+            if (medianEl) medianEl.textContent = Utils.formatCurrency(stats.median || 0);
+        } else if (stats) {
+            if (largestEl) largestEl.textContent = '₦0.00';
+            if (avgEl) avgEl.textContent = Utils.formatCurrency(stats.average || 0);
+            if (medianEl) medianEl.textContent = Utils.formatCurrency(stats.median || 0);
+        }
+
         if (!container || !stats) return;
 
         container.innerHTML = `
@@ -1857,17 +1875,52 @@ const Reports = {
         `;
     },
 
+    sortCategoryTable(field) {
+        if (this.categorySortField === field) {
+            this.categorySortDir = this.categorySortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.categorySortField = field;
+            this.categorySortDir = 'asc';
+        }
+        this.renderCategoryTable(this.currentCategoryBreakdown);
+    },
+
+    getSortIcon(field) {
+        if (this.categorySortField !== field) {
+            return '<span class="sort-indicator" style="opacity: 0.3;">↕</span>';
+        }
+        return `<span class="sort-indicator">${this.categorySortDir === 'asc' ? '▲' : '▼'}</span>`;
+    },
+
     /**
-     * Render category breakdown table
+     * Render category breakdown table with sorting support
      */
     renderCategoryTable(categories) {
         const container = document.getElementById('categoryTable');
         if (!container) return;
 
+        this.currentCategoryBreakdown = Array.isArray(categories) ? categories : [];
+
         if (!categories || categories.length === 0) {
             container.innerHTML = '<p class="text-muted text-center">No category data available</p>';
             return;
         }
+
+        // Sort categories (default alphabetical by category)
+        const field = this.categorySortField || 'category';
+        const dir = this.categorySortDir || 'asc';
+        const sortedCats = [...categories].sort((a, b) => {
+            let valA = a[field];
+            let valB = b[field];
+            if (typeof valA === 'string' || field === 'category') {
+                valA = String(valA || '').toLowerCase();
+                valB = String(valB || '').toLowerCase();
+                return dir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            }
+            valA = Number(valA || 0);
+            valB = Number(valB || 0);
+            return dir === 'asc' ? valA - valB : valB - valA;
+        });
 
         // Calculate totals
         let totalVouchers = 0;
@@ -1885,18 +1938,18 @@ const Reports = {
                 <table>
                     <thead>
                         <tr>
-                            <th>Category</th>
-                            <th class="text-center">Vouchers Raised</th>
-                            <th class="text-right">Amount Paid</th>
-                            <th class="text-right">Balance</th>
-                            <th class="text-center">% Paid</th>
-                            <th class="text-center">% of Total Pmt</th>
+                            <th class="sortable-th" onclick="Reports.sortCategoryTable('category')">Category ${this.getSortIcon('category')}</th>
+                            <th class="text-center sortable-th" onclick="Reports.sortCategoryTable('vouchersRaised')">Vouchers Raised ${this.getSortIcon('vouchersRaised')}</th>
+                            <th class="text-right sortable-th" onclick="Reports.sortCategoryTable('amountPaid')">Amount Paid ${this.getSortIcon('amountPaid')}</th>
+                            <th class="text-right sortable-th" onclick="Reports.sortCategoryTable('balance')">Balance ${this.getSortIcon('balance')}</th>
+                            <th class="text-center sortable-th" onclick="Reports.sortCategoryTable('percentagePaid')">% Paid ${this.getSortIcon('percentagePaid')}</th>
+                            <th class="text-center sortable-th" onclick="Reports.sortCategoryTable('percentOfTotalPayment')">% of Total Pmt ${this.getSortIcon('percentOfTotalPayment')}</th>
                         </tr>
                     </thead>
                     <tbody>
         `;
 
-        categories.forEach(cat => {
+        sortedCats.forEach(cat => {
             const percentBar = `
                 <div class="progress-bar-mini">
                     <div class="progress-fill ${cat.percentagePaid >= 70 ? 'success' : cat.percentagePaid >= 40 ? 'warning' : 'danger'}" 
@@ -2001,57 +2054,227 @@ const Reports = {
         return { baseType: rawBase || 'Unspecified', subType: '' };
     },
 
-    populateAccountTypeFilters(accountTypes) {
-        const parentSelect = document.getElementById('accountTypeFilter');
-        if (!parentSelect) return;
+    toggleAccTypeDropdown(e) {
+        if (e) e.stopPropagation();
+        const dropdown = document.getElementById('accTypeMultiSelectDropdown');
+        if (!dropdown) return;
+        const isShow = dropdown.classList.contains('show');
+        if (isShow) {
+            dropdown.classList.remove('show');
+        } else {
+            dropdown.classList.add('show');
+            const closeOnOutside = (evt) => {
+                const container = document.getElementById('accTypeMultiSelectContainer');
+                if (container && !container.contains(evt.target)) {
+                    dropdown.classList.remove('show');
+                    document.removeEventListener('click', closeOnOutside);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+        }
+    },
 
-        const previous = this.accountTypeFilters.accountType || 'ALL';
+    toggleSubAccTypeDropdown(e) {
+        if (e) e.stopPropagation();
+        const dropdown = document.getElementById('subAccTypeMultiSelectDropdown');
+        if (!dropdown) return;
+        const isShow = dropdown.classList.contains('show');
+        if (isShow) {
+            dropdown.classList.remove('show');
+        } else {
+            dropdown.classList.add('show');
+            const closeOnOutside = (evt) => {
+                const container = document.getElementById('subAccTypeMultiSelectContainer');
+                if (container && !container.contains(evt.target)) {
+                    dropdown.classList.remove('show');
+                    document.removeEventListener('click', closeOnOutside);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+        }
+    },
+
+    populateAccTypeMultiSelectOptions(accountTypes) {
+        const container = document.getElementById('accTypeMultiSelectOptions');
+        if (!container) return;
+
         const baseTypes = Array.from(new Set([
             ...(accountTypes || []).map((row) => this.parseAccountTypeRow(row).baseType),
             ...this.getConfiguredAccountTypes()
-        ])).sort();
-        parentSelect.innerHTML = '<option value="ALL">All Account Types</option>';
-        baseTypes.forEach((base) => {
-            parentSelect.innerHTML += `<option value="${base}">${base}</option>`;
+        ])).filter(Boolean).sort();
+
+        const selectedSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAll = selectedSet.has('ALL') || selectedSet.size === 0;
+
+        let html = `
+            <label class="account-option-item">
+                <input type="checkbox" value="ALL" ${isAll ? 'checked' : ''} onchange="Reports.handleAccTypeCheckboxChange('ALL', this.checked)">
+                <strong>All Account Types</strong>
+            </label>
+        `;
+
+        baseTypes.forEach(base => {
+            const isChecked = !isAll && selectedSet.has(base);
+            const safeBase = this.escapeHtml(base);
+            html += `
+                <label class="account-option-item">
+                    <input type="checkbox" value="${safeBase}" ${isChecked ? 'checked' : ''} onchange="Reports.handleAccTypeCheckboxChange('${safeBase.replace(/'/g, "\\'")}', this.checked)">
+                    <span>${safeBase}</span>
+                </label>
+            `;
         });
 
-        this.accountTypeFilters.accountType = baseTypes.includes(previous) ? previous : 'ALL';
-        parentSelect.value = this.accountTypeFilters.accountType;
-        this.populateSubAccountTypeFilter(accountTypes);
+        container.innerHTML = html;
+        this.updateAccTypeButtonLabels();
     },
 
-    populateSubAccountTypeFilter(accountTypes) {
-        const subSelect = document.getElementById('subAccountTypeFilter');
-        if (!subSelect) return;
+    populateSubAccTypeMultiSelectOptions(accountTypes) {
+        const container = document.getElementById('subAccTypeMultiSelectOptions');
+        if (!container) return;
 
-        const selectedBase = this.accountTypeFilters.accountType || 'ALL';
-        const previousSub = this.accountTypeFilters.subAccountType || 'ALL';
+        const selectedBaseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAllBase = selectedBaseSet.has('ALL') || selectedBaseSet.size === 0;
+
         const fromRows = (accountTypes || [])
             .map((row) => this.parseAccountTypeRow(row))
-            .filter((x) => x.subType && (selectedBase === 'ALL' || x.baseType === selectedBase))
+            .filter((x) => x.subType && (isAllBase || selectedBaseSet.has(x.baseType)))
             .map((x) => x.subType);
-        const fromConfig = selectedBase === 'ALL'
-            ? this.getConfiguredAccountTypes().flatMap((base) => this.getConfiguredSubTypes(base))
-            : this.getConfiguredSubTypes(selectedBase);
-        const subs = Array.from(new Set([...fromRows, ...fromConfig])).sort();
 
-        subSelect.innerHTML = '<option value="ALL">All Sub Account Types</option>';
-        subs.forEach((sub) => {
-            subSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
+        const fromConfig = isAllBase
+            ? this.getConfiguredAccountTypes().flatMap((base) => this.getConfiguredSubTypes(base))
+            : Array.from(selectedBaseSet).flatMap((base) => this.getConfiguredSubTypes(base));
+
+        const subs = Array.from(new Set([...fromRows, ...fromConfig])).filter(Boolean).sort();
+        const selectedSubSet = this.accountTypeFilters.subAccountTypes || new Set(['ALL']);
+        const isAllSub = selectedSubSet.has('ALL') || selectedSubSet.size === 0;
+
+        let html = `
+            <label class="account-option-item">
+                <input type="checkbox" value="ALL" ${isAllSub ? 'checked' : ''} onchange="Reports.handleSubAccTypeCheckboxChange('ALL', this.checked)">
+                <strong>All Sub Account Types</strong>
+            </label>
+        `;
+
+        subs.forEach(sub => {
+            const isChecked = !isAllSub && selectedSubSet.has(sub);
+            const safeSub = this.escapeHtml(sub);
+            html += `
+                <label class="account-option-item">
+                    <input type="checkbox" value="${safeSub}" ${isChecked ? 'checked' : ''} onchange="Reports.handleSubAccTypeCheckboxChange('${safeSub.replace(/'/g, "\\'")}', this.checked)">
+                    <span>${safeSub}</span>
+                </label>
+            `;
         });
 
-        this.accountTypeFilters.subAccountType = subs.includes(previousSub) ? previousSub : 'ALL';
-        subSelect.value = this.accountTypeFilters.subAccountType;
+        container.innerHTML = html;
+        this.updateAccTypeButtonLabels();
+    },
+
+    handleAccTypeCheckboxChange(key, isChecked) {
+        if (!this.accountTypeFilters.accountTypes) this.accountTypeFilters.accountTypes = new Set(['ALL']);
+
+        if (key === 'ALL') {
+            this.accountTypeFilters.accountTypes = new Set(['ALL']);
+        } else {
+            this.accountTypeFilters.accountTypes.delete('ALL');
+            if (isChecked) {
+                this.accountTypeFilters.accountTypes.add(key);
+            } else {
+                this.accountTypeFilters.accountTypes.delete(key);
+            }
+            if (this.accountTypeFilters.accountTypes.size === 0) {
+                this.accountTypeFilters.accountTypes.add('ALL');
+            }
+        }
+
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    handleSubAccTypeCheckboxChange(key, isChecked) {
+        if (!this.accountTypeFilters.subAccountTypes) this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+
+        if (key === 'ALL') {
+            this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+        } else {
+            this.accountTypeFilters.subAccountTypes.delete('ALL');
+            if (isChecked) {
+                this.accountTypeFilters.subAccountTypes.add(key);
+            } else {
+                this.accountTypeFilters.subAccountTypes.delete(key);
+            }
+            if (this.accountTypeFilters.subAccountTypes.size === 0) {
+                this.accountTypeFilters.subAccountTypes.add('ALL');
+            }
+        }
+
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    selectAllAccTypes() {
+        this.accountTypeFilters.accountTypes = new Set(['ALL']);
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    clearAllAccTypes() {
+        this.accountTypeFilters.accountTypes = new Set(['ALL']);
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    selectAllSubAccTypes() {
+        this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    clearAllSubAccTypes() {
+        this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    updateAccTypeButtonLabels() {
+        const typeLabel = document.getElementById('accTypeMultiSelectLabel');
+        const subLabel = document.getElementById('subAccTypeMultiSelectLabel');
+
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        if (typeLabel) {
+            if (baseSet.has('ALL') || baseSet.size === 0) {
+                typeLabel.textContent = 'Account Type: All';
+            } else {
+                const arr = Array.from(baseSet);
+                typeLabel.textContent = arr.length === 1 ? `Account Type: ${arr[0]}` : `Account Type: ${arr[0]} (+${arr.length - 1})`;
+            }
+        }
+
+        const subSet = this.accountTypeFilters.subAccountTypes || new Set(['ALL']);
+        if (subLabel) {
+            if (subSet.has('ALL') || subSet.size === 0) {
+                subLabel.textContent = 'Sub-Type: All';
+            } else {
+                const arr = Array.from(subSet);
+                subLabel.textContent = arr.length === 1 ? `Sub-Type: ${arr[0]}` : `Sub-Type: ${arr[0]} (+${arr.length - 1})`;
+            }
+        }
     },
 
     getFilteredAccountTypeRows(accountTypes) {
-        const selectedBase = this.accountTypeFilters.accountType || 'ALL';
-        const selectedSub = this.accountTypeFilters.subAccountType || 'ALL';
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const subSet = this.accountTypeFilters.subAccountTypes || new Set(['ALL']);
+
+        const isAllBase = baseSet.has('ALL') || baseSet.size === 0;
+        const isAllSub = subSet.has('ALL') || subSet.size === 0;
 
         return (accountTypes || []).filter((row) => {
             const parsed = this.parseAccountTypeRow(row);
-            const baseMatches = selectedBase === 'ALL' || parsed.baseType === selectedBase;
-            const subMatches = selectedSub === 'ALL' || parsed.subType === selectedSub;
+            const baseMatches = isAllBase || baseSet.has(parsed.baseType);
+            const subMatches = isAllSub || (parsed.subType && subSet.has(parsed.subType));
             return baseMatches && subMatches;
         });
     },
@@ -2070,12 +2293,15 @@ const Reports = {
         if (!container) return;
 
         this.currentAccountTypeRows = Array.isArray(accountTypes) ? accountTypes : [];
-        this.populateAccountTypeFilters(this.currentAccountTypeRows);
-        const rows = this.getFilteredAccountTypeRows(this.currentAccountTypeRows);
-        const hasConfiguredTypes = this.getConfiguredAccountTypes().length > 0;
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
 
-        if (!rows.length && !hasConfiguredTypes) {
-            container.innerHTML = '<p class="text-muted text-center">No account type data available</p>';
+        const rows = this.getFilteredAccountTypeRows(this.currentAccountTypeRows);
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAllBase = baseSet.has('ALL') || baseSet.size === 0;
+
+        if (!rows.length) {
+            container.innerHTML = '<p class="text-muted text-center">No account type data available for selected filter</p>';
             return;
         }
 
@@ -2116,22 +2342,31 @@ const Reports = {
             }
         });
 
-        // Ensure configured account types/sub-accounts are represented even when no row exists yet.
-        this.getConfiguredAccountTypes().forEach((baseType) => {
-            if (!grouped[baseType]) {
-                grouped[baseType] = {
-                    count: 0,
-                    totalAmount: 0,
-                    paidAmount: 0,
-                    unpaidAmount: 0,
-                    children: {}
-                };
-            }
-            this.getConfiguredSubTypes(baseType).forEach((subType) => {
-                if (!grouped[baseType].children[subType]) {
-                    grouped[baseType].children[subType] = {
-                        name: subType,
+        // Only inject empty configured account types if ALL base types are selected
+        if (isAllBase) {
+            this.getConfiguredAccountTypes().forEach((baseType) => {
+                if (!grouped[baseType]) {
+                    grouped[baseType] = {
                         count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0,
+                        children: {}
+                    };
+                }
+                this.getConfiguredSubTypes(baseType).forEach((subType) => {
+                    if (!grouped[baseType].children[subType]) {
+                        grouped[baseType].children[subType] = {
+                            name: subType,
+                            count: 0,
+                            totalAmount: 0,
+                            paidAmount: 0,
+                            unpaidAmount: 0
+                        };
+                    }
+                });
+            });
+        }
                         totalAmount: 0,
                         paidAmount: 0,
                         unpaidAmount: 0
@@ -2570,11 +2805,44 @@ const Reports = {
             const result = await API.getDebtProfileList();
             if (result.success) {
                 this.historicalReports = result.reports || [];
-                dropdown.innerHTML = '<option value="">-- Select a Saved Report --</option>';
-                this.historicalReports.forEach(report => {
+                const reports = this.historicalReports;
+
+                // Update KPI summary bar
+                const totalCount = reports.length;
+                const approvedCount = reports.filter(r => String(r.status || '').toUpperCase() === 'APPROVED').length;
+                const pendingCount = reports.filter(r => String(r.status || '').toUpperCase() === 'PENDING').length;
+
+                let lastDateStr = '-';
+                if (reports.length > 0) {
+                    const sorted = [...reports].sort((a, b) => new Date(b.createdAt || b.timestamp || 0) - new Date(a.createdAt || a.timestamp || 0));
+                    if (sorted[0] && (sorted[0].createdAt || sorted[0].timestamp)) {
+                        lastDateStr = new Date(sorted[0].createdAt || sorted[0].timestamp).toLocaleDateString('en-GB');
+                    }
+                }
+
+                const kpiTotal = document.getElementById('debtKpiTotal');
+                const kpiApproved = document.getElementById('debtKpiApproved');
+                const kpiPending = document.getElementById('debtKpiPending');
+                const kpiLastDate = document.getElementById('debtKpiLastDate');
+
+                if (kpiTotal) kpiTotal.textContent = totalCount;
+                if (kpiApproved) kpiApproved.textContent = approvedCount;
+                if (kpiPending) kpiPending.textContent = pendingCount;
+                if (kpiLastDate) kpiLastDate.textContent = lastDateStr;
+
+                if (!reports || reports.length === 0) {
+                    dropdown.innerHTML = '<option value="">-- No Saved Reports Available --</option>';
+                    return;
+                }
+
+                dropdown.innerHTML = `<option value="">-- Select Saved Report (${reports.length}) --</option>`;
+                reports.forEach(report => {
                     const option = document.createElement('option');
                     option.value = report.requestId;
-                    option.textContent = `${report.title} (${report.requestId}) [${report.status}]`;
+                    const dateStr = report.createdAt ? new Date(report.createdAt).toLocaleDateString('en-GB') : '-';
+                    const statusBadge = String(report.status || '').toUpperCase() === 'APPROVED' ? '[APPROVED]' : '[PENDING]';
+                    const title = report.title || report.reportTitle || 'Official Debt Profile';
+                    option.textContent = `${statusBadge} ${title} (${dateStr})`;
                     dropdown.appendChild(option);
                 });
             } else {
