@@ -2219,7 +2219,7 @@ function getSummary(token, year, includeCapital) {
       };
     });
     
-    function getMonthFromCell_(cellVal) {
+    function getMonthFromCell_(cellVal, pmtMonthStr) {
       if (!cellVal) return '';
       if (cellVal instanceof Date) {
         return monthsList[cellVal.getMonth()] || '';
@@ -2227,21 +2227,48 @@ function getSummary(token, year, includeCapital) {
       const str = String(cellVal).trim();
       if (!str) return '';
 
-      // Match "3/10/2026 13:13:38" or "10/3/2026"
-      const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-      if (m) {
-        const p1 = parseInt(m[1], 10);
-        const p2 = parseInt(m[2], 10);
-        let monthIdx = p1 - 1;
-        if (p1 <= 12 && p2 > 12) {
-          monthIdx = p1 - 1;
-        } else if (p1 > 12 && p2 <= 12) {
-          monthIdx = p2 - 1;
-        } else if (p1 <= 12 && p2 <= 12) {
-          monthIdx = p1 - 1; // default to first part as month
+      const lower = str.toLowerCase();
+      for (let i = 0; i < monthsList.length; i++) {
+        const mName = monthsList[i].toLowerCase();
+        if (lower.includes(mName) || lower.includes(mName.substring(0, 3))) {
+          return monthsList[i];
         }
-        if (monthIdx >= 0 && monthIdx < 12) {
-          return monthsList[monthIdx] || '';
+      }
+
+      const m = str.match(/^(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{1,4})/);
+      if (m) {
+        let n1 = parseInt(m[1], 10);
+        let n2 = parseInt(m[2], 10);
+        let n3 = parseInt(m[3], 10);
+
+        let p1 = n1 > 1000 ? n2 : n1;
+        let p2 = n1 > 1000 ? n3 : n2;
+
+        let pmtIdx = pmtMonthStr ? monthsList.indexOf(pmtMonthStr) : -1;
+        let monthNum = -1;
+
+        if (p1 > 12 && p2 <= 12) {
+          monthNum = p2;
+        } else if (p2 > 12 && p1 <= 12) {
+          monthNum = p1;
+        } else if (p1 <= 12 && p2 <= 12) {
+          if (pmtIdx >= 0) {
+            if (p1 - 1 <= pmtIdx && p2 - 1 > pmtIdx) {
+              monthNum = p1;
+            } else if (p2 - 1 <= pmtIdx && p1 - 1 > pmtIdx) {
+              monthNum = p2;
+            } else {
+              monthNum = (p2 <= pmtIdx + 1 && p2 > p1) ? p2 : p1;
+            }
+          } else {
+            if (p1 <= 7 && p2 > 7) monthNum = p1;
+            else if (p2 <= 7 && p1 > 7) monthNum = p2;
+            else monthNum = p1;
+          }
+        }
+
+        if (monthNum >= 1 && monthNum <= 12) {
+          return monthsList[monthNum - 1] || '';
         }
       }
 
@@ -2283,8 +2310,8 @@ function getSummary(token, year, includeCapital) {
       const hasOldVoucherNumber = !!oldVoucher;
       const markedOldVoucherAvailable = oldVoucherAvailable === 'yes';
 
-      const rawDate = row[DATE_COL] || row[CREATED_AT_COL];
-      const raisedMonth = getMonthFromCell_(rawDate) || pmtMonth;
+      const rawDate = row[CREATED_AT_COL] || row[DATE_COL];
+      const raisedMonth = getMonthFromCell_(rawDate, pmtMonth) || pmtMonth;
       
       // Tax amounts
       const vat = parseAmount(row[VAT_COL]);

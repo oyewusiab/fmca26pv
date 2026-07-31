@@ -2017,12 +2017,67 @@ const Reports = {
         return Array.isArray(map[baseType]) ? map[baseType] : [];
     },
 
-    getMonthNameFromDate(dateInput) {
+    parseMonthFromDateStr(dateInput, pmtMonthStr) {
         if (!dateInput) return null;
-        const d = this.parseDateFlexible(dateInput);
-        if (!d || isNaN(d.getTime())) return null;
+        if (dateInput instanceof Date) return dateInput.getMonth();
+        const str = String(dateInput).trim();
+        if (!str) return null;
+
         const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
-        return monthsList[d.getMonth()];
+        const lower = str.toLowerCase();
+        for (let i = 0; i < monthsList.length; i++) {
+            const mName = monthsList[i].toLowerCase();
+            if (lower.includes(mName) || lower.includes(mName.substring(0, 3))) {
+                return i;
+            }
+        }
+
+        const m = str.match(/^(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{1,4})/);
+        if (m) {
+            let n1 = parseInt(m[1], 10);
+            let n2 = parseInt(m[2], 10);
+            let n3 = parseInt(m[3], 10);
+
+            let p1 = n1 > 1000 ? n2 : n1;
+            let p2 = n1 > 1000 ? n3 : n2;
+
+            let pmtIdx = pmtMonthStr ? monthsList.findIndex(x => x.toLowerCase() === String(pmtMonthStr).toLowerCase()) : -1;
+            let monthNum = -1;
+
+            if (p1 > 12 && p2 <= 12) {
+                monthNum = p2;
+            } else if (p2 > 12 && p1 <= 12) {
+                monthNum = p1;
+            } else if (p1 <= 12 && p2 <= 12) {
+                if (pmtIdx >= 0) {
+                    if (p1 - 1 <= pmtIdx && p2 - 1 > pmtIdx) {
+                        monthNum = p1;
+                    } else if (p2 - 1 <= pmtIdx && p1 - 1 > pmtIdx) {
+                        monthNum = p2;
+                    } else {
+                        monthNum = (p2 <= pmtIdx + 1 && p2 > p1) ? p2 : p1;
+                    }
+                } else {
+                    if (p1 <= 7 && p2 > 7) monthNum = p1;
+                    else if (p2 <= 7 && p1 > 7) monthNum = p2;
+                    else monthNum = p1;
+                }
+            }
+
+            if (monthNum >= 1 && monthNum <= 12) {
+                return monthNum - 1;
+            }
+        }
+
+        const d = this.parseDateFlexible(str);
+        return d && !isNaN(d.getTime()) ? d.getMonth() : null;
+    },
+
+    getMonthNameFromDate(dateInput, pmtMonthStr) {
+        const idx = this.parseMonthFromDateStr(dateInput, pmtMonthStr);
+        if (idx === null || idx < 0 || idx > 11) return null;
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        return monthsList[idx];
     },
 
     isCapitalCategory(v) {
@@ -3836,7 +3891,7 @@ const Reports = {
 
             const pmtMonth = String(v?.pmtMonth || '').trim();
             const raisedDate = v?.createdAt || v?.date;
-            const raisedMonth = this.getMonthNameFromDate(raisedDate) || pmtMonth;
+            const raisedMonth = this.getMonthNameFromDate(raisedDate, pmtMonth) || pmtMonth;
 
             let raisedIdx = monthsList.indexOf(raisedMonth);
             if (raisedIdx < 0) {
