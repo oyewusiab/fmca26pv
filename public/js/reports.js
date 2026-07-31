@@ -1074,8 +1074,11 @@ const Reports = {
 
         const total = Number(allYearsData?.grandTotals?.currentOutstandingBalance || 0);
         const currentRow = allYearsData?.yearsSummary?.find(y => y.label === this.currentYear);
-        const current = Number(currentRow?.currentBalance || 0);
-        const prior = Math.max(total - current, 0);
+
+        // Calculate unpaid debt originating specifically from current year
+        const currentUnpaid = Number(currentRow?.unpaidAmount || (currentRow ? Math.max(currentRow.currentBalance - currentRow.balanceBroughtForward, 0) : 0));
+        // Calculate unpaid debt originating from prior years
+        const priorUnpaid = Math.max(total - currentUnpaid, 0);
 
         const isEmpty = !allYearsData || total === 0;
         this.toggleChartPlaceholder('netPayableChart', isEmpty);
@@ -1090,9 +1093,9 @@ const Reports = {
         this.netPayableChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['Current Year', 'Prior Years'],
+                labels: [`Current Year (${this.currentYear})`, 'Prior Years'],
                 datasets: [{
-                    data: [current, prior],
+                    data: [currentUnpaid, priorUnpaid],
                     backgroundColor: [this.THEME.accentBlue, this.THEME.softGrey],
                     borderColor: [this.THEME.accentBlueBorder, this.THEME.softGreyBorder],
                     borderWidth: 1
@@ -1113,11 +1116,11 @@ const Reports = {
 
         const kpi = document.getElementById('netPayableKPI');
         if (kpi) {
-            const share = total > 0 ? (current / total) * 100 : 0;
+            const share = total > 0 ? (currentUnpaid / total) * 100 : 0;
             kpi.innerHTML = `
-                <div class="stat-label">Net Payable Position</div>
+                <div class="stat-label">Net Payable Position (All Years)</div>
                 <div class="stat-value text-danger">${Utils.formatCurrency(total)}</div>
-                <div class="stat-subvalue">Current year share: ${share.toFixed(1)}%</div>
+                <div class="stat-subvalue">${this.currentYear} Share: ${share.toFixed(1)}% (${Utils.formatCurrency(currentUnpaid)}) | Prior Years: ${Utils.formatCurrency(priorUnpaid)}</div>
             `;
         }
     },
@@ -2476,6 +2479,111 @@ const Reports = {
                     <tbody>
         `;
 
+    renderAccountTypeTable(accountTypes) {
+        const container = document.getElementById('accountTypeTable');
+        if (!container) return;
+
+        this.currentAccountTypeRows = Array.isArray(accountTypes) ? accountTypes : [];
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+
+        const rows = this.getFilteredAccountTypeRows(this.currentAccountTypeRows);
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAllBase = baseSet.has('ALL') || baseSet.size === 0;
+
+        if (!rows.length) {
+            container.innerHTML = '<p class="text-muted text-center">No account type data available for selected filter</p>';
+            return;
+        }
+
+        const grouped = {};
+        rows.forEach((row) => {
+            const parsed = this.parseAccountTypeRow(row);
+            const baseType = parsed.baseType;
+            const subType = parsed.subType;
+            if (!grouped[baseType]) {
+                grouped[baseType] = {
+                    count: 0,
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    unpaidAmount: 0,
+                    children: {}
+                };
+            }
+
+            grouped[baseType].count += Number(row.count || 0);
+            grouped[baseType].totalAmount += Number(row.totalAmount || 0);
+            grouped[baseType].paidAmount += Number(row.paidAmount || 0);
+            grouped[baseType].unpaidAmount += Number(row.unpaidAmount || 0);
+
+            if (subType) {
+                if (!grouped[baseType].children[subType]) {
+                    grouped[baseType].children[subType] = {
+                        name: subType,
+                        count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0
+                    };
+                }
+                grouped[baseType].children[subType].count += Number(row.count || 0);
+                grouped[baseType].children[subType].totalAmount += Number(row.totalAmount || 0);
+                grouped[baseType].children[subType].paidAmount += Number(row.paidAmount || 0);
+                grouped[baseType].children[subType].unpaidAmount += Number(row.unpaidAmount || 0);
+            }
+        });
+
+        // Only inject empty configured account types if ALL base types are selected
+        if (isAllBase) {
+            this.getConfiguredAccountTypes().forEach((baseType) => {
+                if (!grouped[baseType]) {
+                    grouped[baseType] = {
+                        count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0,
+                        children: {}
+                    };
+                }
+                this.getConfiguredSubTypes(baseType).forEach((subType) => {
+                    if (!grouped[baseType].children[subType]) {
+                        grouped[baseType].children[subType] = {
+                            name: subType,
+                            count: 0,
+                            totalAmount: 0,
+                            paidAmount: 0,
+                            unpaidAmount: 0
+                        };
+                    }
+                });
+            });
+        }
+
+        const configuredBaseOrder = this.getConfiguredAccountTypes();
+        const baseOrderIndex = {};
+        configuredBaseOrder.forEach((name, idx) => { baseOrderIndex[name] = idx; });
+
+        let totalCount = 0;
+        let totalAmount = 0;
+        let totalPaid = 0;
+        let totalUnpaid = 0;
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Account Type</th>
+                            <th class="text-center">Vouchers</th>
+                            <th class="text-right">Total Amount</th>
+                            <th class="text-right">Paid Amount</th>
+                            <th class="text-right">Unpaid Amount</th>
+                            <th class="text-center">Payment Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
         Object.keys(grouped)
             .sort((a, b) => {
                 const ai = Object.prototype.hasOwnProperty.call(baseOrderIndex, a) ? baseOrderIndex[a] : Number.MAX_SAFE_INTEGER;
@@ -2495,11 +2603,7 @@ const Reports = {
 
                 totalCount += parent.count;
                 totalAmount += parent.totalAmount;
-                totalPaidCurrentMonth += parent.paidCurrentMonth;
-                totalPaidPreviousMonth += parent.paidPreviousMonth;
                 totalPaid += parent.paidAmount;
-                totalUnpaidCurrentMonth += parent.unpaidCurrentMonth;
-                totalUnpaidPreviousMonths += parent.unpaidPreviousMonths;
                 totalUnpaid += parent.unpaidAmount;
 
                 const safeBase = baseType.replace(/'/g, "\\'");
@@ -2511,12 +2615,8 @@ const Reports = {
                         </td>
                         <td class="text-center">${Utils.formatNumber(parent.count)}</td>
                         <td class="text-right">${Utils.formatCurrency(parent.totalAmount)}</td>
-                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidCurrentMonth)}</td>
-                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidPreviousMonth)}</td>
-                        <td class="text-right text-success" style="font-weight: 700;">${Utils.formatCurrency(parent.paidAmount)}</td>
-                        <td class="text-right text-warning">${Utils.formatCurrency(parent.unpaidCurrentMonth)}</td>
-                        <td class="text-right text-warning">${Utils.formatCurrency(parent.unpaidPreviousMonths)}</td>
-                        <td class="text-right text-danger" style="font-weight: 700;">${Utils.formatCurrency(parent.unpaidAmount)}</td>
+                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidAmount)}</td>
+                        <td class="text-right text-danger">${Utils.formatCurrency(parent.unpaidAmount)}</td>
                         <td class="text-center">${paymentRate.toFixed(2)}%</td>
                     </tr>
                 `;
@@ -2536,12 +2636,8 @@ const Reports = {
                                     <td style="padding-left:42px;" class="drill-down-link" onclick="Reports.drillDown('accountType', '${safeBase}', '${child.name.replace(/'/g, "\\'")}')">${child.name}</td>
                                     <td class="text-center">${Utils.formatNumber(child.count)}</td>
                                     <td class="text-right">${Utils.formatCurrency(child.totalAmount)}</td>
-                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidCurrentMonth)}</td>
-                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidPreviousMonth)}</td>
-                                    <td class="text-right text-success" style="font-weight:700;">${Utils.formatCurrency(child.paidAmount)}</td>
-                                    <td class="text-right text-warning">${Utils.formatCurrency(child.unpaidCurrentMonth)}</td>
-                                    <td class="text-right text-warning">${Utils.formatCurrency(child.unpaidPreviousMonths)}</td>
-                                    <td class="text-right text-danger" style="font-weight:700;">${Utils.formatCurrency(child.unpaidAmount)}</td>
+                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidAmount)}</td>
+                                    <td class="text-right text-danger">${Utils.formatCurrency(child.unpaidAmount)}</td>
                                     <td class="text-center">${childRate.toFixed(2)}%</td>
                                 </tr>
                             `;
@@ -2555,12 +2651,8 @@ const Reports = {
                 <td><strong>TOTAL</strong></td>
                 <td class="text-center"><strong>${Utils.formatNumber(totalCount)}</strong></td>
                 <td class="text-right"><strong>${Utils.formatCurrency(totalAmount)}</strong></td>
-                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidCurrentMonth)}</strong></td>
-                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidPreviousMonth)}</strong></td>
-                <td class="text-right text-success" style="font-weight:700;"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
-                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidCurrentMonth)}</strong></td>
-                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidPreviousMonths)}</strong></td>
-                <td class="text-right text-danger" style="font-weight:700;"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-danger"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
                 <td class="text-center"><strong>${grandRate.toFixed(2)}%</strong></td>
             </tr>
         `;

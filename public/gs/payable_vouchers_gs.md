@@ -3389,27 +3389,15 @@ function getAllYearsSummary(token, includeCapital) {
           continue;
         }
         
-        const has2026Format = yearInfo.label === '2026';
-        let statusCol = 0;
-        let accountCol = 3;
-        let grossCol = 6;
-        let oldVNCol = 14;
-        let oldAvailCol = 20;
-        let categoryCol = 9;
-        let accountTypeCol = 15;
-        let numCols = 17;
-
-        if (has2026Format) {
-          const c = resolveVoucherSummaryColumns_(sheet);
-          statusCol = c.STATUS_COL;
-          accountCol = c.ACCT_COL;
-          grossCol = c.GROSS_COL;
-          oldVNCol = c.OLD_VN_COL;
-          oldAvailCol = c.OLD_VN_AVAILABLE_COL;
-          categoryCol = c.CATEGORY_COL;
-          accountTypeCol = c.ACCOUNT_TYPE_COL;
-          numCols = c.LAST_COL;
-        }
+        const c = resolveVoucherSummaryColumns_(sheet);
+        const statusCol = c.STATUS_COL;
+        const accountCol = c.ACCT_COL;
+        const grossCol = c.GROSS_COL;
+        const oldVNCol = c.OLD_VN_COL;
+        const oldAvailCol = c.OLD_VN_AVAILABLE_COL;
+        const categoryCol = c.CATEGORY_COL;
+        const accountTypeCol = c.ACCOUNT_TYPE_COL;
+        const numCols = c.LAST_COL;
 
         const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
         
@@ -3428,7 +3416,7 @@ function getAllYearsSummary(token, includeCapital) {
           const accountType = String(row[accountTypeCol] || '').trim();
           const grossAmount = parseAmount(row[grossCol]);
           const oldVN = String(row[oldVNCol] || '').trim();
-          const oldVoucherAvailable = has2026Format ? String(row[oldAvailCol] || '').trim().toLowerCase() : '';
+          const oldVoucherAvailable = String(row[oldAvailCol] || '').trim().toLowerCase();
           
           if (!account && !grossAmount) continue;
 
@@ -3445,7 +3433,7 @@ function getAllYearsSummary(token, includeCapital) {
             paidAmount += grossAmount;
           } else if (status === 'cancelled') {
             cancelledCount++;
-          } else if (status === 'unpaid' || status === 'pending') {
+          } else if (status === 'unpaid' || status === 'pending' || status === 'pending deletion') {
             unpaidAmount += grossAmount;
           }
           
@@ -3462,6 +3450,7 @@ function getAllYearsSummary(token, includeCapital) {
           totalVouchers: totalVouchers,
           totalAmount: totalAmount,
           paidAmount: paidAmount,
+          unpaidAmount: unpaidAmount,
           revalidatedVouchers: revalidatedCount,
           cancelledVouchers: cancelledCount,
           currentBalance: currentBalance
