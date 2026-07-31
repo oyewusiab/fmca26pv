@@ -1276,7 +1276,11 @@ const Reports = {
     },
 
     computeVoucherStats(vouchers) {
-        const amounts = vouchers.map(v => this.getVoucherAmount(v)).filter(v => v > 0);
+        const activeVouchers = (vouchers || []).filter(v => 
+            String(v?.status || '').trim().toLowerCase() !== 'cancelled' && 
+            this.isVoucherMatchingAccountFilter(v)
+        );
+        const amounts = activeVouchers.map(v => this.getVoucherAmount(v)).filter(v => v > 0);
         const total = amounts.reduce((s, v) => s + v, 0);
         const count = amounts.length;
         const avg = count ? total / count : 0;
@@ -1288,10 +1292,10 @@ const Reports = {
             return sorted[idx];
         };
 
-        const revalidated = vouchers.filter(v => this.isRevalidatedVoucher(v));
+        const revalidated = (vouchers || []).filter(v => this.isVoucherMatchingAccountFilter(v) && this.isRevalidatedVoucher(v));
         const revalidatedAmount = revalidated.reduce((s, v) => s + this.getVoucherAmount(v), 0);
 
-        const cancelled = vouchers.filter(v => String(v.status || '').toLowerCase() === 'cancelled');
+        const cancelled = (vouchers || []).filter(v => this.isVoucherMatchingAccountFilter(v) && String(v.status || '').toLowerCase() === 'cancelled');
         const cancelledAmount = cancelled.reduce((s, v) => s + this.getVoucherAmount(v), 0);
 
         const cancelledByMonth = Array(12).fill(0);
@@ -2000,10 +2004,28 @@ const Reports = {
         return Array.isArray(map[baseType]) ? map[baseType] : [];
     },
 
+    getMonthNameFromDate(dateInput) {
+        if (!dateInput) return null;
+        const d = new Date(dateInput);
+        if (isNaN(d.getTime())) return null;
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        return monthsList[d.getMonth()];
+    },
+
+    isCapitalCategory(v) {
+        if (!v) return false;
+        const c = String(v.category || v.categories || '').trim().toLowerCase();
+        const a = String(v.accountType || '').trim().toLowerCase();
+        return c === 'capital' || a === 'capital' || a === 'cap';
+    },
+
     buildAccountTypeBreakdownFromVouchers(vouchers) {
         const stats = {};
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
         (vouchers || []).forEach((v) => {
+            if (!this.isVoucherMatchingAccountFilter(v)) return;
+
             const baseType = String(v?.accountType || '').trim() || 'Unspecified';
             const subType = String(v?.subAccountType || '').trim();
             const key = `${baseType}::${subType}`;
@@ -2013,7 +2035,11 @@ const Reports = {
                     subAccountType: subType,
                     count: 0,
                     totalAmount: 0,
+                    paidCurrentMonth: 0,
+                    paidPreviousMonth: 0,
                     paidAmount: 0,
+                    unpaidCurrentMonth: 0,
+                    unpaidPreviousMonths: 0,
                     unpaidAmount: 0
                 };
             }
@@ -2022,8 +2048,29 @@ const Reports = {
             const status = String(v?.status || '').trim().toLowerCase();
             stats[key].count += 1;
             stats[key].totalAmount += amount;
-            if (status === 'paid') stats[key].paidAmount += amount;
-            if (status === 'unpaid') stats[key].unpaidAmount += amount;
+
+            const pmtMonth = String(v?.pmtMonth || '').trim();
+            const raisedDate = v?.createdAt || v?.date;
+            const raisedMonth = this.getMonthNameFromDate(raisedDate) || pmtMonth;
+
+            const pmtIdx = monthsList.indexOf(pmtMonth);
+            const raisedIdx = monthsList.indexOf(raisedMonth);
+
+            if (status === 'paid') {
+                if (raisedIdx >= 0 && pmtIdx >= 0 && raisedIdx < pmtIdx) {
+                    stats[key].paidPreviousMonth += amount;
+                } else {
+                    stats[key].paidCurrentMonth += amount;
+                }
+                stats[key].paidAmount += amount;
+            } else if (status === 'unpaid') {
+                if (raisedIdx < 0 || pmtIdx < 0 || raisedIdx >= pmtIdx) {
+                    stats[key].unpaidCurrentMonth += amount;
+                } else {
+                    stats[key].unpaidPreviousMonths += amount;
+                }
+                stats[key].unpaidAmount += amount;
+            }
         });
 
         return Object.values(stats).map((row) => {
@@ -2314,7 +2361,11 @@ const Reports = {
                 grouped[baseType] = {
                     count: 0,
                     totalAmount: 0,
+                    paidCurrentMonth: 0,
+                    paidPreviousMonth: 0,
                     paidAmount: 0,
+                    unpaidCurrentMonth: 0,
+                    unpaidPreviousMonths: 0,
                     unpaidAmount: 0,
                     children: {}
                 };
@@ -2322,7 +2373,11 @@ const Reports = {
 
             grouped[baseType].count += Number(row.count || 0);
             grouped[baseType].totalAmount += Number(row.totalAmount || 0);
+            grouped[baseType].paidCurrentMonth += Number(row.paidCurrentMonth || 0);
+            grouped[baseType].paidPreviousMonth += Number(row.paidPreviousMonth || 0);
             grouped[baseType].paidAmount += Number(row.paidAmount || 0);
+            grouped[baseType].unpaidCurrentMonth += Number(row.unpaidCurrentMonth || 0);
+            grouped[baseType].unpaidPreviousMonths += Number(row.unpaidPreviousMonths || 0);
             grouped[baseType].unpaidAmount += Number(row.unpaidAmount || 0);
 
             if (subType) {
@@ -2331,13 +2386,21 @@ const Reports = {
                         name: subType,
                         count: 0,
                         totalAmount: 0,
+                        paidCurrentMonth: 0,
+                        paidPreviousMonth: 0,
                         paidAmount: 0,
+                        unpaidCurrentMonth: 0,
+                        unpaidPreviousMonths: 0,
                         unpaidAmount: 0
                     };
                 }
                 grouped[baseType].children[subType].count += Number(row.count || 0);
                 grouped[baseType].children[subType].totalAmount += Number(row.totalAmount || 0);
+                grouped[baseType].children[subType].paidCurrentMonth += Number(row.paidCurrentMonth || 0);
+                grouped[baseType].children[subType].paidPreviousMonth += Number(row.paidPreviousMonth || 0);
                 grouped[baseType].children[subType].paidAmount += Number(row.paidAmount || 0);
+                grouped[baseType].children[subType].unpaidCurrentMonth += Number(row.unpaidCurrentMonth || 0);
+                grouped[baseType].children[subType].unpaidPreviousMonths += Number(row.unpaidPreviousMonths || 0);
                 grouped[baseType].children[subType].unpaidAmount += Number(row.unpaidAmount || 0);
             }
         });
@@ -2349,7 +2412,11 @@ const Reports = {
                     grouped[baseType] = {
                         count: 0,
                         totalAmount: 0,
+                        paidCurrentMonth: 0,
+                        paidPreviousMonth: 0,
                         paidAmount: 0,
+                        unpaidCurrentMonth: 0,
+                        unpaidPreviousMonths: 0,
                         unpaidAmount: 0,
                         children: {}
                     };
@@ -2360,7 +2427,11 @@ const Reports = {
                             name: subType,
                             count: 0,
                             totalAmount: 0,
+                            paidCurrentMonth: 0,
+                            paidPreviousMonth: 0,
                             paidAmount: 0,
+                            unpaidCurrentMonth: 0,
+                            unpaidPreviousMonths: 0,
                             unpaidAmount: 0
                         };
                     }
@@ -2374,20 +2445,32 @@ const Reports = {
 
         let totalCount = 0;
         let totalAmount = 0;
+        let totalPaidCurrentMonth = 0;
+        let totalPaidPreviousMonth = 0;
         let totalPaid = 0;
+        let totalUnpaidCurrentMonth = 0;
+        let totalUnpaidPreviousMonths = 0;
         let totalUnpaid = 0;
 
         let html = `
-            <div class="table-container">
-                <table>
+            <div class="table-container" style="overflow-x: auto;">
+                <table class="table-responsive">
                     <thead>
                         <tr>
-                            <th>Account Type</th>
-                            <th class="text-center">Vouchers</th>
-                            <th class="text-right">Total Amount</th>
-                            <th class="text-right">Paid Amount</th>
-                            <th class="text-right">Unpaid Amount</th>
-                            <th class="text-center">Payment Rate</th>
+                            <th rowspan="2" style="vertical-align: middle;">Account Type</th>
+                            <th rowspan="2" class="text-center" style="vertical-align: middle;">Vouchers</th>
+                            <th rowspan="2" class="text-right" style="vertical-align: middle;">Total Amount</th>
+                            <th colspan="3" class="text-center" style="border-bottom: 1px solid rgba(0,0,0,0.1); background-color: rgba(40, 167, 69, 0.05);">Amount Paid</th>
+                            <th colspan="3" class="text-center" style="border-bottom: 1px solid rgba(0,0,0,0.1); background-color: rgba(220, 53, 69, 0.05);">Amount Unpaid</th>
+                            <th rowspan="2" class="text-center" style="vertical-align: middle;">Payment Rate</th>
+                        </tr>
+                        <tr>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 600; background-color: rgba(40, 167, 69, 0.05);" title="Vouchers raised in current period and paid same period">From Raised This Period</th>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 600; background-color: rgba(40, 167, 69, 0.05);" title="Vouchers raised in previous periods and paid in current period">From Previous Vouchers</th>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 700; background-color: rgba(40, 167, 69, 0.1);">Total Payment</th>
+                            <th class="text-right text-warning" style="font-size: 11px; font-weight: 600; background-color: rgba(220, 53, 69, 0.05);" title="Vouchers raised in current period and remaining unpaid">From Raised This Period</th>
+                            <th class="text-right text-warning" style="font-size: 11px; font-weight: 600; background-color: rgba(220, 53, 69, 0.05);" title="Vouchers raised in previous periods and remaining unpaid">From Previous Vouchers</th>
+                            <th class="text-right text-danger" style="font-size: 11px; font-weight: 700; background-color: rgba(220, 53, 69, 0.1);">Total Unpaid</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2412,7 +2495,11 @@ const Reports = {
 
                 totalCount += parent.count;
                 totalAmount += parent.totalAmount;
+                totalPaidCurrentMonth += parent.paidCurrentMonth;
+                totalPaidPreviousMonth += parent.paidPreviousMonth;
                 totalPaid += parent.paidAmount;
+                totalUnpaidCurrentMonth += parent.unpaidCurrentMonth;
+                totalUnpaidPreviousMonths += parent.unpaidPreviousMonths;
                 totalUnpaid += parent.unpaidAmount;
 
                 const safeBase = baseType.replace(/'/g, "\\'");
@@ -2424,8 +2511,12 @@ const Reports = {
                         </td>
                         <td class="text-center">${Utils.formatNumber(parent.count)}</td>
                         <td class="text-right">${Utils.formatCurrency(parent.totalAmount)}</td>
-                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidAmount)}</td>
-                        <td class="text-right text-danger">${Utils.formatCurrency(parent.unpaidAmount)}</td>
+                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidCurrentMonth)}</td>
+                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidPreviousMonth)}</td>
+                        <td class="text-right text-success" style="font-weight: 700;">${Utils.formatCurrency(parent.paidAmount)}</td>
+                        <td class="text-right text-warning">${Utils.formatCurrency(parent.unpaidCurrentMonth)}</td>
+                        <td class="text-right text-warning">${Utils.formatCurrency(parent.unpaidPreviousMonths)}</td>
+                        <td class="text-right text-danger" style="font-weight: 700;">${Utils.formatCurrency(parent.unpaidAmount)}</td>
                         <td class="text-center">${paymentRate.toFixed(2)}%</td>
                     </tr>
                 `;
@@ -2445,8 +2536,12 @@ const Reports = {
                                     <td style="padding-left:42px;" class="drill-down-link" onclick="Reports.drillDown('accountType', '${safeBase}', '${child.name.replace(/'/g, "\\'")}')">${child.name}</td>
                                     <td class="text-center">${Utils.formatNumber(child.count)}</td>
                                     <td class="text-right">${Utils.formatCurrency(child.totalAmount)}</td>
-                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidAmount)}</td>
-                                    <td class="text-right text-danger">${Utils.formatCurrency(child.unpaidAmount)}</td>
+                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidCurrentMonth)}</td>
+                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidPreviousMonth)}</td>
+                                    <td class="text-right text-success" style="font-weight:700;">${Utils.formatCurrency(child.paidAmount)}</td>
+                                    <td class="text-right text-warning">${Utils.formatCurrency(child.unpaidCurrentMonth)}</td>
+                                    <td class="text-right text-warning">${Utils.formatCurrency(child.unpaidPreviousMonths)}</td>
+                                    <td class="text-right text-danger" style="font-weight:700;">${Utils.formatCurrency(child.unpaidAmount)}</td>
                                     <td class="text-center">${childRate.toFixed(2)}%</td>
                                 </tr>
                             `;
@@ -2460,8 +2555,12 @@ const Reports = {
                 <td><strong>TOTAL</strong></td>
                 <td class="text-center"><strong>${Utils.formatNumber(totalCount)}</strong></td>
                 <td class="text-right"><strong>${Utils.formatCurrency(totalAmount)}</strong></td>
-                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
-                <td class="text-right text-danger"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidCurrentMonth)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidPreviousMonth)}</strong></td>
+                <td class="text-right text-success" style="font-weight:700;"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidCurrentMonth)}</strong></td>
+                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidPreviousMonths)}</strong></td>
+                <td class="text-right text-danger" style="font-weight:700;"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
                 <td class="text-center"><strong>${grandRate.toFixed(2)}%</strong></td>
             </tr>
         `;
@@ -2483,37 +2582,65 @@ const Reports = {
         }
 
         let totalCount = 0;
+        let totalPaidCurrentMonth = 0;
+        let totalPaidPreviousMonth = 0;
         let totalPaid = 0;
+        let totalUnpaidCurrentMonth = 0;
+        let totalUnpaidPreviousMonths = 0;
         let totalUnpaid = 0;
 
         let html = `
-            <div class="table-container">
-                <table>
+            <div class="table-container" style="overflow-x: auto;">
+                <table class="table-responsive">
                     <thead>
                         <tr>
-                            <th>Month</th>
-                            <th class="text-center">Voucher Count</th>
-                            <th class="text-right">Amount Paid</th>
-                            <th class="text-right">Amount Unpaid</th>
-                            <th class="text-right">Total</th>
+                            <th rowspan="2" style="vertical-align: middle;">Month</th>
+                            <th rowspan="2" class="text-center" style="vertical-align: middle;">Voucher Count</th>
+                            <th colspan="3" class="text-center" style="border-bottom: 1px solid rgba(0,0,0,0.1); background-color: rgba(40, 167, 69, 0.05);">Amount Paid</th>
+                            <th colspan="3" class="text-center" style="border-bottom: 1px solid rgba(0,0,0,0.1); background-color: rgba(220, 53, 69, 0.05);">Amount Unpaid</th>
+                            <th rowspan="2" class="text-right" style="vertical-align: middle;">Total Expenditure</th>
+                        </tr>
+                        <tr>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 600; background-color: rgba(40, 167, 69, 0.05);" title="Vouchers raised this month and paid same month">From Raised This Month</th>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 600; background-color: rgba(40, 167, 69, 0.05);" title="Vouchers raised in previous month(s) and paid this month">From Previous Vouchers</th>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 700; background-color: rgba(40, 167, 69, 0.1);">Total Payment</th>
+                            <th class="text-right text-warning" style="font-size: 11px; font-weight: 600; background-color: rgba(220, 53, 69, 0.05);" title="Vouchers raised this month and remaining unpaid">From Raised This Month</th>
+                            <th class="text-right text-warning" style="font-size: 11px; font-weight: 600; background-color: rgba(220, 53, 69, 0.05);" title="Vouchers raised in previous month(s) and remaining unpaid">From Previous Vouchers</th>
+                            <th class="text-right text-danger" style="font-size: 11px; font-weight: 700; background-color: rgba(220, 53, 69, 0.1);">Total Unpaid</th>
                         </tr>
                     </thead>
                     <tbody>
         `;
 
         months.forEach(month => {
-            totalCount += month.count;
-            totalPaid += month.paidAmount;
-            totalUnpaid += month.unpaidAmount;
+            const count = Number(month.count || 0);
+            const paidCurr = Number(month.paidCurrentMonth || 0);
+            const paidPrev = Number(month.paidPreviousMonth || 0);
+            const paidTot = Number(month.paidAmount || (paidCurr + paidPrev));
+            const unpaidCurr = Number(month.unpaidCurrentMonth || 0);
+            const unpaidPrev = Number(month.unpaidPreviousMonths || 0);
+            const unpaidTot = Number(month.unpaidAmount || (unpaidCurr + unpaidPrev));
 
-            const monthTotal = month.paidAmount + month.unpaidAmount;
+            totalCount += count;
+            totalPaidCurrentMonth += paidCurr;
+            totalPaidPreviousMonth += paidPrev;
+            totalPaid += paidTot;
+            totalUnpaidCurrentMonth += unpaidCurr;
+            totalUnpaidPreviousMonths += unpaidPrev;
+            totalUnpaid += unpaidTot;
+
+            const monthTotal = paidTot + unpaidTot;
 
             html += `
                 <tr>
                     <td class="drill-down-link" onclick="Reports.drillDown('month', '${month.month}')"><strong>${month.month}</strong></td>
-                    <td class="text-center">${Utils.formatNumber(month.count)}</td>
-                    <td class="text-right text-success">${Utils.formatCurrency(month.paidAmount)}</td>
-                    <td class="text-right text-warning">${Utils.formatCurrency(month.unpaidAmount)}</td>
+                    <td class="text-center">${Utils.formatNumber(count)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(paidCurr)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(paidPrev)}</td>
+                    <td class="text-right text-success" style="font-weight:700;">${Utils.formatCurrency(paidTot)}</td>
+                    <td class="text-right text-warning">${Utils.formatCurrency(unpaidCurr)}</td>
+                    <td class="text-right text-warning">${Utils.formatCurrency(unpaidPrev)}</td>
+                    <td class="text-right text-danger" style="font-weight:700;">${Utils.formatCurrency(unpaidTot)}</td>
                     <td class="text-right">${Utils.formatCurrency(monthTotal)}</td>
                 </tr>
             `;
@@ -2524,8 +2651,12 @@ const Reports = {
             <tr class="totals-row">
                 <td><strong>TOTAL</strong></td>
                 <td class="text-center"><strong>${Utils.formatNumber(totalCount)}</strong></td>
-                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
-                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidCurrentMonth)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidPreviousMonth)}</strong></td>
+                <td class="text-right text-success" style="font-weight:700;"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidCurrentMonth)}</strong></td>
+                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidPreviousMonths)}</strong></td>
+                <td class="text-right text-danger" style="font-weight:700;"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
                 <td class="text-right"><strong>${Utils.formatCurrency(totalPaid + totalUnpaid)}</strong></td>
             </tr>
         `;
@@ -3534,18 +3665,32 @@ const Reports = {
     },
 
     isVoucherMatchingAccountFilter(v) {
+        if (!v) return false;
+
+        // Exempt Capital category by default unless explicitly selected
+        const isCap = this.isCapitalCategory(v);
+        const hasExplicitCapital = this.selectedAccounts && 
+            !this.selectedAccounts.has('ALL') && 
+            Array.from(this.selectedAccounts).some(a => String(a).toLowerCase() === 'capital' || String(a).toLowerCase() === 'cap');
+
+        if (isCap && !hasExplicitCapital) {
+            return false;
+        }
+
         if (!this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0) {
             return true;
         }
 
         const vType = String(v?.accountType || '').trim();
         const vSubType = String(v?.subAccountType || '').trim();
+        const vCat = String(v?.category || v?.categories || '').trim();
         const selectedArr = Array.from(this.selectedAccounts);
 
         for (const target of selectedArr) {
             const targetLower = target.toLowerCase();
             if (vType.toLowerCase() === targetLower) return true;
             if (vSubType && vSubType.toLowerCase() === targetLower) return true;
+            if (vCat.toLowerCase() === targetLower) return true;
             if ((targetLower === 'ohd' || targetLower === 'overhead') && 
                 (vType.toLowerCase() === 'ohd' || vType.toLowerCase() === 'overhead')) {
                 return true;
@@ -3695,30 +3840,56 @@ const Reports = {
         const accountTypeBreakdown = this.buildAccountTypeBreakdownFromVouchers(vouchers);
 
         const monthlyMap = {};
-        CONFIG.MONTHS.forEach((m, idx) => {
-            monthlyMap[idx] = { month: m, vouchersRaised: 0, amountPaid: 0, balance: 0, percentagePaid: 0 };
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        monthsList.forEach((m, idx) => {
+            monthlyMap[idx] = {
+                month: m,
+                count: 0,
+                paidCurrentMonth: 0,
+                paidPreviousMonth: 0,
+                paidAmount: 0,
+                unpaidCurrentMonth: 0,
+                unpaidPreviousMonths: 0,
+                unpaidAmount: 0
+            };
         });
+
         vouchers.forEach(v => {
-            const idx = this.getMonthIndexFromVoucher(v);
-            if (idx !== null && idx !== undefined && monthlyMap[idx]) {
-                const gross = parseFloat(v.grossAmount || 0);
-                const cell = monthlyMap[idx];
-                cell.vouchersRaised++;
-                if (v.status === 'Paid') {
-                    cell.amountPaid += gross;
-                } else if (v.status === 'Unpaid') {
-                    cell.balance += gross;
+            if (!this.isVoucherMatchingAccountFilter(v)) return;
+
+            const pmtMonth = String(v?.pmtMonth || '').trim();
+            const raisedDate = v?.createdAt || v?.date;
+            const raisedMonth = this.getMonthNameFromDate(raisedDate) || pmtMonth;
+
+            const pmtIdx = monthsList.indexOf(pmtMonth);
+            const raisedIdx = monthsList.indexOf(raisedMonth);
+            const gross = parseFloat(v.grossAmount || 0);
+            const status = String(v.status || '').trim().toLowerCase();
+
+            const targetIdx = pmtIdx >= 0 ? pmtIdx : (raisedIdx >= 0 ? raisedIdx : null);
+
+            if (targetIdx !== null && monthlyMap[targetIdx]) {
+                const cell = monthlyMap[targetIdx];
+                cell.count++;
+                if (status === 'paid') {
+                    if (raisedIdx >= 0 && raisedIdx < targetIdx) {
+                        cell.paidPreviousMonth += gross;
+                    } else {
+                        cell.paidCurrentMonth += gross;
+                    }
+                    cell.paidAmount += gross;
+                } else if (status === 'unpaid') {
+                    if (raisedIdx >= 0 && raisedIdx < targetIdx) {
+                        cell.unpaidPreviousMonths += gross;
+                    } else {
+                        cell.unpaidCurrentMonth += gross;
+                    }
+                    cell.unpaidAmount += gross;
                 }
             }
         });
-        const monthlyBreakdown = Object.values(monthlyMap).map(m => {
-            return {
-                month: m.month,
-                count: m.vouchersRaised,
-                paidAmount: m.amountPaid,
-                unpaidAmount: m.balance
-            };
-        });
+
+        const monthlyBreakdown = Object.values(monthlyMap);
 
         this.summaryData = {
             success: true,

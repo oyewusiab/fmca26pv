@@ -432,6 +432,7 @@
                     <div class="card-header">
                         <h3 class="card-title">
                             <i class="fas fa-scale-balanced"></i> Cash Outflow vs Commitment Split
+                            <i class="fas fa-question-circle report-info-icon" title="Comparison of actual paid cash disbursements against total voucher commitments and original contract sums."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('cashCommitChart', 'Cash_Commitment_Split')">
                             <i class="fas fa-download"></i> PNG
@@ -449,6 +450,7 @@
                     <div class="card-header">
                         <h3 class="card-title">
                             <i class="fas fa-file-invoice-dollar"></i> Accruals Snapshot
+                            <i class="fas fa-question-circle report-info-icon" title="Overview of accrued unpaid liabilities and estimated tax exposure (VAT, WHT, Stamp Duty)."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('accrualsSnapshotChart', 'Accruals_Snapshot')">
                             <i class="fas fa-download"></i> PNG
@@ -465,11 +467,12 @@
             <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-layer-group"></i> Net Payable Position (All Years)
+                    <i class="fas fa-question-circle report-info-icon" title="Cumulative net payable position comparing outstanding debt for the current financial year against prior years."></i>
                 </h2>
                 <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items:center;">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title"><i class="fas fa-chart-pie"></i> Current vs Prior Years</h3>
+                            <h3 class="card-title"><i class="fas fa-chart-pie"></i> Current vs Prior Years <i class="fas fa-question-circle report-info-icon" title="Proportional distribution of net unpaid balance between current active year and prior years."></i></h3>
                         </div>
                         <div class="card-body">
                             <canvas id="netPayableChart" height="150"></canvas>
@@ -487,6 +490,7 @@
             <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-chart-area"></i> Average Voucher Value & Distribution
+                    <i class="fas fa-question-circle report-info-icon" title="Statistical metrics (mean, median P50, P75, P90) and distribution histogram across non-cancelled active vouchers."></i>
                 </h2>
                 <div class="stats-grid" id="voucherValueCards">
                     <div class="stat-card">
@@ -496,7 +500,7 @@
                 </div>
                 <div class="card" style="margin-top: 12px;">
                     <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-signal"></i> Voucher Value Distribution</h3>
+                        <h3 class="card-title"><i class="fas fa-signal"></i> Voucher Value Distribution <i class="fas fa-question-circle report-info-icon" title="Frequency distribution histogram categorizing vouchers into monetary value ranges."></i></h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('voucherDistChart', 'Voucher_Distribution')">
                             <i class="fas fa-download"></i> PNG
                         </button>
@@ -511,6 +515,7 @@
             <div class="report-section tab-section-tax">
                 <h2 class="report-section-title">
                     <i class="fas fa-receipt"></i> Tax Analysis
+                    <i class="fas fa-question-circle report-info-icon" title="Summary of total tax liabilities, remitted tax payments, and outstanding tax compliance rate."></i>
                 </h2>
                 <div class="stats-grid" id="taxSummaryCards" style="margin-bottom: 20px;">
                     <div class="stat-card info">
@@ -538,6 +543,7 @@
                     <div class="card-header">
                         <h3 class="card-title">
                             <i class="fas fa-chart-line"></i> Tax Liability vs Tax Paid (Month-wise)
+                            <i class="fas fa-question-circle report-info-icon" title="Monthly comparison of tax liability generated versus tax remitted to revenue authorities."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('taxSplitChart', 'Tax_Liability_vs_Paid')">
                             <i class="fas fa-download"></i> PNG
@@ -555,6 +561,7 @@
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-history"></i> Tax Remittance History Ledger
+                            <i class="fas fa-question-circle report-info-icon" title="Detailed ledger log of all tax remittance transactions and payment receipts."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('taxPaymentsContainer', 'Tax_Remittance_Ledger')">
                             <i class="fas fa-file-excel"></i> Export Ledger
@@ -600,7 +607,7 @@
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title"><i class="fas fa-hashtag"></i> By Count</h3>
+                            <h3 class="card-title"><i class="fas fa-hashtag"></i> By Count <i class="fas fa-question-circle report-info-icon" title="Proportion of vouchers by status count (Paid, Unpaid, Cancelled)."></i></h3>
                             <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusCountChart', 'Status_By_Count')">
                                 <i class="fas fa-download"></i> PNG
                             </button>
@@ -612,7 +619,7 @@
 
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title"><i class="fas fa-naira-sign"></i> By Amount</h3>
+                            <h3 class="card-title"><i class="fas fa-naira-sign"></i> By Amount <i class="fas fa-question-circle report-info-icon" title="Proportion of total gross monetary value across voucher statuses."></i></h3>
                             <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('statusAmountChart', 'Status_By_Amount')">
                                 <i class="fas fa-download"></i> PNG
                             </button>
@@ -714,6 +721,7 @@
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-calendar-alt"></i> Monthly Breakdown
+                            <i class="fas fa-question-circle report-info-icon" title="Monthly breakdown showing Amount Paid and Amount Unpaid separated into vouchers raised in the current month vs carried over from previous months."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('monthlyTable', 'Monthly_Breakdown')">
                             <i class="fas fa-file-excel"></i> Export
@@ -731,6 +739,7 @@
                     <div class="card-header">
                         <h3 class="card-title">
                             <i class="fas fa-chart-pie"></i> Category Payments (Chart)
+                            <i class="fas fa-question-circle report-info-icon" title="Visual pie/bar distribution of payments by expense category."></i>
                         </h3>
                     </div>
                     <div class="card-body">
@@ -745,6 +754,7 @@
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-chart-bar"></i> Unpaid Balance Pareto (80/20)
+                            <i class="fas fa-question-circle report-info-icon" title="Pareto analysis identifying key 20% categories or vendors contributing to 80% of unpaid debt."></i>
                         </h3>
                         <div style="display: flex; gap: 8px;">
                             <select class="form-control" id="paretoGroupSelector" onchange="Reports.toggleParetoGroup()" style="width: auto; padding: 2px 8px; font-size: 12px; height: 28px; line-height: 1;">
@@ -771,6 +781,7 @@
                     <div class="card-header">
                         <h3 class="card-title">
                             <i class="fas fa-chart-line"></i> Monthly Payments (Chart)
+                            <i class="fas fa-question-circle report-info-icon" title="Monthly expenditure trends illustrating paid vs unpaid amounts."></i>
                         </h3>
                     </div>
                     <div class="card-body">
@@ -782,11 +793,12 @@
             <div class="report-section tab-section-debt" id="agingSection">
                 <h2 class="report-section-title">
                     <i class="fas fa-hourglass-half"></i> Outstanding by Age (Amount + Count Trend)
+                    <i class="fas fa-question-circle report-info-icon" title="Aging schedule classifying unpaid vouchers into 0-30, 31-60, 61-90, and 90+ day intervals."></i>
                 </h2>
 
                 <div class="card">
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6;">
-                        <h3 class="card-title"><i class="fas fa-table"></i> Aging Breakdown</h3>
+                        <h3 class="card-title"><i class="fas fa-table"></i> Aging Breakdown <i class="fas fa-question-circle report-info-icon" title="Detailed table of unpaid voucher balances categorized by age brackets."></i></h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('agingTable', 'Aging_Breakdown')">
                             <i class="fas fa-file-excel"></i> Export Table
                         </button>
@@ -805,6 +817,7 @@
             <div class="report-section tab-section-debt" id="cardMultiYearDebt">
                 <h2 class="report-section-title">
                     <i class="fas fa-history"></i> Multi-Year Debt Tracking
+                    <i class="fas fa-question-circle report-info-icon" title="Multi-year debt profile tracking balance brought forward, total raised, paid, revalidated, cancelled, and current balance across years."></i>
                 </h2>
                 
                 <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 20px;">
@@ -822,6 +835,7 @@
                     <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                         <h3 class="card-title">
                             <i class="fas fa-table"></i> Year-by-Year Summary
+                            <i class="fas fa-question-circle report-info-icon" title="Comprehensive year-by-year financial tracking matrix."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.exportCard('allYearsTable', 'Multi_Year_Summary')">
                             <i class="fas fa-file-excel"></i> Export
@@ -836,11 +850,12 @@
             <div class="report-section tab-section-debt">
                 <h2 class="report-section-title">
                     <i class="fas fa-chart-line"></i> Outstanding Debt Trend (All Years)
+                    <i class="fas fa-question-circle report-info-icon" title="Historical multi-year trajectory of cumulative unpaid balances."></i>
                 </h2>
 
                 <div class="card">
                     <div class="card-header">
-                    <h3 class="card-title"><i class="fas fa-wave-square"></i> Trend</h3>
+                    <h3 class="card-title"><i class="fas fa-wave-square"></i> Trend <i class="fas fa-question-circle report-info-icon" title="Line chart visualizing debt trends over consecutive financial years."></i></h3>
                     <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('debtTrendChart', 'Debt_Trend')">
                         <i class="fas fa-download"></i> PNG
                     </button>
@@ -855,6 +870,7 @@
             <div class="report-section tab-section-debt">
                 <h2 class="report-section-title">
                     <i class="fas fa-exclamation-triangle"></i> Debt Profile (2026)
+                    <i class="fas fa-question-circle report-info-icon" title="Detailed analysis of active financial year debt distribution by category and payee."></i>
                 </h2>
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -863,6 +879,7 @@
                         <div class="card-header">
                             <h3 class="card-title">
                                 <i class="fas fa-chart-bar"></i> Debt by Category
+                                <i class="fas fa-question-circle report-info-icon" title="Outstanding unpaid debt totals broken down by expenditure category."></i>
                             </h3>
                         </div>
                         <div class="card-body" id="debtByCategory">
@@ -875,6 +892,7 @@
                         <div class="card-header">
                             <h3 class="card-title">
                                 <i class="fas fa-users"></i> Top 10 Outstanding Payees
+                                <i class="fas fa-question-circle report-info-icon" title="List of payees/vendors with the largest unpaid balances."></i>
                             </h3>
                         </div>
                         <div class="card-body" id="topDebtors">
@@ -887,7 +905,7 @@
             <div class="report-section tab-section-debt">
             <div class="card">
                 <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-users"></i> Top Debtors (Chart)</h3>
+                <h3 class="card-title"><i class="fas fa-users"></i> Top Debtors (Chart) <i class="fas fa-question-circle report-info-icon" title="Bar chart visualizing top 10 payee debt amounts."></i></h3>
                 <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('topDebtorsChart', 'Top_Debtors')">
                     <i class="fas fa-download"></i> PNG
                 </button>
@@ -901,7 +919,7 @@
             <div class="report-section tab-section-debt">
                 <div class="card">
                     <div class="card-header">
-                    <h3 class="card-title"><i class="fas fa-bullseye"></i> Debt Concentration</h3>
+                    <h3 class="card-title"><i class="fas fa-bullseye"></i> Debt Concentration <i class="fas fa-question-circle report-info-icon" title="Doughnut chart comparing debt owed to Top 10 payees versus all other creditors."></i></h3>
                     </div>
                     <div class="card-body" style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:center;">
                     <div>
@@ -922,11 +940,12 @@
             <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-rotate-right"></i> Revalidated Impact
+                    <i class="fas fa-question-circle report-info-icon" title="Financial breakdown of revalidated vouchers carried over from prior years."></i>
                 </h2>
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:center;">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title"><i class="fas fa-chart-pie"></i> Revalidated vs New</h3>
+                            <h3 class="card-title"><i class="fas fa-chart-pie"></i> Revalidated vs New <i class="fas fa-question-circle report-info-icon" title="Proportion of total expenditure belonging to revalidated vouchers vs newly raised vouchers."></i></h3>
                         </div>
                         <div class="card-body">
                             <canvas id="revalidatedImpactChart" height="150"></canvas>
@@ -946,6 +965,7 @@
                     <div class="card-header">
                         <h3 class="card-title">
                             <i class="fas fa-chart-bar"></i> Category Margin / Share Shift
+                            <i class="fas fa-question-circle report-info-icon" title="Year-over-year shift in category expenditure share."></i>
                         </h3>
                         <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('categoryShareShiftChart', 'Category_Share_Shift')">
                             <i class="fas fa-download"></i> PNG
@@ -961,11 +981,12 @@
             <div class="report-section tab-section-summary">
                 <h2 class="report-section-title">
                     <i class="fas fa-ban"></i> Cancelled Voucher Financial Impact
+                    <i class="fas fa-question-circle report-info-icon" title="Financial magnitude and monthly distribution of cancelled payment vouchers."></i>
                 </h2>
                 <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items:center;">
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title"><i class="fas fa-chart-line"></i> Cancelled Amount by Month</h3>
+                            <h3 class="card-title"><i class="fas fa-chart-line"></i> Cancelled Amount by Month <i class="fas fa-question-circle report-info-icon" title="Monthly breakdown of cancelled voucher amounts and counts."></i></h3>
                             <button class="btn btn-sm btn-secondary" onclick="Reports.downloadChart('cancelledImpactChart', 'Cancelled_Impact')">
                                 <i class="fas fa-download"></i> PNG
                             </button>
@@ -1201,7 +1222,7 @@
                     </div>
                     <div class="card">
                         <div class="card-header">
-                            <h3 class="card-title">Detailed Debt Schedule</h3>
+                            <h3 class="card-title">Detailed Debt Schedule <i class="fas fa-question-circle report-info-icon" title="Itemized schedule of vouchers included in the official debt profile."></i></h3>
                         </div>
                         <div class="card-body" id="reportDetailsTableContainer">
                             <!-- Table inserted by JS -->

@@ -2069,7 +2069,7 @@ function getDashboardStats(token) {
   }
 }
 
-function getSummary(token, year) {
+function getSummary(token, year, includeCapital) {
   try {
     const session = getSession(token);
     if (!session) {
@@ -2091,9 +2091,10 @@ function getSummary(token, year) {
     }
     
     year = year || '2026';
+    const allowCapital = includeCapital === true;
     
     // Cache Service check
-    const cacheKey = 'summary_cache_' + year;
+    const cacheKey = 'summary_cache_' + year + '_' + (allowCapital ? 'cap' : 'nocap');
     const cache = CacheService.getScriptCache();
     try {
       const cached = cache.get(cacheKey);
@@ -2172,6 +2173,8 @@ function getSummary(token, year) {
     const OLD_VN_AVAILABLE_COL = c.OLD_VN_AVAILABLE_COL;
     const ACCOUNT_TYPE_COL = c.ACCOUNT_TYPE_COL;
     const SUB_ACCT_COL = c.SUB_ACCT_COL;
+    const DATE_COL     = c.DATE_COL;
+    const CREATED_AT_COL = c.CREATED_AT_COL;
     
     // ---------- INITIALISE COUNTERS ----------
     
@@ -2195,8 +2198,8 @@ function getSummary(token, year) {
     
     // Category and monthly breakdown
     const categoryStats = {};   // { [category]: { vouchersRaised, amountPaid, balance, totalAmount } }
-    const monthlyStats  = {};   // { [month]: { count, paidAmount, unpaidAmount } }
-    const accountTypeStats = {}; // { [accountType]: { count, totalAmount, paidAmount, unpaidAmount, cancelledAmount, totalTax, paidTax } }
+    const monthlyStats  = {};   // { [month]: { count, paidCurrentMonth, paidPreviousMonth, paidAmount, unpaidCurrentMonth, unpaidPreviousMonths, unpaidAmount } }
+    const accountTypeStats = {}; // { [accountType]: { count, totalAmount, paidCurrentMonth, paidPreviousMonth, paidAmount, unpaidCurrentMonth, unpaidPreviousMonths, unpaidAmount, cancelledAmount, totalTax, paidTax } }
     
     const monthsList = [
       'January','February','March','April','May','June',
@@ -2204,9 +2207,25 @@ function getSummary(token, year) {
     ];
     
     monthsList.forEach(m => {
-      monthlyStats[m] = { count: 0, paidAmount: 0, unpaidAmount: 0 };
+      monthlyStats[m] = {
+        month: m,
+        count: 0,
+        paidCurrentMonth: 0,
+        paidPreviousMonth: 0,
+        paidAmount: 0,
+        unpaidCurrentMonth: 0,
+        unpaidPreviousMonths: 0,
+        unpaidAmount: 0
+      };
     });
     
+    function getMonthFromCell_(cellVal) {
+      if (!cellVal) return '';
+      const d = new Date(cellVal);
+      if (isNaN(d.getTime())) return '';
+      return monthsList[d.getMonth()] || '';
+    }
+
     // ---------- PROCESS EACH ROW ----------
     
     for (let i = 0; i < data.length; i++) {
@@ -2222,6 +2241,14 @@ function getSummary(token, year) {
       const baseAccountType = String(row[ACCOUNT_TYPE_COL] || '').trim() || 'Unspecified';
       const subAccountType = String(row[SUB_ACCT_COL] || '').trim();
       const accountKey = subAccountType ? `${baseAccountType}::${subAccountType}` : `${baseAccountType}::`;
+
+      // Exempt Capital category by default unless explicitly allowed
+      const isCapital = category.toLowerCase() === 'capital' || 
+                        baseAccountType.toLowerCase() === 'capital' || 
+                        baseAccountType.toLowerCase() === 'cap';
+      if (isCapital && !allowCapital) {
+        continue;
+      }
       
       const contractSum = parseAmount(row[CONTRACT_COL]);
       const grossAmount = parseAmount(row[GROSS_COL]);
@@ -2229,6 +2256,9 @@ function getSummary(token, year) {
       const oldVoucherAvailable = String(row[OLD_VN_AVAILABLE_COL] || '').trim().toLowerCase();
       const hasOldVoucherNumber = !!oldVoucher;
       const markedOldVoucherAvailable = oldVoucherAvailable === 'yes';
+
+      const rawDate = row[DATE_COL] || row[CREATED_AT_COL];
+      const raisedMonth = getMonthFromCell_(rawDate) || pmtMonth;
       
       // Tax amounts
       const vat = parseAmount(row[VAT_COL]);
@@ -2278,14 +2308,22 @@ function getSummary(token, year) {
         cancelledVoucherCount++;
         totalCancelledAmount += grossAmount;
       }
-      // other statuses ignored for these sums
+
+      const pmtIdx = monthsList.indexOf(pmtMonth);
+      const raisedIdx = monthsList.indexOf(raisedMonth);
 
       // ----- Account type breakdown -----
       if (!accountTypeStats[accountKey]) {
         accountTypeStats[accountKey] = {
+          accountType: baseAccountType,
+          subAccountType: subAccountType,
           count: 0,
           totalAmount: 0,
+          paidCurrentMonth: 0,
+          paidPreviousMonth: 0,
           paidAmount: 0,
+          unpaidCurrentMonth: 0,
+          unpaidPreviousMonths: 0,
           unpaidAmount: 0,
           cancelledAmount: 0,
           totalTax: 0,
@@ -2299,9 +2337,19 @@ function getSummary(token, year) {
       at.totalTax += (vat + wht + stampDuty);
 
       if (status === 'paid') {
+        if (raisedIdx >= 0 && pmtIdx >= 0 && raisedIdx < pmtIdx) {
+          at.paidPreviousMonth += grossAmount;
+        } else {
+          at.paidCurrentMonth += grossAmount;
+        }
         at.paidAmount += grossAmount;
         at.paidTax += (vat + wht + stampDuty);
       } else if (status === 'unpaid') {
+        if (raisedIdx < 0 || pmtIdx < 0 || raisedIdx >= pmtIdx) {
+          at.unpaidCurrentMonth += grossAmount;
+        } else {
+          at.unpaidPreviousMonths += grossAmount;
+        }
         at.unpaidAmount += grossAmount;
       } else if (status === 'cancelled') {
         at.cancelledAmount += grossAmount;
@@ -2318,12 +2366,10 @@ function getSummary(token, year) {
       }
       const cat = categoryStats[category];
       
-      // Vouchers raised in this category (count of records with account)
       if (account) {
         cat.vouchersRaised++;
       }
       
-      // Total amount in this category (all gross)
       cat.totalAmount += grossAmount;
       
       if (status === 'paid') {
@@ -2331,22 +2377,33 @@ function getSummary(token, year) {
       } else if (status === 'unpaid') {
         cat.balance += grossAmount;
       }
-      // Cancelled amounts reduce debt; not counted in balance
       
       // ----- Monthly breakdown -----
-      if (pmtMonth && monthsList.includes(pmtMonth)) {
-        monthlyStats[pmtMonth].count++;
+      const targetMonth = (pmtMonth && monthsList.includes(pmtMonth)) ? pmtMonth : (raisedMonth && monthsList.includes(raisedMonth) ? raisedMonth : '');
+      if (targetMonth && monthlyStats[targetMonth]) {
+        const ms = monthlyStats[targetMonth];
+        ms.count++;
         if (status === 'paid') {
-          monthlyStats[pmtMonth].paidAmount += grossAmount;
+          if (raisedIdx >= 0 && pmtIdx >= 0 && raisedIdx < pmtIdx) {
+            ms.paidPreviousMonth += grossAmount;
+          } else {
+            ms.paidCurrentMonth += grossAmount;
+          }
+          ms.paidAmount += grossAmount;
         } else if (status === 'unpaid') {
-          monthlyStats[pmtMonth].unpaidAmount += grossAmount;
+          const mIdx = monthsList.indexOf(targetMonth);
+          if (raisedIdx >= 0 && raisedIdx < mIdx) {
+            ms.unpaidPreviousMonths += grossAmount;
+          } else {
+            ms.unpaidCurrentMonth += grossAmount;
+          }
+          ms.unpaidAmount += grossAmount;
         }
       }
     }
     
     // ---------- FINAL CALCULATIONS ----------
     
-    // Total Debt = Total Contract Sum - (Paid + Cancelled)
     const totalDebt = totalContractSum - (totalPaidAmount + totalCancelledAmount);
     
     // Average Payment Rate = Paid vouchers (count) / Total raised (count)
@@ -2465,31 +2522,62 @@ function getSummary(token, year) {
  * @param {string} token - Session token
  * @returns {Object} Debt profile data
  */
-function getDebtProfile(token) {
+function getDebtProfile(token, year, includeCapital) {
   try {
     const session = getSession(token);
     if (!session) {
       return { success: false, error: 'Session expired' };
     }
     
-    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
-    const data = sheet.getDataRange().getValues();
+    year = year || '2026';
+    const allowCapital = includeCapital === true;
+
+    let sheetName = CONFIG.SHEETS.VOUCHERS_2026;
+    if (year !== '2026') {
+      switch (year) {
+        case '2025':  sheetName = CONFIG.SHEETS.VOUCHERS_2025;        break;
+        case '2024':  sheetName = CONFIG.SHEETS.VOUCHERS_2024;        break;
+        case '2023':  sheetName = CONFIG.SHEETS.VOUCHERS_2023;        break;
+        case '<2023': sheetName = CONFIG.SHEETS.VOUCHERS_BEFORE_2023; break;
+      }
+    }
+
+    const sheet = getSheet(sheetName);
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      return {
+        success: true,
+        totalDebt: 0,
+        debtByCategory: [],
+        topDebtors: [],
+        allPayeeDebts: []
+      };
+    }
+
+    const c = resolveVoucherSummaryColumns_(sheet);
+    const data = sheet.getRange(2, 1, lastRow - 1, c.LAST_COL).getValues();
     
     const debtByCategory = {};
     const debtByPayee = {};
     
-    for (let i = 1; i < data.length; i++) {
+    for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      if (!row[CONFIG.VOUCHER_COLUMNS.PAYEE - 1]) continue;
-      
-      const status = String(row[CONFIG.VOUCHER_COLUMNS.STATUS - 1]).trim();
-      
+      const status = String(row[c.STATUS_COL] || '').trim().toLowerCase();
+      const payee = String(row[c.PAYEE_COL] || '').trim();
+      const category = String(row[c.CATEGORY_COL] || '').trim() || 'Uncategorized';
+      const accountType = String(row[c.ACCOUNT_TYPE_COL] || '').trim();
+      const grossAmount = parseAmount(row[c.GROSS_COL]);
+
+      if (!payee && !grossAmount) continue;
+
       // Only count unpaid vouchers as debt
-      if (status !== 'Unpaid' && status !== 'Pending Deletion') continue;
+      if (status !== 'unpaid' && status !== 'pending deletion' && status !== 'pending') continue;
       
-      const payee = String(row[CONFIG.VOUCHER_COLUMNS.PAYEE - 1]).trim();
-      const category = String(row[CONFIG.VOUCHER_COLUMNS.CATEGORIES - 1]).trim() || 'Uncategorized';
-      const grossAmount = parseAmount(row[CONFIG.VOUCHER_COLUMNS.GROSS_AMOUNT - 1]);
+      // Exempt Capital category by default
+      const isCapital = category.toLowerCase() === 'capital' || 
+                        accountType.toLowerCase() === 'capital' || 
+                        accountType.toLowerCase() === 'cap';
+      if (isCapital && !allowCapital) continue;
       
       // By category
       if (!debtByCategory[category]) {
@@ -2499,11 +2587,12 @@ function getDebtProfile(token) {
       debtByCategory[category].count++;
       
       // By payee
-      if (!debtByPayee[payee]) {
-        debtByPayee[payee] = { amount: 0, count: 0 };
+      const payeeKey = payee || 'Unknown Payee';
+      if (!debtByPayee[payeeKey]) {
+        debtByPayee[payeeKey] = { amount: 0, count: 0 };
       }
-      debtByPayee[payee].amount += grossAmount;
-      debtByPayee[payee].count++;
+      debtByPayee[payeeKey].amount += grossAmount;
+      debtByPayee[payeeKey].count++;
     }
     
     // Convert to arrays and sort
@@ -3244,7 +3333,7 @@ function sendReleaseNotification(controlNumber, targetUnit, vouchers, releasedBy
  * @param {string} token - Session token
  * @returns {Object} All years summary with grand totals
  */
-function getAllYearsSummary(token) {
+function getAllYearsSummary(token, includeCapital) {
   try {
     const session = getSession(token);
     if (!session) {
@@ -3264,6 +3353,8 @@ function getAllYearsSummary(token) {
       return { success: false, error: 'Unauthorized' };
     }
     
+    const allowCapital = includeCapital === true;
+
     const years = [
       { label: '<2023', sheet: CONFIG.SHEETS.VOUCHERS_BEFORE_2023 },
       { label: '2023', sheet: CONFIG.SHEETS.VOUCHERS_2023 },
@@ -3304,6 +3395,8 @@ function getAllYearsSummary(token) {
         let grossCol = 6;
         let oldVNCol = 14;
         let oldAvailCol = 20;
+        let categoryCol = 9;
+        let accountTypeCol = 15;
         let numCols = 17;
 
         if (has2026Format) {
@@ -3313,6 +3406,8 @@ function getAllYearsSummary(token) {
           grossCol = c.GROSS_COL;
           oldVNCol = c.OLD_VN_COL;
           oldAvailCol = c.OLD_VN_AVAILABLE_COL;
+          categoryCol = c.CATEGORY_COL;
+          accountTypeCol = c.ACCOUNT_TYPE_COL;
           numCols = c.LAST_COL;
         }
 
@@ -3329,11 +3424,19 @@ function getAllYearsSummary(token) {
           const row = data[i];
           const status = String(row[statusCol] || '').trim().toLowerCase();
           const account = String(row[accountCol] || '').trim();
+          const category = String(row[categoryCol] || '').trim();
+          const accountType = String(row[accountTypeCol] || '').trim();
           const grossAmount = parseAmount(row[grossCol]);
           const oldVN = String(row[oldVNCol] || '').trim();
           const oldVoucherAvailable = has2026Format ? String(row[oldAvailCol] || '').trim().toLowerCase() : '';
           
           if (!account && !grossAmount) continue;
+
+          // Capital category default exemption
+          const isCapital = category.toLowerCase() === 'capital' || 
+                            accountType.toLowerCase() === 'capital' || 
+                            accountType.toLowerCase() === 'cap';
+          if (isCapital && !allowCapital) continue;
           
           if (account) totalVouchers++;
           totalAmount += grossAmount;
@@ -3342,7 +3445,7 @@ function getAllYearsSummary(token) {
             paidAmount += grossAmount;
           } else if (status === 'cancelled') {
             cancelledCount++;
-          } else {
+          } else if (status === 'unpaid' || status === 'pending') {
             unpaidAmount += grossAmount;
           }
           
