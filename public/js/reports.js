@@ -361,27 +361,37 @@ const Reports = {
     parseDateFlexible(value) {
         if (!value) return null;
         if (value instanceof Date) return value;
-        const d = new Date(value);
-        if (!isNaN(d.getTime())) return d;
+        const str = String(value).trim();
+        if (!str) return null;
 
-        // Handle "1/5/2026 20:20:22" style
-        const m = String(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-        if (!m) return null;
+        // Match "3/10/2026 13:13:38" or "03/10/2026"
+        const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (m) {
+            const p1 = parseInt(m[1], 10);
+            const p2 = parseInt(m[2], 10);
+            const yyyy = parseInt(m[3], 10);
+            const hh = parseInt(m[4] || '0', 10);
+            const mm = parseInt(m[5] || '0', 10);
+            const ss = parseInt(m[6] || '0', 10);
 
-        const a = parseInt(m[1], 10);
-        const b = parseInt(m[2], 10);
-        const yyyy = parseInt(m[3], 10);
-        const hh = parseInt(m[4], 10);
-        const mm = parseInt(m[5], 10);
-        const ss = parseInt(m[6] || '0', 10);
+            let day = p1, month = p2;
+            if (p1 <= 12 && p2 > 12) {
+                month = p1;
+                day = p2;
+            } else if (p1 > 12 && p2 <= 12) {
+                day = p1;
+                month = p2;
+            } else if (p1 <= 12 && p2 <= 12) {
+                month = p1;
+                day = p2;
+            }
 
-        // Assume dd/mm unless forced
-        let day = a, month = b;
-        if (a <= 12 && b <= 12) { day = a; month = b; } // keep dd/mm
-        else if (a <= 12 && b > 12) { month = a; day = b; }
+            const out = new Date(yyyy, month - 1, day, hh, mm, ss);
+            return isNaN(out.getTime()) ? null : out;
+        }
 
-        const out = new Date(yyyy, month - 1, day, hh, mm, ss);
-        return isNaN(out.getTime()) ? null : out;
+        const d = new Date(str);
+        return isNaN(d.getTime()) ? null : d;
     },
 
     async loadAgingAnalysis2026() {
@@ -2009,8 +2019,8 @@ const Reports = {
 
     getMonthNameFromDate(dateInput) {
         if (!dateInput) return null;
-        const d = new Date(dateInput);
-        if (isNaN(d.getTime())) return null;
+        const d = this.parseDateFlexible(dateInput);
+        if (!d || isNaN(d.getTime())) return null;
         const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
         return monthsList[d.getMonth()];
     },
@@ -2565,12 +2575,28 @@ const Reports = {
 
         months.forEach(month => {
             const count = Number(month.count || 0);
-            const paidCurr = Number(month.paidCurrentMonth || 0);
-            const paidPrev = Number(month.paidPreviousMonth || 0);
-            const paidTot = Number(month.paidAmount || (paidCurr + paidPrev));
-            const unpaidCurr = Number(month.unpaidCurrentMonth || 0);
-            const unpaidPrev = Number(month.unpaidPreviousMonths || 0);
-            const unpaidTot = Number(month.unpaidAmount || (unpaidCurr + unpaidPrev));
+            const paidTot = Number(month.paidAmount || 0);
+            const unpaidTot = Number(month.unpaidAmount || 0);
+
+            let paidCurr = Number(month.paidCurrentMonth);
+            let paidPrev = Number(month.paidPreviousMonth);
+            if ((isNaN(paidCurr) && isNaN(paidPrev)) || (paidCurr === 0 && paidPrev === 0 && paidTot > 0)) {
+                paidCurr = paidTot;
+                paidPrev = 0;
+            } else {
+                paidCurr = isNaN(paidCurr) ? 0 : paidCurr;
+                paidPrev = isNaN(paidPrev) ? 0 : paidPrev;
+            }
+
+            let unpaidCurr = Number(month.unpaidCurrentMonth);
+            let unpaidPrev = Number(month.unpaidPreviousMonths);
+            if ((isNaN(unpaidCurr) && isNaN(unpaidPrev)) || (unpaidCurr === 0 && unpaidPrev === 0 && unpaidTot > 0)) {
+                unpaidCurr = unpaidTot;
+                unpaidPrev = 0;
+            } else {
+                unpaidCurr = isNaN(unpaidCurr) ? 0 : unpaidCurr;
+                unpaidPrev = isNaN(unpaidPrev) ? 0 : unpaidPrev;
+            }
 
             totalCount += count;
             totalPaidCurrentMonth += paidCurr;

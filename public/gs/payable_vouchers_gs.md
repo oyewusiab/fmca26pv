@@ -2221,9 +2221,35 @@ function getSummary(token, year, includeCapital) {
     
     function getMonthFromCell_(cellVal) {
       if (!cellVal) return '';
-      const d = new Date(cellVal);
-      if (isNaN(d.getTime())) return '';
-      return monthsList[d.getMonth()] || '';
+      if (cellVal instanceof Date) {
+        return monthsList[cellVal.getMonth()] || '';
+      }
+      const str = String(cellVal).trim();
+      if (!str) return '';
+
+      // Match "3/10/2026 13:13:38" or "10/3/2026"
+      const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (m) {
+        const p1 = parseInt(m[1], 10);
+        const p2 = parseInt(m[2], 10);
+        let monthIdx = p1 - 1;
+        if (p1 <= 12 && p2 > 12) {
+          monthIdx = p1 - 1;
+        } else if (p1 > 12 && p2 <= 12) {
+          monthIdx = p2 - 1;
+        } else if (p1 <= 12 && p2 <= 12) {
+          monthIdx = p1 - 1; // default to first part as month
+        }
+        if (monthIdx >= 0 && monthIdx < 12) {
+          return monthsList[monthIdx] || '';
+        }
+      }
+
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        return monthsList[d.getMonth()] || '';
+      }
+      return '';
     }
 
     // ---------- PROCESS EACH ROW ----------
