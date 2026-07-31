@@ -2405,25 +2405,59 @@ function getSummary(token, year, includeCapital) {
       }
       
       // ----- Monthly breakdown -----
-      const targetMonth = (pmtMonth && monthsList.includes(pmtMonth)) ? pmtMonth : (raisedMonth && monthsList.includes(raisedMonth) ? raisedMonth : '');
-      if (targetMonth && monthlyStats[targetMonth]) {
-        const ms = monthlyStats[targetMonth];
-        ms.count++;
-        if (status === 'paid') {
-          if (raisedIdx >= 0 && pmtIdx >= 0 && raisedIdx < pmtIdx) {
+      let rIdx = monthsList.indexOf(raisedMonth);
+      if (rIdx < 0) {
+        const pIdx = monthsList.indexOf(pmtMonth);
+        rIdx = pIdx >= 0 ? pIdx : 0;
+      }
+
+      const raisedMonthName = monthsList[rIdx];
+      if (monthlyStats[raisedMonthName] && account) {
+        monthlyStats[raisedMonthName].count++;
+      }
+
+      let pIdx = monthsList.indexOf(pmtMonth);
+
+      if (status === 'paid') {
+        if (pIdx < 0) pIdx = rIdx;
+
+        const pmtMonthName = monthsList[pIdx];
+        if (monthlyStats[pmtMonthName]) {
+          const ms = monthlyStats[pmtMonthName];
+          if (rIdx < pIdx) {
             ms.paidPreviousMonth += grossAmount;
           } else {
             ms.paidCurrentMonth += grossAmount;
           }
           ms.paidAmount += grossAmount;
-        } else if (status === 'unpaid') {
-          const mIdx = monthsList.indexOf(targetMonth);
-          if (raisedIdx >= 0 && raisedIdx < mIdx) {
-            ms.unpaidPreviousMonths += grossAmount;
-          } else {
-            ms.unpaidCurrentMonth += grossAmount;
+        }
+
+        // Accrued unpaid liability for months prior to payment month
+        for (let m = rIdx; m < pIdx; m++) {
+          const mName = monthsList[m];
+          if (monthlyStats[mName]) {
+            const ms = monthlyStats[mName];
+            if (rIdx === m) {
+              ms.unpaidCurrentMonth += grossAmount;
+            } else {
+              ms.unpaidPreviousMonths += grossAmount;
+            }
+            ms.unpaidAmount += grossAmount;
           }
-          ms.unpaidAmount += grossAmount;
+        }
+      } else if (status === 'unpaid' || status === 'pending' || status === 'pending deletion') {
+        // Accrued unpaid liability for all months from raised month onward
+        for (let m = rIdx; m < 12; m++) {
+          const mName = monthsList[m];
+          if (monthlyStats[mName]) {
+            const ms = monthlyStats[mName];
+            if (rIdx === m) {
+              ms.unpaidCurrentMonth += grossAmount;
+            } else {
+              ms.unpaidPreviousMonths += grossAmount;
+            }
+            ms.unpaidAmount += grossAmount;
+          }
         }
       }
     }
