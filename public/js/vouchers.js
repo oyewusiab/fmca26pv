@@ -1360,7 +1360,13 @@ const Vouchers = {
   },
 
   // ===== Voucher form =====
-  openVoucherForm(voucher = null) {
+  openVoucherForm(voucher = null, rowIndex = null) {
+    if (typeof voucher === 'number' || typeof voucher === 'string') {
+      return this.editVoucher(parseInt(voucher, 10));
+    }
+    if (voucher && typeof voucher === 'object' && !voucher.rowIndex && rowIndex) {
+      voucher.rowIndex = parseInt(rowIndex, 10);
+    }
     this.isEditMode = !!voucher;
     this.selectedVoucher = voucher;
     this._duplicateConfirmed = false;
@@ -1611,19 +1617,19 @@ const Vouchers = {
     if (!payee) return Utils.showToast('Payee name is required', 'error');
     if (!accountOrMail) return Utils.showToast('Voucher Number is required', 'error');
 
-    // In edit mode, if detected duplicate is the same voucher being edited, clear it
-    if (this.isEditMode && this.selectedVoucher && this._detectedDuplicateVoucher) {
-      const detectedRow = String(this._detectedDuplicateVoucher.rowIndex || this._detectedDuplicateVoucher.row || '');
-      const originalRow = String(this.selectedVoucher.rowIndex || this.selectedVoucher.row || '');
-      const detectedNo = String(this._detectedDuplicateVoucher.accountOrMail || '').trim().toUpperCase();
-      const originalNo = String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase();
+    // In edit mode, if voucher number is unchanged or matches the voucher being edited, clear duplicate flag
+    if (this.isEditMode) {
+      const originalNo = this.selectedVoucher ? String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase() : '';
       const currentInputNo = accountOrMail.trim().toUpperCase();
+      const detectedNo = this._detectedDuplicateVoucher ? String(this._detectedDuplicateVoucher.accountOrMail || '').trim().toUpperCase() : '';
+      const detectedRow = this._detectedDuplicateVoucher ? String(this._detectedDuplicateVoucher.rowIndex || this._detectedDuplicateVoucher.row || '') : '';
+      const originalRow = this.selectedVoucher ? String(this.selectedVoucher.rowIndex || this.selectedVoucher.row || '') : '';
 
-      const isSameRecordByRow = (detectedRow && originalRow && detectedRow === originalRow);
-      const isSameRecordByNo = (detectedNo && originalNo && detectedNo === originalNo);
-      const isSameInputNo = (detectedNo && currentInputNo && detectedNo === currentInputNo);
-
-      if (isSameRecordByRow || isSameRecordByNo || isSameInputNo) {
+      if (originalNo && currentInputNo === originalNo) {
+        this._detectedDuplicateVoucher = null;
+      } else if (detectedRow && originalRow && detectedRow === originalRow) {
+        this._detectedDuplicateVoucher = null;
+      } else if (detectedNo && originalNo && detectedNo === originalNo) {
         this._detectedDuplicateVoucher = null;
       }
     }
@@ -3737,19 +3743,19 @@ const Vouchers = {
     try {
       const result = await API.lookupVoucher(voucherNumber);
       if (result.success && result.found) {
-        // If editing, skip if it's the exact same record
-        if (this.isEditMode && this.selectedVoucher) {
+        // If editing, skip if it's the exact same record or if number is unchanged
+        if (this.isEditMode) {
           const matchedRow = String(result.voucher.rowIndex || result.voucher.row || '');
-          const selectedRow = String(this.selectedVoucher.rowIndex || this.selectedVoucher.row || '');
+          const selectedRow = this.selectedVoucher ? String(this.selectedVoucher.rowIndex || this.selectedVoucher.row || '') : '';
           const matchedNo = String(result.voucher.accountOrMail || '').trim().toUpperCase();
-          const selectedNo = String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase();
-          const currentInputNo = voucherNumber.toUpperCase();
+          const selectedNo = this.selectedVoucher ? String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase() : '';
+          const currentInputNo = voucherNumber.trim().toUpperCase();
 
-          const isSameRecordByRow = (matchedRow && selectedRow && matchedRow === selectedRow);
-          const isSameRecordByNo = (matchedNo && selectedNo && matchedNo === selectedNo);
-          const isSameInputNo = (matchedNo && currentInputNo && matchedNo === currentInputNo && (selectedNo === '' || selectedNo === matchedNo));
+          const isSameRow = (matchedRow && selectedRow && matchedRow === selectedRow);
+          const isUnchangedNumber = (selectedNo && currentInputNo === selectedNo);
+          const isMatchedSelf = (matchedNo && selectedNo && matchedNo === selectedNo);
 
-          if (isSameRecordByRow || isSameRecordByNo || isSameInputNo) {
+          if (isSameRow || isUnchangedNumber || isMatchedSelf) {
             if (inlineWarn) inlineWarn.classList.add('hidden');
             if (panel) panel.classList.add('hidden');
             this._detectedDuplicateVoucher = null;
@@ -3946,6 +3952,6 @@ const Vouchers = {
 }; // <-- This closes the Vouchers object
 
 window.Vouchers = Vouchers;
-window.openVoucherModal = (voucher, rowIndex) => Vouchers.openVoucherForm(voucher);
+window.openVoucherModal = (voucher, rowIndex) => Vouchers.openVoucherForm(voucher, rowIndex);
 
 document.addEventListener('DOMContentLoaded', () => Vouchers.init());
