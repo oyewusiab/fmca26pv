@@ -341,6 +341,14 @@
       return await this.post("rejectDelete", { rowIndex, reason });
     },
 
+    async approveVoucherEdit(rowIndex) {
+      return await this.post("approveVoucherEdit", { rowIndex });
+    },
+
+    async rejectVoucherEdit(rowIndex, reason = "") {
+      return await this.post("rejectVoucherEdit", { rowIndex, reason });
+    },
+
     async deleteVoucher(rowIndex) {
       return await this.post("deleteVoucher", { rowIndex });
     },
@@ -693,6 +701,8 @@
           badgeClass = "badge-cancelled";
           break;
         case "pending deletion":
+        case "pending edit approval":
+        case "pending edit":
           badgeClass = "badge-pending";
           break;
       }

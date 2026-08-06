@@ -328,6 +328,12 @@ function doPost(e) {
             case 'rejectDelete':
                 result = rejectVoucherDelete(token, payload.rowIndex, payload.reason);
                 break;
+            case 'approveVoucherEdit':
+                result = approveVoucherEdit(token, payload.rowIndex);
+                break;
+            case 'rejectVoucherEdit':
+                result = rejectVoucherEdit(token, payload.rowIndex, payload.reason);
+                break;
             case 'deleteVoucher':
                 result = deleteVoucher(token, payload.rowIndex);
                 break;

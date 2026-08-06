@@ -16,7 +16,7 @@ const CONFIG = {
     SESSION_KEY: 'pv2026_session',
 
     // Valid statuses
-    STATUSES: ['Unpaid', 'Paid', 'Cancelled', 'Pending Deletion'],
+    STATUSES: ['Unpaid', 'Paid', 'Cancelled', 'Pending Deletion', 'Pending Edit Approval'],
 
     // Months
     MONTHS: [

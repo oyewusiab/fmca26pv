@@ -983,16 +983,41 @@ const Vouchers = {
     let buttons = '';
 
     // Edit
-    if (perms.canEditVoucher && user.role !== CONFIG.ROLES.CPO && voucher.status !== 'Pending Deletion') {
-      const canEdit =
-        voucher.status === 'Unpaid' ||
-        user.role === CONFIG.ROLES.ADMIN ||
-        user.role === CONFIG.ROLES.PAYABLE_HEAD;
+    const isUnreleased = !voucher.controlNumber || voucher.controlNumber.toString().trim() === '';
+    const isPaid = String(voucher.status || '').toLowerCase() === 'paid';
+    const isPendingEdit = voucher.status === 'Pending Edit Approval' || Boolean(voucher.pendingEdit);
+
+    if (perms.canEditVoucher && user.role !== CONFIG.ROLES.CPO && voucher.status !== 'Pending Deletion' && !isPendingEdit) {
+      let canEdit = false;
+      if (user.role === CONFIG.ROLES.ADMIN || user.role === CONFIG.ROLES.PAYABLE_HEAD) {
+        canEdit = true;
+      } else if (user.role === CONFIG.ROLES.PAYABLE_STAFF) {
+        if (isUnreleased || (isPaid && !isUnreleased)) {
+          canEdit = true;
+        }
+      }
 
       if (canEdit) {
+        const editTitle = (user.role === CONFIG.ROLES.PAYABLE_STAFF && isPaid && !isUnreleased)
+          ? "Edit (Requires Approval)"
+          : "Edit";
         buttons += `
-        <button class="btn btn-sm btn-primary" onclick="Vouchers.editVoucher(${voucher.rowIndex})" title="Edit">
+        <button class="btn btn-sm btn-primary" onclick="Vouchers.editVoucher(${voucher.rowIndex})" title="${editTitle}">
           <i class="fas fa-edit"></i>
+        </button>
+      `;
+      }
+    }
+
+    // Pending Edit Approval Workflow
+    if (isPendingEdit) {
+      if ([CONFIG.ROLES.ADMIN, CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO].includes(user.role)) {
+        buttons += `
+        <button class="btn btn-sm btn-success" onclick="Vouchers.approveEdit(${voucher.rowIndex})" title="Approve Edit Request">
+          <i class="fas fa-check-double"></i>
+        </button>
+        <button class="btn btn-sm btn-warning" onclick="Vouchers.rejectEdit(${voucher.rowIndex})" title="Reject Edit Request">
+          <i class="fas fa-times-circle"></i>
         </button>
       `;
       }
@@ -1529,6 +1554,23 @@ const Vouchers = {
       voucher = result.voucher;
     }
 
+    const isUnreleased = !voucher.controlNumber || voucher.controlNumber.toString().trim() === '';
+    const isPaid = String(voucher.status || '').toLowerCase() === 'paid';
+
+    let canEdit = false;
+    if (user.role === CONFIG.ROLES.ADMIN || user.role === CONFIG.ROLES.PAYABLE_HEAD) {
+      canEdit = true;
+    } else if (user.role === CONFIG.ROLES.PAYABLE_STAFF) {
+      if (isUnreleased || (isPaid && !isUnreleased)) {
+        canEdit = true;
+      }
+    }
+
+    if (!canEdit) {
+      Utils.showToast('You are not authorized to edit this voucher. Payable Staff can only edit unreleased vouchers or Paid released vouchers (pending approval).', 'error');
+      return;
+    }
+
     this.openVoucherForm(voucher);
   },
 
@@ -1571,11 +1613,17 @@ const Vouchers = {
 
     // In edit mode, if detected duplicate is the same voucher being edited, clear it
     if (this.isEditMode && this.selectedVoucher && this._detectedDuplicateVoucher) {
+      const detectedRow = String(this._detectedDuplicateVoucher.rowIndex || this._detectedDuplicateVoucher.row || '');
+      const originalRow = String(this.selectedVoucher.rowIndex || this.selectedVoucher.row || '');
       const detectedNo = String(this._detectedDuplicateVoucher.accountOrMail || '').trim().toUpperCase();
       const originalNo = String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase();
-      const detectedRow = String(this._detectedDuplicateVoucher.rowIndex || '');
-      const originalRow = String(this.selectedVoucher.rowIndex || '');
-      if (detectedRow === originalRow || detectedNo === originalNo) {
+      const currentInputNo = accountOrMail.trim().toUpperCase();
+
+      const isSameRecordByRow = (detectedRow && originalRow && detectedRow === originalRow);
+      const isSameRecordByNo = (detectedNo && originalNo && detectedNo === originalNo);
+      const isSameInputNo = (detectedNo && currentInputNo && detectedNo === currentInputNo);
+
+      if (isSameRecordByRow || isSameRecordByNo || isSameInputNo) {
         this._detectedDuplicateVoucher = null;
       }
     }
@@ -1656,6 +1704,11 @@ const Vouchers = {
 
       if (this.isEditMode && this.selectedVoucher) {
         voucherData.controlNumber = this.selectedVoucher.controlNumber || '';
+        const isUnreleased = !this.selectedVoucher.controlNumber || this.selectedVoucher.controlNumber.toString().trim() === '';
+        const isPaid = String(this.selectedVoucher.status || '').toLowerCase() === 'paid';
+        if (user && user.role === CONFIG.ROLES.PAYABLE_STAFF && isPaid && !isUnreleased) {
+          voucherData.requiresApproval = true;
+        }
         result = await API.updateVoucher(this.selectedVoucher.rowIndex, voucherData);
       } else {
         voucherData.controlNumber = '';
@@ -2211,6 +2264,75 @@ const Vouchers = {
     } catch (e) {
       console.error('submitRejectDelete error:', e);
       Utils.showToast('Error rejecting deletion', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  },
+
+  async approveEdit(rowIndex) {
+    let voucher = this.vouchers.find(x => x.rowIndex === rowIndex);
+    if (!voucher) {
+      this.showLoading(true);
+      const result = await API.getVoucherByRow(rowIndex, '2026');
+      this.showLoading(false);
+      if (!result.success) return Utils.showToast(result.error || 'Voucher not found', 'error');
+      voucher = result.voucher;
+    }
+
+    const confirmed = await Utils.confirm(
+      `Approve edit request for this voucher?\n\n` +
+      `• Voucher No.: ${voucher.accountOrMail || '-'}\n` +
+      `• Payee: ${voucher.payee || '-'}\n` +
+      `• Gross Amount: ${Utils.formatCurrency(voucher.grossAmount || 0)}\n` +
+      `• Control No.: ${voucher.controlNumber || '-'}`,
+      'Approve Voucher Edit'
+    );
+    if (!confirmed) return;
+
+    this.showLoading(true);
+    try {
+      const result = await API.approveVoucherEdit(rowIndex);
+      if (result.success) {
+        Utils.showToast(result.message || 'Voucher edit approved successfully', 'success');
+        this.clearVouchersCache();
+        await this.loadVouchers();
+      } else {
+        Utils.showToast(result.error || 'Edit approval failed', 'error');
+      }
+    } catch (e) {
+      console.error('approveEdit error:', e);
+      Utils.showToast('Error approving edit', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  },
+
+  async rejectEdit(rowIndex) {
+    let voucher = this.vouchers.find(x => x.rowIndex === rowIndex);
+    if (!voucher) {
+      this.showLoading(true);
+      const result = await API.getVoucherByRow(rowIndex, '2026');
+      this.showLoading(false);
+      if (!result.success) return Utils.showToast(result.error || 'Voucher not found', 'error');
+      voucher = result.voucher;
+    }
+
+    const reason = prompt('Please enter a reason for rejecting this edit request (optional):');
+    if (reason === null) return; // User cancelled
+
+    this.showLoading(true);
+    try {
+      const result = await API.rejectVoucherEdit(rowIndex, reason || '');
+      if (result.success) {
+        Utils.showToast(result.message || 'Edit request rejected', 'success');
+        this.clearVouchersCache();
+        await this.loadVouchers();
+      } else {
+        Utils.showToast(result.error || 'Rejection failed', 'error');
+      }
+    } catch (e) {
+      console.error('rejectEdit error:', e);
+      Utils.showToast('Error rejecting edit', 'error');
     } finally {
       this.showLoading(false);
     }
@@ -3616,14 +3738,23 @@ const Vouchers = {
       const result = await API.lookupVoucher(voucherNumber);
       if (result.success && result.found) {
         // If editing, skip if it's the exact same record
-        if (this.isEditMode && this.selectedVoucher &&
-            (String(result.voucher.rowIndex) === String(this.selectedVoucher.rowIndex) ||
-             (result.voucher.accountOrMail && this.selectedVoucher.accountOrMail &&
-              String(result.voucher.accountOrMail).trim().toUpperCase() === String(this.selectedVoucher.accountOrMail).trim().toUpperCase()))) {
-          if (inlineWarn) inlineWarn.classList.add('hidden');
-          if (panel) panel.classList.add('hidden');
-          this._detectedDuplicateVoucher = null;
-          return;
+        if (this.isEditMode && this.selectedVoucher) {
+          const matchedRow = String(result.voucher.rowIndex || result.voucher.row || '');
+          const selectedRow = String(this.selectedVoucher.rowIndex || this.selectedVoucher.row || '');
+          const matchedNo = String(result.voucher.accountOrMail || '').trim().toUpperCase();
+          const selectedNo = String(this.selectedVoucher.accountOrMail || '').trim().toUpperCase();
+          const currentInputNo = voucherNumber.toUpperCase();
+
+          const isSameRecordByRow = (matchedRow && selectedRow && matchedRow === selectedRow);
+          const isSameRecordByNo = (matchedNo && selectedNo && matchedNo === selectedNo);
+          const isSameInputNo = (matchedNo && currentInputNo && matchedNo === currentInputNo && (selectedNo === '' || selectedNo === matchedNo));
+
+          if (isSameRecordByRow || isSameRecordByNo || isSameInputNo) {
+            if (inlineWarn) inlineWarn.classList.add('hidden');
+            if (panel) panel.classList.add('hidden');
+            this._detectedDuplicateVoucher = null;
+            return;
+          }
         }
 
         // Require exact complete match

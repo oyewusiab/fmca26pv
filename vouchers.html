@@ -226,10 +226,16 @@
         table td.voucher-no-cell {
             color: var(--primary-color);
             font-weight: 600;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            padding-right: 12px;
         }
 
         table td.payee-cell {
             font-weight: 500;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            padding-left: 8px;
         }
 
         table td.particular-cell {
@@ -629,6 +635,7 @@
                     <option value="Paid">Paid</option>
                     <option value="Cancelled">Cancelled</option>
                     <option value="Pending Deletion">Pending Deletion</option>
+                    <option value="Pending Edit Approval">Pending Edit Approval</option>
                 </select>
 
                 <select class="form-control category-select" id="categoryFilter">

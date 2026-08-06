@@ -2087,12 +2087,23 @@ textarea.form-control {
 
 #vouchersList table th.voucher-no-header,
 #vouchersList table td.voucher-no-cell {
-    width: 160px !important; /* Voucher No column */
+    width: 200px !important; /* Voucher No column */
+    min-width: 190px !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    padding-right: 12px !important;
+    box-sizing: border-box !important;
 }
 
 #vouchersList table th.payee-header,
 #vouchersList table td.payee-cell {
-    width: 180px !important; /* Payee column */
+    width: 210px !important; /* Payee column */
+    min-width: 190px !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    box-sizing: border-box !important;
 }
 
 #vouchersList table th.particular-header,
