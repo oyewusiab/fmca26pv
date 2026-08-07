@@ -3784,6 +3784,315 @@ function testUpdateVoucherStatus() {
 }
 
 /**
+ * Creates a new voucher in 2026 VOUCHERS sheet
+ */
+function createVoucher(token, voucher) {
+  try {
+    const session = getSession(token);
+    if (!session) {
+      return { success: false, error: 'Session expired' };
+    }
+    if (!hasPermission(session.role, [
+      CONFIG.ROLES.PAYABLE_STAFF,
+      CONFIG.ROLES.PAYABLE_HEAD,
+      CONFIG.ROLES.ADMIN
+    ])) {
+      return { success: false, error: 'Unauthorized: Cannot create vouchers' };
+    }
+    if (!voucher.payee || !voucher.payee.trim()) {
+      return { success: false, error: 'Payee name is required' };
+    }
+    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    const cols = resolveVoucherColumns_(sheet);
+    if (voucher.oldVoucherNumber && voucher.oldVoucherNumber.trim()) {
+      const data = sheet.getDataRange().getValues();
+      const newOldVN = voucher.oldVoucherNumber.trim().toUpperCase();
+      for (let i = 1; i < data.length; i++) {
+        const existingOldVN = String(data[i][cols.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
+        if (existingOldVN === newOldVN) {
+          return { 
+            success: false, 
+            error: 'Duplicate: A voucher with this Old Voucher Number already exists in 2026 (Row ' + (i + 1) + ')'
+          };
+        }
+      }
+    }
+    if (voucher.accountOrMail && voucher.accountOrMail.trim() && !voucher.allowDuplicate && !voucher.duplicateReason) {
+      const data = sheet.getDataRange().getValues();
+      const newVN = voucher.accountOrMail.trim().toUpperCase();
+      for (let i = 1; i < data.length; i++) {
+        const existingVN = String(data[i][cols.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
+        if (existingVN === newVN) {
+          return { 
+            success: false, 
+            error: 'Duplicate: Voucher number "' + voucher.accountOrMail + '" already exists in Row ' + (i + 1) + '. Please use a unique number.'
+          };
+        }
+      }
+    }
+    voucher.status = voucher.status || 'Unpaid';
+    voucher.createdAt = getNigerianTimestamp();
+    if (!voucher.totalGross) {
+      voucher.totalGross = parseAmount(voucher.grossAmount);
+    }
+    const gross = parseAmount(voucher.grossAmount);
+    const vat = parseAmount(voucher.vat);
+    const wht = parseAmount(voucher.wht);
+    const stamp = parseAmount(voucher.stampDuty);
+    voucher.net = gross - (vat + wht + stamp);
+    const rowData = voucherToRow(voucher, sheet.getLastColumn(), cols);
+    sheet.appendRow(rowData);
+    const newRowIndex = sheet.getLastRow();
+    clearAllVoucherCaches();
+    logAudit(session, 'CREATE_VOUCHER', 'Created new voucher', CONFIG.SHEETS.VOUCHERS_2026, newRowIndex);
+    return { 
+      success: true, 
+      message: 'Voucher created successfully',
+      rowIndex: newRowIndex,
+      voucher: rowToVoucher(rowData, newRowIndex, cols)
+    };
+  } catch (error) {
+    return { success: false, error: 'Failed to create voucher: ' + error.message };
+  }
+}
+
+/**
+ * Updates an existing voucher in 2026 VOUCHERS sheet
+ */
+function updateVoucher(token, rowIndex, voucher) {
+  try {
+    const session = getSession(token);
+    if (!session) {
+      return { success: false, error: 'Session expired' };
+    }
+    if (!hasPermission(session.role, [
+      CONFIG.ROLES.PAYABLE_STAFF,
+      CONFIG.ROLES.PAYABLE_HEAD,
+      CONFIG.ROLES.CPO,
+      CONFIG.ROLES.ADMIN
+    ])) {
+      return { success: false, error: 'Unauthorized: Cannot update vouchers' };
+    }
+    if (!rowIndex || rowIndex < 2) {
+      return { success: false, error: 'Invalid voucher reference' };
+    }
+    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    const lastRow = sheet.getLastRow();
+    if (rowIndex > lastRow) {
+      return { success: false, error: 'Voucher not found' };
+    }
+    const sheetCols = sheet.getLastColumn();
+    const cols = resolveVoucherColumns_(sheet);
+    const currentRow = sheet.getRange(rowIndex, 1, 1, sheetCols).getValues()[0];
+    const currentVoucher = rowToVoucher(currentRow, rowIndex, cols);
+    
+    const hasCN = Boolean(currentVoucher.controlNumber && currentVoucher.controlNumber.toString().trim() !== '');
+    const isPaid = String(currentVoucher.status || '').toLowerCase() === 'paid';
+
+    if (session.role === CONFIG.ROLES.PAYABLE_STAFF) {
+      if (hasCN || isPaid) {
+        const statusCell = sheet.getRange(rowIndex, CONFIG.VOUCHER_COLUMNS.STATUS);
+        statusCell.setNote('PENDING_EDIT_DATA:' + JSON.stringify(voucher) + '|REQUESTED_BY:' + session.email);
+        statusCell.setValue('Pending Edit Approval');
+        const usersSheet = getSheet(CONFIG.SHEETS.USERS);
+        const usersData = usersSheet.getDataRange().getValues();
+        const approverEmails = [];
+        for (let i = 1; i < usersData.length; i++) {
+          const role = usersData[i][CONFIG.USER_COLUMNS.ROLE - 1];
+          const email = usersData[i][CONFIG.USER_COLUMNS.EMAIL - 1];
+          const active = usersData[i][CONFIG.USER_COLUMNS.ACTIVE - 1];
+          if (active && email && [CONFIG.ROLES.ADMIN, CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO].includes(role)) {
+            approverEmails.push(email);
+          }
+        }
+        if (approverEmails.length > 0) {
+          createNotifications(
+            approverEmails,
+            '✏️ Voucher Edit Approval Required',
+            session.name + ' (Payable Staff) requested edits for voucher ' + (currentVoucher.accountOrMail || '') + ' (' + (currentVoucher.payee || '') + '). Approval required.',
+            'vouchers.html',
+            'info'
+          );
+        }
+        clearAllVoucherCaches();
+        return {
+          success: true,
+          pendingApproval: true,
+          message: 'Edit request submitted for approval by Admin, Payable Head, or CPO Head.'
+        };
+      }
+    }
+    
+    const targetRowIndex = parseInt(rowIndex, 10);
+    if (voucher.oldVoucherNumber && voucher.oldVoucherNumber.trim()) {
+      const data = sheet.getDataRange().getValues();
+      const newOldVN = voucher.oldVoucherNumber.trim().toUpperCase();
+      for (let i = 1; i < data.length; i++) {
+        if (i + 1 === targetRowIndex) continue;
+        const existingOldVN = String(data[i][cols.OLD_VOUCHER_NUMBER - 1]).trim().toUpperCase();
+        if (existingOldVN === newOldVN) {
+          return { 
+            success: false, 
+            error: 'Duplicate: This Old Voucher Number already exists in Row ' + (i + 1)
+          };
+        }
+      }
+    }
+    if (voucher.accountOrMail && voucher.accountOrMail.trim() && !voucher.allowDuplicate && !voucher.duplicateReason) {
+      const data = sheet.getDataRange().getValues();
+      const newVN = voucher.accountOrMail.trim().toUpperCase();
+      for (let i = 1; i < data.length; i++) {
+        if (i + 1 === targetRowIndex) continue;
+        const existingVN = String(data[i][cols.ACCOUNT_OR_MAIL - 1]).trim().toUpperCase();
+        if (existingVN === newVN) {
+          return { 
+            success: false, 
+            error: 'Duplicate: Voucher number "' + voucher.accountOrMail + '" already exists in Row ' + (i + 1) + '. Please use a unique number.'
+          };
+        }
+      }
+    }
+    voucher.createdAt = currentVoucher.createdAt;
+    if (!voucher.status) {
+      voucher.status = currentVoucher.status;
+    }
+    if (!voucher.controlNumber) {
+      voucher.controlNumber = currentVoucher.controlNumber;
+    }
+    if (!voucher.totalGross) {
+      voucher.totalGross = parseAmount(voucher.grossAmount);
+    }
+    const gross = parseAmount(voucher.grossAmount);
+    const vat = parseAmount(voucher.vat);
+    const wht = parseAmount(voucher.wht);
+    const stamp = parseAmount(voucher.stampDuty);
+    voucher.net = gross - (vat + wht + stamp);
+    const rowData = voucherToRow(voucher, sheetCols, cols);
+    sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
+    clearAllVoucherCaches();
+    logAudit(session, 'UPDATE_VOUCHER', 'Updated voucher', CONFIG.SHEETS.VOUCHERS_2026, rowIndex);
+    return { 
+      success: true, 
+      message: 'Voucher updated successfully',
+      voucher: rowToVoucher(rowData, rowIndex, cols)
+    };
+  } catch (error) {
+    return { success: false, error: 'Failed to update voucher: ' + error.message };
+  }
+}
+
+/**
+ * Approve pending voucher edit request
+ */
+function approveVoucherEdit(token, rowIndex) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (![CONFIG.ROLES.ADMIN, CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO].includes(session.role)) {
+      return { success: false, error: 'Unauthorized: Only Admin, Payable Head, or CPO Head can approve voucher edits.' };
+    }
+
+    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    rowIndex = parseInt(rowIndex, 10);
+    const lastRow = sheet.getLastRow();
+    if (rowIndex < 2 || rowIndex > lastRow) {
+      return { success: false, error: 'Invalid voucher reference' };
+    }
+
+    const statusCell = sheet.getRange(rowIndex, CONFIG.VOUCHER_COLUMNS.STATUS);
+    const note = statusCell.getNote() || '';
+
+    if (!note.includes('PENDING_EDIT_DATA:')) {
+      statusCell.setValue('Paid');
+      return { success: false, error: 'No pending edit request found for this voucher.' };
+    }
+
+    const match = note.match(/PENDING_EDIT_DATA:(.*?)\|REQUESTED_BY:(.*)/);
+    if (!match) {
+      return { success: false, error: 'Invalid edit request format' };
+    }
+
+    const editData = JSON.parse(match[1]);
+    const requesterEmail = match[2];
+
+    const cols = resolveVoucherColumns_(sheet);
+    if (editData.payee) sheet.getRange(rowIndex, cols.PAYEE).setValue(editData.payee);
+    if (editData.particular) sheet.getRange(rowIndex, cols.PARTICULAR).setValue(editData.particular);
+    if (editData.grossAmount) sheet.getRange(rowIndex, cols.GROSS_AMOUNT).setValue(editData.grossAmount);
+    if (editData.vat !== undefined) sheet.getRange(rowIndex, cols.VAT).setValue(editData.vat);
+    if (editData.wht !== undefined) sheet.getRange(rowIndex, cols.WHT).setValue(editData.wht);
+    if (editData.stampDuty !== undefined) sheet.getRange(rowIndex, cols.STAMP_DUTY).setValue(editData.stampDuty);
+    if (editData.accountOrMail) sheet.getRange(rowIndex, cols.ACCOUNT_OR_MAIL).setValue(editData.accountOrMail);
+    if (editData.categories) sheet.getRange(rowIndex, cols.CATEGORIES).setValue(editData.categories);
+    if (editData.accountType) sheet.getRange(rowIndex, cols.ACCOUNT_TYPE).setValue(editData.accountType);
+    if (editData.subAccountType !== undefined) sheet.getRange(rowIndex, cols.SUB_ACCOUNT_TYPE).setValue(editData.subAccountType);
+
+    statusCell.setValue('Paid');
+    statusCell.setNote('');
+
+    if (requesterEmail) {
+      createNotifications(
+        [requesterEmail],
+        '✅ Voucher Edit Approved',
+        'Your requested edits for voucher ' + (editData.accountOrMail || '') + ' have been approved by ' + session.name + '.',
+        'vouchers.html',
+        'success'
+      );
+    }
+
+    clearAllVoucherCaches();
+    return { success: true, message: 'Voucher edit request approved and changes applied successfully.' };
+  } catch (error) {
+    return { success: false, error: 'Failed to approve edit: ' + error.message };
+  }
+}
+
+/**
+ * Reject pending voucher edit request
+ */
+function rejectVoucherEdit(token, rowIndex, reason) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (![CONFIG.ROLES.ADMIN, CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO].includes(session.role)) {
+      return { success: false, error: 'Unauthorized: Only Admin, Payable Head, or CPO Head can reject voucher edits.' };
+    }
+
+    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    rowIndex = parseInt(rowIndex, 10);
+    const lastRow = sheet.getLastRow();
+    if (rowIndex < 2 || rowIndex > lastRow) {
+      return { success: false, error: 'Invalid voucher reference' };
+    }
+
+    const statusCell = sheet.getRange(rowIndex, CONFIG.VOUCHER_COLUMNS.STATUS);
+    const note = statusCell.getNote() || '';
+    const match = note.match(/REQUESTED_BY:(.*)/);
+    const requesterEmail = match ? match[1] : null;
+
+    statusCell.setValue('Paid');
+    statusCell.setNote('');
+
+    if (requesterEmail) {
+      createNotifications(
+        [requesterEmail],
+        '❌ Voucher Edit Rejected',
+        'Your edit request was rejected by ' + session.name + '.' + (reason ? ' Reason: ' + reason : ''),
+        'vouchers.html',
+        'warning'
+      );
+    }
+
+    clearAllVoucherCaches();
+    return { success: true, message: 'Voucher edit request rejected.' };
+  } catch (error) {
+    return { success: false, error: 'Failed to reject edit: ' + error.message };
+  }
+}
+
+/**
  * Approve and execute voucher deletion
  * - Payable Head & Admin can approve for normal vouchers
  * - For PAID or RELEASED vouchers, only CPO or Admin can approve
