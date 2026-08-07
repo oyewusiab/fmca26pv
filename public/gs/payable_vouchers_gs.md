@@ -4454,7 +4454,6 @@ function getPendingDeletions(token) {
         pendingVouchers.push(voucher);
       }
     }
-    }
     
     return { 
       success: true, 
