@@ -233,6 +233,58 @@ const Components = {
         }, wait);
     },
 
+    showActivityToast(title, subtext = 'Processing...', icon = 'fa-sync fa-spin', durationMs = 3500) {
+        let toast = document.getElementById('actionActivityToast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'actionActivityToast';
+            document.body.appendChild(toast);
+        }
+        toast.innerHTML = `
+            <div class="toast-icon-wrap">
+                <i class="fas ${icon}"></i>
+            </div>
+            <div class="toast-text-wrap">
+                <span class="toast-title">${title}</span>
+                ${subtext ? `<span class="toast-subtext">${subtext}</span>` : ''}
+            </div>
+        `;
+        toast.classList.add('active');
+        clearTimeout(this._toastTimer);
+        if (durationMs > 0) {
+            this._toastTimer = setTimeout(() => {
+                toast.classList.remove('active');
+            }, durationMs);
+        }
+    },
+
+    hideActivityToast() {
+        const toast = document.getElementById('actionActivityToast');
+        if (toast) toast.classList.remove('active');
+    },
+
+    setProgressBar(percent) {
+        let bar = document.getElementById('globalProgressBar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'globalProgressBar';
+            document.body.appendChild(bar);
+        }
+        if (percent > 0 && percent < 100) {
+            bar.style.width = percent + '%';
+            bar.classList.add('active');
+        } else if (percent >= 100) {
+            bar.style.width = '100%';
+            setTimeout(() => {
+                bar.classList.remove('active');
+                setTimeout(() => { bar.style.width = '0%'; }, 300);
+            }, 300);
+        } else {
+            bar.classList.remove('active');
+            bar.style.width = '0%';
+        }
+    },
+
     /**
      * Generates empty state HTML
      */

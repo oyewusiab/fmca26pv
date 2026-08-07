@@ -1702,7 +1702,11 @@ const Vouchers = {
       duplicateReason: this._duplicateReason || ''
     };
 
-    this.showLoading(true);
+    const isEditing = this.isEditMode && this.selectedVoucher;
+    const actionMsg = isEditing ? '✏️ Submitting voucher edit request...' : '💾 Saving new payment voucher...';
+    this.showLoading(true, actionMsg);
+    Utils.showProcessingToast(isEditing ? 'Updating Voucher' : 'Saving Voucher', 'Processing record in database...', 'fa-save fa-pulse', 4000);
+    Utils.setButtonLoading('saveVoucherBtn', true, isEditing ? 'Saving...' : 'Creating...');
 
     try {
       let result;
@@ -1739,6 +1743,7 @@ const Vouchers = {
       Utils.showToast('Error saving voucher', 'error');
     } finally {
       this.showLoading(false);
+      Utils.setButtonLoading('saveVoucherBtn', false);
     }
   },
 
@@ -2113,7 +2118,8 @@ const Vouchers = {
     );
     if (!confirmed) return;
 
-    this.showLoading(true);
+    this.showLoading(true, '🗑️ Submitting deletion request...');
+    Utils.showProcessingToast('Deletion Request', 'Notifying unit heads & admin...', 'fa-trash-alt fa-bounce', 4000);
     this.closeModal('deleteRequestModal');
 
     try {
@@ -2294,7 +2300,8 @@ const Vouchers = {
     );
     if (!confirmed) return;
 
-    this.showLoading(true);
+    this.showLoading(true, '✅ Approving voucher edit request...');
+    Utils.showProcessingToast('Approving Edit', 'Updating voucher record...', 'fa-check-double fa-spin', 4000);
     try {
       const result = await API.approveVoucherEdit(rowIndex);
       if (result.success) {
@@ -2325,7 +2332,8 @@ const Vouchers = {
     const reason = prompt('Please enter a reason for rejecting this edit request (optional):');
     if (reason === null) return; // User cancelled
 
-    this.showLoading(true);
+    this.showLoading(true, '❌ Rejecting voucher edit request...');
+    Utils.showProcessingToast('Rejecting Request', 'Restoring original voucher status...', 'fa-times-circle', 4000);
     try {
       const result = await API.rejectVoucherEdit(rowIndex, reason || '');
       if (result.success) {
@@ -2493,7 +2501,8 @@ const Vouchers = {
     const rowIndex = this._modalReviewVoucher.rowIndex;
     this.closeModal('reviewEditModal');
 
-    this.showLoading(true);
+    this.showLoading(true, '❌ Rejecting voucher edit request...');
+    Utils.showProcessingToast('Rejecting Edit', 'Restoring original voucher state...', 'fa-times-circle', 3500);
     try {
       const result = await API.rejectVoucherEdit(rowIndex, reason);
       if (result.success) {
@@ -2518,7 +2527,8 @@ const Vouchers = {
     );
     if (!confirmed) return;
 
-    this.showLoading(true);
+    this.showLoading(true, '↺ Cancelling deletion request...');
+    Utils.showProcessingToast('Cancelling Request', 'Restoring original status...', 'fa-undo', 3500);
 
     try {
       const result = await API.cancelDeleteRequest(rowIndex);
@@ -3477,7 +3487,9 @@ const Vouchers = {
       return;
     }
 
-    this.showLoading(true);
+    this.showLoading(true, '🏷️ Updating status to ' + status + '...');
+    Utils.showProcessingToast('Status Update', 'Updating status to ' + status + '...', 'fa-tag fa-pulse', 3500);
+    Utils.setButtonLoading('saveStatusBtn', true, 'Updating...');
 
     try {
       // Optimistic update
@@ -3513,6 +3525,7 @@ const Vouchers = {
       Utils.showToast('Error updating status', 'error');
     } finally {
       this.showLoading(false);
+      Utils.setButtonLoading('saveStatusBtn', false);
     }
   },
 
@@ -3773,9 +3786,10 @@ const Vouchers = {
     document.getElementById(id)?.classList.remove('active');
   },
 
-  showLoading(show) {
+  showLoading(show, message = null) {
     if (window.Components && typeof Components.setLoading === 'function') {
-      Components.setLoading(show, this.isGlobalSearchMode ? 'Searching all years...' : 'Loading vouchers...');
+      const defaultMsg = this.isGlobalSearchMode ? 'Searching cross-year archives...' : 'Loading vouchers...';
+      Components.setLoading(show, message || defaultMsg);
       return;
     }
     const loader = document.getElementById('loadingOverlay');

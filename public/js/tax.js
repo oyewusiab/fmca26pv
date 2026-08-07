@@ -931,7 +931,8 @@ const Tax = {
             return;
         }
 
-        this.showLoading(true);
+        this.showLoading(true, '🧾 Recording tax payment...');
+        Utils.showProcessingToast('Tax Payment', 'Saving tax remittance record...', 'fa-file-invoice-dollar fa-pulse', 3500);
 
         const result = await API.recordTaxPayment(payment);
 
@@ -1217,9 +1218,9 @@ const Tax = {
     /**
      * Show/hide loading overlay
      */
-    showLoading(show) {
+    showLoading(show, message = 'Loading tax data...') {
         if (window.Components && typeof Components.setLoading === 'function') {
-            Components.setLoading(show, 'Loading tax data...');
+            Components.setLoading(show, message);
             return;
         }
         const overlay = document.getElementById('loadingOverlay');

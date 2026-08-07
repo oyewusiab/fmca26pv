@@ -2927,9 +2927,9 @@ const Reports = {
     /**
      * Show/hide loading overlay
      */
-    showLoading(show) {
+    showLoading(show, message = 'Loading report data...') {
         if (window.Components && typeof Components.setLoading === 'function') {
-            Components.setLoading(show, 'Loading report data...');
+            Components.setLoading(show, message);
             return;
         }
         const loader = document.getElementById('loadingOverlay');

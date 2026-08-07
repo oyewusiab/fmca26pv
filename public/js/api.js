@@ -150,6 +150,10 @@
             return await this._inflightRequests.get(cacheKey);
           }
 
+          if (window.Components && typeof Components.setProgressBar === 'function') {
+            Components.setProgressBar(40);
+          }
+
           const requestPromise = this._fetchJson(
             url,
             { method: "GET", redirect: "follow" },
@@ -161,6 +165,9 @@
 
           try {
             const result = await requestPromise;
+            if (window.Components && typeof Components.setProgressBar === 'function') {
+              Components.setProgressBar(100);
+            }
 
             if (result?.error && String(result.error).includes("Session expired")) {
               Auth.clearSession?.();
@@ -211,6 +218,9 @@
      */
     async post(action, data = {}, timeoutMs = 25000) {
       try {
+        if (window.Components && typeof Components.setProgressBar === 'function') {
+          Components.setProgressBar(45);
+        }
         const token = Auth.getToken?.();
 
         const payload = {
@@ -230,6 +240,9 @@
           0,
           timeoutMs
         );
+        if (window.Components && typeof Components.setProgressBar === 'function') {
+          Components.setProgressBar(100);
+        }
 
         if (result?.error && String(result.error).includes("Session expired")) {
           Auth.clearSession?.();
@@ -746,6 +759,44 @@
         clearTimeout(timeout);
         timeout = setTimeout(() => func.apply(this, args), wait);
       };
+    };
+
+  Utils.setButtonLoading =
+    Utils.setButtonLoading ||
+    function (btnOrId, isLoading, loadingText = "Processing...") {
+      const btn = typeof btnOrId === "string" ? document.getElementById(btnOrId) : btnOrId;
+      if (!btn) return;
+      if (isLoading) {
+        if (!btn.dataset.origHtml) {
+          btn.dataset.origHtml = btn.innerHTML;
+        }
+        btn.disabled = true;
+        btn.classList.add("btn-is-loading");
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin btn-spinner"></i> ${loadingText}`;
+      } else {
+        btn.disabled = false;
+        btn.classList.remove("btn-is-loading");
+        if (btn.dataset.origHtml) {
+          btn.innerHTML = btn.dataset.origHtml;
+          delete btn.dataset.origHtml;
+        }
+      }
+    };
+
+  Utils.showProcessingToast =
+    Utils.showProcessingToast ||
+    function (title, subtext = "Processing...", icon = "fa-sync fa-spin", durationMs = 3500) {
+      if (window.Components && typeof Components.showActivityToast === "function") {
+        Components.showActivityToast(title, subtext, icon, durationMs);
+      }
+    };
+
+  Utils.hideProcessingToast =
+    Utils.hideProcessingToast ||
+    function () {
+      if (window.Components && typeof Components.hideActivityToast === "function") {
+        Components.hideActivityToast();
+      }
     };
 
   Utils.getToastIcon =

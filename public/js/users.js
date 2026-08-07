@@ -110,7 +110,7 @@ const Users = {
      * Load users from backend
      */
     async loadUsers() {
-        this.showLoading(true);
+        this.showLoading(true, '👥 Syncing user accounts...');
         
         try {
             const result = await API.getUsers();
@@ -405,7 +405,10 @@ const Users = {
             return;
         }
         
-        this.showLoading(true);
+        const isEdit = this.isEditMode && this.selectedUser;
+        this.showLoading(true, isEdit ? '👤 Updating user profile...' : '👤 Creating new user account...');
+        Utils.showProcessingToast(isEdit ? 'Updating User' : 'Creating User', 'Saving user account privileges...', 'fa-user-cog fa-spin', 3000);
+        Utils.setButtonLoading('saveUserBtn', true, 'Saving...');
         
         try {
             let result;
@@ -441,6 +444,7 @@ const Users = {
         }
         
         this.showLoading(false);
+        Utils.setButtonLoading('saveUserBtn', false);
     },
     
     /**
@@ -647,9 +651,9 @@ const Users = {
     /**
      * Show/hide loading
      */
-    showLoading(show) {
+    showLoading(show, message = 'Loading users...') {
         if (window.Components && typeof Components.setLoading === 'function') {
-            Components.setLoading(show, 'Loading users...');
+            Components.setLoading(show, message);
             return;
         }
         const loader = document.getElementById('loadingOverlay');

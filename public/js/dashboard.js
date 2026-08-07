@@ -595,9 +595,9 @@ const Dashboard = {
         container.innerHTML = html;
     },
 
-    showLoading(show) {
+    showLoading(show, message = 'Loading dashboard...') {
         if (window.Components && typeof Components.setLoading === 'function') {
-            Components.setLoading(show, 'Loading dashboard...');
+            Components.setLoading(show, message);
             return;
         }
         const overlay = document.getElementById('loadingOverlay');
