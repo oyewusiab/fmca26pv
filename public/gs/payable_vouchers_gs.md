@@ -202,6 +202,9 @@ function doGet(e) {
             case 'getPendingDeletions':
                 result = getPendingDeletions(params.token);
                 break;
+            case 'getPendingEdits':
+                result = getPendingEdits(params.token);
+                break;
 
             // ---- PROFILE ----
             case 'getMyProfile':
@@ -318,6 +321,9 @@ function doPost(e) {
             // ---- DELETE WORKFLOW ----
             case 'requestDelete':
                 result = requestVoucherDelete(token, payload.rowIndex, payload.reason, payload.previousStatus);
+                break;
+            case 'getPendingEdits':
+                result = getPendingEdits(token);
                 break;
             case 'cancelDeleteRequest':
                 result = cancelDeleteRequest(token, payload.rowIndex);
@@ -4446,7 +4452,50 @@ function getPendingDeletions(token) {
           }
         } catch (e) {}
         pendingVouchers.push(voucher);
-      } else if (status === 'PENDING EDIT APPROVAL' || status === 'PENDING_EDIT_APPROVAL') {
+      }
+    }
+    }
+    
+    return { 
+      success: true, 
+      vouchers: pendingVouchers,
+      count: pendingVouchers.length
+    };
+    
+  } catch (error) {
+    return { success: false, error: 'Failed to get pending deletions: ' + error.message };
+  }
+}
+
+/**
+ * Get pending voucher edit requests for approval
+ */
+function getPendingEdits(token) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (!hasPermission(session.role, [
+      CONFIG.ROLES.PAYABLE_HEAD,
+      CONFIG.ROLES.CPO,
+      CONFIG.ROLES.ADMIN
+    ])) {
+      return { success: true, vouchers: [], count: 0 };
+    }
+
+    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      return { success: true, vouchers: [], count: 0 };
+    }
+
+    const cols = resolveVoucherColumns_(sheet);
+    const data = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+    const pendingEdits = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const status = String(data[i][cols.STATUS - 1] || '').trim().toUpperCase();
+      if (status === 'PENDING EDIT APPROVAL' || status === 'PENDING_EDIT_APPROVAL') {
         const voucher = rowToVoucher(data[i], i + 2, cols);
         try {
           const note = sheet.getRange(i + 2, cols.STATUS).getNote();
@@ -4458,18 +4507,277 @@ function getPendingDeletions(token) {
             }
           }
         } catch (e) {}
-        pendingVouchers.push(voucher);
+        pendingEdits.push(voucher);
       }
     }
+
+    return {
+      success: true,
+      vouchers: pendingEdits,
+      count: pendingEdits.length
+    };
+  } catch (error) {
+    return { success: false, error: 'Failed to get pending edits: ' + error.message };
+  }
+}
+
+/**
+ * Updates voucher status (for CPO and Payable units)
+ */
+function updateVoucherStatus(token, rowIndex, status, pmtMonth) {
+  try {
+    const session = getSession(token);
+    if (!session) {
+      return { success: false, error: 'Session expired' };
+    }
+    
+    if (!hasPermission(session.role, [
+      CONFIG.ROLES.PAYABLE_STAFF,
+      CONFIG.ROLES.PAYABLE_HEAD,
+      CONFIG.ROLES.CPO,
+      CONFIG.ROLES.ADMIN
+    ])) {
+      return { success: false, error: 'Unauthorized: Cannot update status' };
+    }
+    
+    const validStatuses = ['Paid', 'Unpaid', 'Cancelled'];
+    if (!validStatuses.includes(status)) {
+      return { success: false, error: 'Invalid status. Must be: ' + validStatuses.join(', ') };
+    }
+    
+    if (!rowIndex || rowIndex < 2) {
+      return { success: false, error: 'Invalid voucher reference' };
+    }
+    
+    const sheet = getSheet(CONFIG.SHEETS.VOUCHERS_2026);
+    const lastRow = sheet.getLastRow();
+    
+    if (rowIndex > lastRow) {
+      return { success: false, error: 'Voucher not found' };
+    }
+    
+    sheet.getRange(rowIndex, CONFIG.VOUCHER_COLUMNS.STATUS).setValue(status);
+    
+    if (pmtMonth !== undefined && pmtMonth !== null && pmtMonth !== '') {
+      if (!hasPermission(session.role, [CONFIG.ROLES.CPO, CONFIG.ROLES.ADMIN])) {
+        return { success: false, error: 'Only CPO can set payment month' };
+      }
+      sheet.getRange(rowIndex, CONFIG.VOUCHER_COLUMNS.PMT_MONTH).setValue(pmtMonth);
+    }
+    
+    clearAllVoucherCaches();
+    logAudit(session, 'UPDATE_STATUS', 'Changed status to ' + status, CONFIG.SHEETS.VOUCHERS_2026, rowIndex);
     
     return { 
       success: true, 
-      vouchers: pendingVouchers,
-      count: pendingVouchers.length
+      message: 'Status updated to: ' + status
     };
     
   } catch (error) {
-    return { success: false, error: 'Failed to get pending deletions: ' + error.message };
+    return { success: false, error: 'Failed to update status: ' + error.message };
+  }
+}
+
+/**
+ * Gets a single voucher by row index
+ */
+function getVoucherByRow(token, rowIndex, year) {
+  try {
+    const session = getSession(token);
+    if (!session) {
+      return { success: false, error: 'Session expired' };
+    }
+    
+    let sheetName = CONFIG.SHEETS.VOUCHERS_2026;
+    if (year && year !== '2026') {
+      switch(year) {
+        case '2025': sheetName = CONFIG.SHEETS.VOUCHERS_2025; break;
+        case '2024': sheetName = CONFIG.SHEETS.VOUCHERS_2024; break;
+        case '2023': sheetName = CONFIG.SHEETS.VOUCHERS_2023; break;
+        case '<2023': sheetName = CONFIG.SHEETS.VOUCHERS_BEFORE_2023; break;
+      }
+    }
+    
+    const sheet = getSheet(sheetName);
+    const lastRow = sheet.getLastRow();
+    
+    if (rowIndex < 2 || rowIndex > lastRow) {
+      return { success: false, error: 'Voucher not found' };
+    }
+    
+    const cols = resolveVoucherColumns_(sheet);
+    const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const voucher = rowToVoucher(row, rowIndex, cols);
+    
+    if (voucher.status === 'Pending Edit Approval') {
+      try {
+        const note = sheet.getRange(rowIndex, cols.STATUS).getNote();
+        if (note && note.includes('PENDING_EDIT_DATA:')) {
+          const match = note.match(/PENDING_EDIT_DATA:(.*?)\|REQUESTED_BY:(.*)/);
+          if (match) {
+            voucher.pendingEditData = JSON.parse(match[1]);
+            voucher.requestedBy = match[2].trim();
+          }
+        }
+      } catch (e) {}
+    }
+    
+    return { success: true, voucher: voucher };
+    
+  } catch (error) {
+    return { success: false, error: 'Failed to get voucher: ' + error.message };
+  }
+}
+
+/**
+ * Gets vouchers list with filters and pagination
+ */
+function getVouchers(token, yearOrOptions, filtersArg, pageArg, pageSizeArg) {
+  try {
+    const session = getSession(token);
+    if (!session) return { success: false, error: 'Session expired' };
+
+    if (!hasPermission(session.role, [
+      CONFIG.ROLES.PAYABLE_STAFF,
+      CONFIG.ROLES.PAYABLE_HEAD,
+      CONFIG.ROLES.CPO,
+      CONFIG.ROLES.AUDIT,
+      CONFIG.ROLES.DDFA,
+      CONFIG.ROLES.DFA,
+      CONFIG.ROLES.ADMIN
+    ])) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    let year = '2026';
+    let filters = {};
+    let page = 1;
+    let pageSize = 50;
+
+    if (typeof yearOrOptions === 'object' && yearOrOptions !== null) {
+      year = String(yearOrOptions.year || '2026');
+      page = parseInt(yearOrOptions.page, 10) || 1;
+      pageSize = parseInt(yearOrOptions.pageSize, 10) || 50;
+      if (yearOrOptions.filters) {
+        try {
+          filters = typeof yearOrOptions.filters === 'string' ? JSON.parse(yearOrOptions.filters) : yearOrOptions.filters;
+        } catch (e) { filters = {}; }
+      }
+    } else {
+      year = String(yearOrOptions || '2026');
+      page = parseInt(pageArg, 10) || 1;
+      pageSize = parseInt(pageSizeArg, 10) || 50;
+      if (filtersArg) {
+        try {
+          filters = typeof filtersArg === 'string' ? JSON.parse(filtersArg) : filtersArg;
+        } catch (e) { filters = {}; }
+      }
+    }
+
+    page = Math.max(page, 1);
+    pageSize = Math.min(Math.max(pageSize, 1), 200);
+
+    let sheetName;
+    switch (year) {
+      case '2026': sheetName = CONFIG.SHEETS.VOUCHERS_2026; break;
+      case '2025': sheetName = CONFIG.SHEETS.VOUCHERS_2025; break;
+      case '2024': sheetName = CONFIG.SHEETS.VOUCHERS_2024; break;
+      case '2023': sheetName = CONFIG.SHEETS.VOUCHERS_2023; break;
+      case '<2023': sheetName = CONFIG.SHEETS.VOUCHERS_BEFORE_2023; break;
+      default: sheetName = CONFIG.SHEETS.VOUCHERS_2026; year = '2026';
+    }
+
+    const sheet = getSheet(sheetName);
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+
+    if (lastRow <= 1) {
+      return {
+        success: true,
+        vouchers: [],
+        totalCount: 0,
+        page: 1,
+        pageSize: pageSize,
+        totalPages: 0,
+        year: year
+      };
+    }
+
+    const term = String(filters.searchTerm || '').trim().toLowerCase();
+    const releaseFilter = String(filters.release || 'All').trim();
+    const cols = resolveVoucherColumns_(sheet);
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const allMatching = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (!row[cols.PAYEE - 1] && !row[cols.CONTROL_NUMBER - 1] && !row[cols.OLD_VOUCHER_NUMBER - 1]) continue;
+
+      let include = true;
+      const status = String(row[cols.STATUS - 1] || '').trim();
+      const category = String(row[cols.CATEGORIES - 1] || '').trim();
+      const pmtMonth = String(row[cols.PMT_MONTH - 1] || '').trim();
+      const controlNumber = String(row[cols.CONTROL_NUMBER - 1] || '').trim();
+      const payee = String(row[cols.PAYEE - 1] || '');
+      const accountOrMail = String(row[cols.ACCOUNT_OR_MAIL - 1] || '');
+      const particular = String(row[cols.PARTICULAR - 1] || '');
+      const oldVoucherNumber = String(row[cols.OLD_VOUCHER_NUMBER - 1] || '');
+      const grossAmount = parseAmount(row[cols.GROSS_AMOUNT - 1]);
+
+      if (filters.status && filters.status !== 'All') {
+        if (status !== filters.status) include = false;
+      }
+      if (include && filters.category && filters.category !== 'All') {
+        if (category !== filters.category) include = false;
+      }
+      if (include && filters.pmtMonth && filters.pmtMonth !== 'All') {
+        if (pmtMonth !== filters.pmtMonth) include = false;
+      }
+      if (include && releaseFilter !== 'All') {
+        const hasCN = controlNumber !== '';
+        if (releaseFilter === 'Released' && !hasCN) include = false;
+        if (releaseFilter === 'Not Released' && hasCN) include = false;
+      }
+      if (include && term) {
+        const searchFields = [payee, accountOrMail, particular, controlNumber, oldVoucherNumber, String(grossAmount)].join(' ').toLowerCase();
+        if (!searchFields.includes(term)) include = false;
+      }
+
+      if (include) {
+        const rowIndex = i + 2;
+        const v = rowToVoucher(row, rowIndex, cols);
+        if (v.status === 'Pending Edit Approval') {
+          try {
+            const note = sheet.getRange(rowIndex, cols.STATUS).getNote();
+            if (note && note.includes('PENDING_EDIT_DATA:')) {
+              const match = note.match(/PENDING_EDIT_DATA:(.*?)\|REQUESTED_BY:(.*)/);
+              if (match) {
+                v.pendingEditData = JSON.parse(match[1]);
+                v.requestedBy = match[2].trim();
+              }
+            }
+          } catch (e) {}
+        }
+        allMatching.push(v);
+      }
+    }
+
+    const totalCount = allMatching.length;
+    const totalPages = Math.ceil(totalCount / pageSize) || 1;
+    const startIndex = (page - 1) * pageSize;
+    const paginatedVouchers = allMatching.slice(startIndex, startIndex + pageSize);
+
+    return {
+      success: true,
+      vouchers: paginatedVouchers,
+      totalCount: totalCount,
+      page: page,
+      pageSize: pageSize,
+      totalPages: totalPages,
+      year: year
+    };
+  } catch (error) {
+    return { success: false, error: 'Failed to get vouchers: ' + error.message };
   }
 }
 
