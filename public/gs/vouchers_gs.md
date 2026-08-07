@@ -351,6 +351,19 @@ function getVoucherByRow(token, rowIndex, year) {
     const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
     const voucher = rowToVoucher(row, rowIndex, cols);
     
+    if (voucher.status === 'Pending Edit Approval') {
+      try {
+        const note = sheet.getRange(rowIndex, cols.STATUS).getNote();
+        if (note && note.includes('PENDING_EDIT_DATA:')) {
+          const match = note.match(/PENDING_EDIT_DATA:(.*?)\|REQUESTED_BY:(.*)/);
+          if (match) {
+            voucher.pendingEditData = JSON.parse(match[1]);
+            voucher.requestedBy = match[2].trim();
+          }
+        }
+      } catch (e) {}
+    }
+    
     return { success: true, voucher: voucher };
     
   } catch (error) {
@@ -981,7 +994,7 @@ function updateVoucher(token, rowIndex, voucher) {
             approverEmails,
             '✏️ Voucher Edit Approval Required',
             session.name + ' (Payable Staff) requested edits for voucher ' + (currentVoucher.accountOrMail || '') + ' (' + (currentVoucher.payee || '') + '). Approval required.',
-            'vouchers.html',
+            'vouchers.html?filter=Pending%20Edit%20Approval&highlight=' + rowIndex,
             'info'
           );
         }

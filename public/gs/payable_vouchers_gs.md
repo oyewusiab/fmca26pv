@@ -3910,7 +3910,7 @@ function updateVoucher(token, rowIndex, voucher) {
             approverEmails,
             '✏️ Voucher Edit Approval Required',
             session.name + ' (Payable Staff) requested edits for voucher ' + (currentVoucher.accountOrMail || '') + ' (' + (currentVoucher.payee || '') + '). Approval required.',
-            'vouchers.html',
+            'vouchers.html?filter=Pending%20Edit%20Approval&highlight=' + rowIndex,
             'info'
           );
         }
@@ -4443,6 +4443,19 @@ function getPendingDeletions(token) {
               if (p.startsWith('REQUESTED_BY:')) voucher.requestedBy = p.substring(13).trim();
               if (p.startsWith('ORIGINAL_STATUS:')) voucher.originalStatus = p.substring(16).trim();
             });
+          }
+        } catch (e) {}
+        pendingVouchers.push(voucher);
+      } else if (status === 'PENDING EDIT APPROVAL' || status === 'PENDING_EDIT_APPROVAL') {
+        const voucher = rowToVoucher(data[i], i + 2, cols);
+        try {
+          const note = sheet.getRange(i + 2, cols.STATUS).getNote();
+          if (note && note.includes('PENDING_EDIT_DATA:')) {
+            const match = note.match(/PENDING_EDIT_DATA:(.*?)\|REQUESTED_BY:(.*)/);
+            if (match) {
+              voucher.pendingEditData = JSON.parse(match[1]);
+              voucher.requestedBy = match[2].trim();
+            }
           }
         } catch (e) {}
         pendingVouchers.push(voucher);

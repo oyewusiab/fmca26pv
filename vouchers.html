@@ -628,6 +628,8 @@
                 </div>
             </div>
 
+            <div id="pendingEditAlertBanner" style="display: none; margin-bottom: 15px;"></div>
+
             <div class="filters-bar collapsed" id="filtersBar">
                 <select class="form-control" id="statusFilter">
                     <option value="All">All Status</option>
@@ -1404,6 +1406,52 @@
                 <button class="btn btn-warning" onclick="Vouchers.submitRejectDelete()">
                     <i class="fas fa-times"></i> Reject Request
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Review Proposed Edit Modal -->
+    <div class="modal-overlay" id="reviewEditModal">
+        <div class="modal" style="max-width: 750px; width: 92%;">
+            <div class="modal-header" style="background: linear-gradient(135deg, var(--primary-color), #0d3c16); color: white;">
+                <h3 class="modal-title" style="color: white; display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-edit"></i> Review Proposed Voucher Edit
+                </h3>
+                <button type="button" class="modal-close" onclick="Vouchers.closeModal('reviewEditModal')" style="color: white;">&times;</button>
+            </div>
+            <div class="modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+                <div id="reviewEditHeaderInfo" style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 16px; border-radius: 8px; margin-bottom: 16px;">
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #f1f5f9; text-align: left;">
+                                <th style="padding: 10px; border-bottom: 2px solid #cbd5e1; width: 25%;">Field</th>
+                                <th style="padding: 10px; border-bottom: 2px solid #cbd5e1; width: 37.5%;">Current (Original) Value</th>
+                                <th style="padding: 10px; border-bottom: 2px solid #cbd5e1; width: 37.5%;">Proposed New Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reviewEditDiffBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="reviewEditRejectReasonGroup" class="form-group mt-3" style="display: none;">
+                    <label for="reviewEditRejectReason">Reason for Rejection <span class="text-muted">(Optional)</span></label>
+                    <textarea class="form-control" id="reviewEditRejectReason" rows="2" placeholder="Explain why this edit request is being rejected..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                <button type="button" class="btn btn-secondary" onclick="Vouchers.closeModal('reviewEditModal')">Cancel</button>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-warning" id="reviewEditRejectBtn" onclick="Vouchers.submitModalRejectEdit()">
+                        <i class="fas fa-times-circle"></i> Reject Edit
+                    </button>
+                    <button type="button" class="btn btn-success" id="reviewEditApproveBtn" onclick="Vouchers.submitModalApproveEdit()">
+                        <i class="fas fa-check-double"></i> Approve & Save Edit
+                    </button>
+                </div>
             </div>
         </div>
     </div>

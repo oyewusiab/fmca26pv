@@ -2108,6 +2108,48 @@ textarea.form-control {
 
 #vouchersList table th.particular-header,
 #vouchersList table td.particular-cell {
+
+/* Diff Comparison & Pending Edit Styles */
+.diff-row-changed {
+    background-color: #fefce8 !important;
+}
+
+.diff-field-name {
+    font-weight: 600;
+    color: #475569;
+}
+
+.diff-old-val {
+    color: #991b1b;
+    background-color: #fef2f2;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 12.5px;
+}
+
+.diff-new-val {
+    color: #166534;
+    background-color: #dcfce7;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 12.5px;
+}
+
+.diff-unchanged {
+    color: #64748b;
+}
+
+.row-highlight-pulse {
+    animation: pulseRowHighlight 2s ease-in-out 3;
+    border: 2px solid #3b82f6 !important;
+}
+
+@keyframes pulseRowHighlight {
+    0% { background-color: rgba(59, 130, 246, 0.25); }
+    50% { background-color: rgba(59, 130, 246, 0.05); }
+    100% { background-color: rgba(59, 130, 246, 0.25); }
+}
     width: 320px !important; /* Particular column */
 }
 

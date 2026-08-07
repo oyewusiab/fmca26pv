@@ -239,14 +239,19 @@ const Vouchers = {
 
     const filter = urlParams.get('filter');
     if (filter) {
-      const map = { pending: 'Pending Deletion', pending_delete: 'Pending Deletion', unpaid: 'Unpaid', paid: 'Paid' };
-      if (map[filter]) {
-        const statusFilter = document.getElementById('statusFilter');
-        if (statusFilter) statusFilter.value = map[filter];
-        this.filters.status = map[filter];
-        this.currentPage = 1;
-        this.loadVouchers();
-      }
+      const map = {
+        pending: 'Pending Deletion',
+        pending_delete: 'Pending Deletion',
+        pending_edit: 'Pending Edit Approval',
+        unpaid: 'Unpaid',
+        paid: 'Paid'
+      };
+      const filterValue = map[filter.toLowerCase()] || filter;
+      const statusFilter = document.getElementById('statusFilter');
+      if (statusFilter) statusFilter.value = filterValue;
+      this.filters.status = filterValue;
+      this.currentPage = 1;
+      this.loadVouchers();
     }
   },
 
@@ -273,8 +278,15 @@ const Vouchers = {
 
     if (targetRow) {
       targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      targetRow.classList.add('row-highlight');
-      setTimeout(() => targetRow.classList.remove('row-highlight'), 3000);
+      targetRow.classList.add('row-highlight-pulse');
+      setTimeout(() => targetRow.classList.remove('row-highlight-pulse'), 6000);
+      const rowIdx = parseInt(targetRow.dataset.row, 10);
+      if (rowIdx) {
+        const v = this.vouchers.find(x => x.rowIndex === rowIdx);
+        if (v && v.status === 'Pending Edit Approval') {
+          this.reviewEditRequest(rowIdx);
+        }
+      }
       this._pendingHighlight = null;
     }
   },
@@ -716,12 +728,15 @@ const Vouchers = {
       });
     }
 
-    this.renderPagination();
+    this.updatePaginationUI();
+    this.updateBulkActionBar();
 
-    // Deep-link: scroll to highlighted row after DOM settles
+    // Scroll to highlighted row if deep-linked
     if (this._pendingHighlight) {
-      requestAnimationFrame(() => this.scrollToHighlightedRow());
+      setTimeout(() => this.scrollToHighlightedRow(), 150);
     }
+
+    this.checkPendingEditAlertBanner();
   },
 
   updateSelection() {
@@ -1006,6 +1021,9 @@ const Vouchers = {
     if (isPendingEdit) {
       if ([CONFIG.ROLES.ADMIN, CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO].includes(user.role)) {
         buttons += `
+        <button class="btn btn-sm btn-primary" onclick="Vouchers.reviewEditRequest(${voucher.rowIndex})" title="Review Proposed Changes">
+          <i class="fas fa-eye"></i> Review
+        </button>
         <button class="btn btn-sm btn-success" onclick="Vouchers.approveEdit(${voucher.rowIndex})" title="Approve Edit Request">
           <i class="fas fa-check-double"></i>
         </button>
@@ -2322,6 +2340,174 @@ const Vouchers = {
       }
     } catch (e) {
       console.error('rejectEdit error:', e);
+      Utils.showToast('Error rejecting edit', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  },
+
+  checkPendingEditAlertBanner() {
+    const user = Auth.getUser();
+    if (!user || ![CONFIG.ROLES.ADMIN, CONFIG.ROLES.PAYABLE_HEAD, CONFIG.ROLES.CPO].includes(user.role)) {
+      return;
+    }
+    const pendingEdits = this.vouchers.filter(v => v.status === 'Pending Edit Approval');
+    const container = document.getElementById('pendingEditAlertBanner');
+    if (!container) return;
+
+    if (pendingEdits.length > 0) {
+      container.style.display = 'block';
+      container.innerHTML = `
+        <div class="alert alert-warning" style="display: flex; justify-content: space-between; align-items: center; background: #fffbebf5; border: 1px solid #fcd34d; padding: 12px 16px; border-radius: 8px; color: #92400e; font-size: 13.5px; margin-bottom: 0;">
+          <span>
+            <i class="fas fa-exclamation-triangle" style="margin-right: 8px; font-size: 16px; color: #d97706;"></i>
+            <strong>Action Required:</strong> There are <strong>${pendingEdits.length}</strong> voucher edit request(s) awaiting your approval.
+          </span>
+          <button class="btn btn-sm btn-primary" onclick="Vouchers.filterPendingEditsOnly()" style="background: #d97706; border-color: #b45309; font-weight: 600; padding: 4px 12px;">
+            <i class="fas fa-filter"></i> Review Edit Requests
+          </button>
+        </div>
+      `;
+    } else {
+      container.style.display = 'none';
+      container.innerHTML = '';
+    }
+  },
+
+  filterPendingEditsOnly() {
+    const statusFilter = document.getElementById('statusFilter');
+    if (statusFilter) statusFilter.value = 'Pending Edit Approval';
+    this.filters.status = 'Pending Edit Approval';
+    this.currentPage = 1;
+    this.renderVouchersList();
+  },
+
+  async reviewEditRequest(rowIndex) {
+    let voucher = this.vouchers.find(x => x.rowIndex === rowIndex);
+    if (!voucher || !voucher.pendingEditData) {
+      this.showLoading(true);
+      const res = await API.getVoucherByRow(rowIndex, '2026');
+      this.showLoading(false);
+      if (res.success && res.voucher) {
+        voucher = res.voucher;
+      }
+    }
+
+    if (!voucher) {
+      return Utils.showToast('Voucher not found', 'error');
+    }
+
+    this._modalReviewVoucher = voucher;
+
+    const headerInfo = document.getElementById('reviewEditHeaderInfo');
+    const diffBody = document.getElementById('reviewEditDiffBody');
+    const modal = document.getElementById('reviewEditModal');
+
+    if (headerInfo) {
+      headerInfo.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h4 style="margin: 0 0 4px 0; color: #0f172a; font-size: 15px;">Voucher No.: <strong>${this.escapeHtml(voucher.accountOrMail || '-')}</strong></h4>
+            <div style="font-size: 13px; color: #475569;">Payee: <strong>${this.escapeHtml(voucher.payee || '-')}</strong> | Control No.: <strong>${this.escapeHtml(voucher.controlNumber || '-')}</strong></div>
+          </div>
+          <div style="text-align: right; font-size: 12.5px; color: #64748b;">
+            <div>Requested By: <strong style="color: #1e293b;">${this.escapeHtml(voucher.requestedBy || 'Payable Staff')}</strong></div>
+            <div>Original Status: <span class="badge badge-success">Paid</span></div>
+          </div>
+        </div>
+      `;
+    }
+
+    const proposed = voucher.pendingEditData || {};
+    const fieldDefs = [
+      { key: 'accountOrMail', label: 'Voucher Number (Account/Ref)' },
+      { key: 'payee', label: 'Payee Name' },
+      { key: 'particular', label: 'Particulars' },
+      { key: 'grossAmount', label: 'Gross Amount', type: 'currency' },
+      { key: 'vat', label: 'VAT', type: 'currency' },
+      { key: 'wht', label: 'WHT', type: 'currency' },
+      { key: 'stampDuty', label: 'Stamp Duty', type: 'currency' },
+      { key: 'net', label: 'Net Amount', type: 'currency' },
+      { key: 'categories', label: 'Category' },
+      { key: 'accountType', label: 'Account Type' },
+      { key: 'subAccountType', label: 'Sub Account Type' },
+      { key: 'date', label: 'Voucher Date' },
+      { key: 'oldVoucherNumber', label: 'Old Voucher Number' }
+    ];
+
+    let rowsHtml = '';
+
+    fieldDefs.forEach(f => {
+      const origVal = voucher[f.key];
+      const propVal = proposed[f.key];
+
+      let origDisplay = origVal !== undefined && origVal !== null ? String(origVal).trim() : '';
+      let propDisplay = propVal !== undefined && propVal !== null ? String(propVal).trim() : '';
+
+      if (f.type === 'currency') {
+        origDisplay = Utils.formatCurrency(parseAmount(origVal));
+        propDisplay = Utils.formatCurrency(parseAmount(propVal));
+      }
+
+      const isChanged = propVal !== undefined && String(origVal).trim() !== String(propVal).trim();
+
+      const rowClass = isChanged ? 'diff-row-changed' : '';
+      const oldClass = isChanged ? 'diff-old-val' : 'diff-unchanged';
+      const newClass = isChanged ? 'diff-new-val' : 'diff-unchanged';
+
+      rowsHtml += `
+        <tr class="${rowClass}">
+          <td class="diff-field-name" style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${f.label}</td>
+          <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><span class="${oldClass}">${this.escapeHtml(origDisplay || '-')}</span></td>
+          <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><span class="${newClass}">${this.escapeHtml(propDisplay || '-')}</span> ${isChanged ? '<i class="fas fa-asterisk" style="font-size:10px; color:#d97706; margin-left:4px;" title="Modified Field"></i>' : ''}</td>
+        </tr>
+      `;
+    });
+
+    if (diffBody) diffBody.innerHTML = rowsHtml;
+
+    const rejectGroup = document.getElementById('reviewEditRejectReasonGroup');
+    if (rejectGroup) rejectGroup.style.display = 'none';
+    const rejectReasonInput = document.getElementById('reviewEditRejectReason');
+    if (rejectReasonInput) rejectReasonInput.value = '';
+
+    if (modal) modal.classList.add('active');
+  },
+
+  async submitModalApproveEdit() {
+    if (!this._modalReviewVoucher) return;
+    const rowIndex = this._modalReviewVoucher.rowIndex;
+    this.closeModal('reviewEditModal');
+    await this.approveEdit(rowIndex);
+  },
+
+  async submitModalRejectEdit() {
+    if (!this._modalReviewVoucher) return;
+    const rejectGroup = document.getElementById('reviewEditRejectReasonGroup');
+    const rejectInput = document.getElementById('reviewEditRejectReason');
+
+    if (rejectGroup && rejectGroup.style.display === 'none') {
+      rejectGroup.style.display = 'block';
+      rejectInput?.focus();
+      return;
+    }
+
+    const reason = rejectInput ? rejectInput.value.trim() : '';
+    const rowIndex = this._modalReviewVoucher.rowIndex;
+    this.closeModal('reviewEditModal');
+
+    this.showLoading(true);
+    try {
+      const result = await API.rejectVoucherEdit(rowIndex, reason);
+      if (result.success) {
+        Utils.showToast(result.message || 'Edit request rejected', 'success');
+        this.clearVouchersCache();
+        await this.loadVouchers();
+      } else {
+        Utils.showToast(result.error || 'Failed to reject edit request', 'error');
+      }
+    } catch (e) {
+      console.error('submitModalRejectEdit error:', e);
       Utils.showToast('Error rejecting edit', 'error');
     } finally {
       this.showLoading(false);
