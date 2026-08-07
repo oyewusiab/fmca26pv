@@ -983,22 +983,15 @@ const Vouchers = {
     let buttons = '';
 
     // Edit
-    const isUnreleased = !voucher.controlNumber || voucher.controlNumber.toString().trim() === '';
+    const hasCN = Boolean(voucher.controlNumber && voucher.controlNumber.toString().trim() !== '');
     const isPaid = String(voucher.status || '').toLowerCase() === 'paid';
     const isPendingEdit = voucher.status === 'Pending Edit Approval' || Boolean(voucher.pendingEdit);
 
     if (perms.canEditVoucher && user.role !== CONFIG.ROLES.CPO && voucher.status !== 'Pending Deletion' && !isPendingEdit) {
-      let canEdit = false;
-      if (user.role === CONFIG.ROLES.ADMIN || user.role === CONFIG.ROLES.PAYABLE_HEAD) {
-        canEdit = true;
-      } else if (user.role === CONFIG.ROLES.PAYABLE_STAFF) {
-        if (isUnreleased || (isPaid && !isUnreleased)) {
-          canEdit = true;
-        }
-      }
+      let canEdit = true;
 
       if (canEdit) {
-        const editTitle = (user.role === CONFIG.ROLES.PAYABLE_STAFF && isPaid && !isUnreleased)
+        const editTitle = (user.role === CONFIG.ROLES.PAYABLE_STAFF && (hasCN || isPaid))
           ? "Edit (Requires Approval)"
           : "Edit";
         buttons += `
@@ -1560,23 +1553,6 @@ const Vouchers = {
       voucher = result.voucher;
     }
 
-    const isUnreleased = !voucher.controlNumber || voucher.controlNumber.toString().trim() === '';
-    const isPaid = String(voucher.status || '').toLowerCase() === 'paid';
-
-    let canEdit = false;
-    if (user.role === CONFIG.ROLES.ADMIN || user.role === CONFIG.ROLES.PAYABLE_HEAD) {
-      canEdit = true;
-    } else if (user.role === CONFIG.ROLES.PAYABLE_STAFF) {
-      if (isUnreleased || (isPaid && !isUnreleased)) {
-        canEdit = true;
-      }
-    }
-
-    if (!canEdit) {
-      Utils.showToast('You are not authorized to edit this voucher. Payable Staff can only edit unreleased vouchers or Paid released vouchers (pending approval).', 'error');
-      return;
-    }
-
     this.openVoucherForm(voucher);
   },
 
@@ -1589,16 +1565,7 @@ const Vouchers = {
     }
 
     if (this.isEditMode && this.selectedVoucher && user) {
-      const isUnreleased = !this.selectedVoucher.controlNumber || this.selectedVoucher.controlNumber.toString().trim() === '';
-      const isPaid = String(this.selectedVoucher.status || '').toLowerCase() === 'paid';
-      let canEdit = false;
-      if (user.role === CONFIG.ROLES.ADMIN || user.role === CONFIG.ROLES.PAYABLE_HEAD) {
-        canEdit = true;
-      } else if (user.role === CONFIG.ROLES.PAYABLE_STAFF) {
-        if (isUnreleased || (isPaid && !isUnreleased)) {
-          canEdit = true;
-        }
-      }
+      let canEdit = true;
       if (!canEdit) {
         Utils.showToast('You are not authorized to edit this voucher', 'error');
         return;
@@ -1727,9 +1694,9 @@ const Vouchers = {
 
       if (this.isEditMode && this.selectedVoucher) {
         voucherData.controlNumber = this.selectedVoucher.controlNumber || '';
-        const isUnreleased = !this.selectedVoucher.controlNumber || this.selectedVoucher.controlNumber.toString().trim() === '';
+        const hasCN = Boolean(this.selectedVoucher.controlNumber && this.selectedVoucher.controlNumber.toString().trim() !== '');
         const isPaid = String(this.selectedVoucher.status || '').toLowerCase() === 'paid';
-        if (user && user.role === CONFIG.ROLES.PAYABLE_STAFF && isPaid && !isUnreleased) {
+        if (user && user.role === CONFIG.ROLES.PAYABLE_STAFF && (hasCN || isPaid)) {
           voucherData.requiresApproval = true;
         }
         result = await API.updateVoucher(this.selectedVoucher.rowIndex, voucherData);

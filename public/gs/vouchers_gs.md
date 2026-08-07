@@ -954,14 +954,11 @@ function updateVoucher(token, rowIndex, voucher) {
     const currentVoucher = rowToVoucher(currentRow, rowIndex, cols);
     
     // NOW check restrictions based on current voucher state
-    const hasCN = currentVoucher.controlNumber && currentVoucher.controlNumber.toString().trim() !== '';
+    const hasCN = Boolean(currentVoucher.controlNumber && currentVoucher.controlNumber.toString().trim() !== '');
     const isPaid = String(currentVoucher.status || '').toLowerCase() === 'paid';
 
     if (session.role === CONFIG.ROLES.PAYABLE_STAFF) {
-      if (hasCN && !isPaid) {
-        return { success: false, error: 'Payable Staff cannot edit released vouchers that are not Paid.' };
-      }
-      if (hasCN && isPaid) {
+      if (hasCN || isPaid) {
         // Requires approval by ADMIN, PAYABLE_HEAD, or CPO!
         const statusCell = sheet.getRange(rowIndex, CONFIG.VOUCHER_COLUMNS.STATUS);
         statusCell.setNote('PENDING_EDIT_DATA:' + JSON.stringify(voucher) + '|REQUESTED_BY:' + session.email);
@@ -983,7 +980,7 @@ function updateVoucher(token, rowIndex, voucher) {
           createNotifications(
             approverEmails,
             '✏️ Voucher Edit Approval Required',
-            session.name + ' (Payable Staff) requested edits for Paid voucher ' + (currentVoucher.accountOrMail || '') + ' (' + (currentVoucher.payee || '') + '). Approval required.',
+            session.name + ' (Payable Staff) requested edits for voucher ' + (currentVoucher.accountOrMail || '') + ' (' + (currentVoucher.payee || '') + '). Approval required.',
             'vouchers.html',
             'info'
           );
@@ -1051,28 +1048,6 @@ function updateVoucher(token, rowIndex, voucher) {
     // Calculate TOTAL GROSS
     if (!voucher.totalGross) {
       voucher.totalGross = parseAmount(voucher.grossAmount);
-    }
-    // In updateVoucher() function, after getting currentVoucher:
-
-    // Check if voucher is released (has control number)
-    if (currentVoucher.controlNumber && currentVoucher.controlNumber.toString().trim() !== '') {
-        // Released vouchers can only be edited by CPO or Admin
-        if (session.role !== CONFIG.ROLES.CPO && session.role !== CONFIG.ROLES.ADMIN) {
-            return { 
-                success: false, 
-                error: 'This voucher has been released. Only CPO or Admin can edit released vouchers.' 
-            };
-        }
-    }
-
-    // Check if voucher is paid
-    if (String(currentVoucher.status || '').toLowerCase() === 'paid') {
-        if (session.role !== CONFIG.ROLES.CPO && session.role !== CONFIG.ROLES.ADMIN) {
-            return { 
-                success: false, 
-                error: 'Paid vouchers can only be edited by CPO or Admin.' 
-            };
-        }
     }
     // Recalculate NET on server: NET = GROSS - (VAT + WHT + STAMP DUTY)
     const gross = parseAmount(voucher.grossAmount);
