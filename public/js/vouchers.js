@@ -1535,6 +1535,7 @@ const Vouchers = {
     }
 
     // If global search mode, fetch from 2026 to avoid wrong-year match
+    let voucher;
     if (this.isGlobalSearchMode) {
       this.showLoading(true);
       const r = await this.get2026VoucherForAction(rowIndex);
@@ -1543,11 +1544,10 @@ const Vouchers = {
         Utils.showToast(r.error || 'Voucher not found', 'error');
         return;
       }
-      return this.openVoucherForm(r.voucher);
+      voucher = r.voucher;
+    } else {
+      voucher = this.vouchers.find(v => v.rowIndex === rowIndex);
     }
-
-    // Normal mode - existing logic
-    let voucher = this.vouchers.find(v => v.rowIndex === rowIndex);
 
     if (!voucher) {
       this.showLoading(true);
@@ -1586,6 +1586,23 @@ const Vouchers = {
     if (this.isEditMode && (!perms.canEditVoucher || (user && user.role === CONFIG.ROLES.CPO))) {
       Utils.showToast('You are not authorized to edit vouchers', 'error');
       return;
+    }
+
+    if (this.isEditMode && this.selectedVoucher && user) {
+      const isUnreleased = !this.selectedVoucher.controlNumber || this.selectedVoucher.controlNumber.toString().trim() === '';
+      const isPaid = String(this.selectedVoucher.status || '').toLowerCase() === 'paid';
+      let canEdit = false;
+      if (user.role === CONFIG.ROLES.ADMIN || user.role === CONFIG.ROLES.PAYABLE_HEAD) {
+        canEdit = true;
+      } else if (user.role === CONFIG.ROLES.PAYABLE_STAFF) {
+        if (isUnreleased || (isPaid && !isUnreleased)) {
+          canEdit = true;
+        }
+      }
+      if (!canEdit) {
+        Utils.showToast('You are not authorized to edit this voucher', 'error');
+        return;
+      }
     }
 
     const particularValidation = this.validateParticular();
