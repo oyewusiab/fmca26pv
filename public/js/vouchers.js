@@ -728,9 +728,6 @@ const Vouchers = {
       });
     }
 
-    this.updatePaginationUI();
-    this.updateBulkActionBar();
-
     // Scroll to highlighted row if deep-linked
     if (this._pendingHighlight) {
       setTimeout(() => this.scrollToHighlightedRow(), 150);
