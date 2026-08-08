@@ -1,0 +1,4413 @@
+/**
+ * PAYABLE VOUCHER 2026 - Reports Module
+ * Comprehensive reporting and analytics
+ */
+
+const Reports = {
+    // State
+    currentYear: '2026',
+    summaryData: null,
+    allYearsData: null,
+    debtProfile: null,
+    voucherCache: {},
+    voucherStats: null,
+    taxMonthlyData: null,
+    taxSummary: null,
+    categoryChart: null,
+    monthlyChart: null,
+    statusCountChart: null,
+    statusAmountChart: null,
+    debtTrendChart: null,
+    topDebtorsChart: null,
+    categoryParetoChart: null,
+    debtConcentrationChart: null,
+    agingChart: null,
+    cashCommitChart: null,
+    accrualsSnapshotChart: null,
+    netPayableChart: null,
+    voucherDistChart: null,
+    taxSplitChart: null,
+    revalidatedImpactChart: null,
+    categoryShareShiftChart: null,
+    cancelledImpactChart: null,
+    debtRequestStatus: null,
+    debtReportData: null,
+    reportAgingChart: null,
+    reportCategoryChart: null,
+    reportDepartmentChart: null,
+    systemConfig: null,
+    currentAccountTypeRows: [],
+    accountTypeFilters: { accountTypes: new Set(['ALL']), subAccountTypes: new Set(['ALL']) },
+    expandedAccountTypeGroups: new Set(),
+    selectedAccounts: new Set(['ALL']),
+    defaultAccountTypes: ['Capital', 'Liquid Oxygen', 'RFA', 'TSA', 'Project', 'OHD'],
+    categorySortField: 'category',
+    categorySortDir: 'asc',
+    currentCategoryBreakdown: [],
+
+    // Unified Chart Colors System
+    THEME: {
+        primaryGreen: 'rgba(46, 125, 50, 0.85)',
+        primaryGreenBorder: '#2e7d32',
+        
+        softGrey: 'rgba(108, 117, 125, 0.7)',
+        softGreyBorder: '#6c757d',
+        
+        successPaid: 'rgba(40, 167, 69, 0.85)',
+        successPaidBorder: '#28a745',
+        
+        warningAccent: 'rgba(255, 193, 7, 0.85)',
+        warningAccentBorder: '#ffc107',
+        
+        dangerAccent: 'rgba(220, 53, 69, 0.85)',
+        dangerAccentBorder: '#dc3545',
+        
+        accentBlue: 'rgba(0, 123, 255, 0.85)',
+        accentBlueBorder: '#007bff',
+        
+        accentPurple: 'rgba(111, 66, 193, 0.85)',
+        accentPurpleBorder: '#6f42c1',
+
+        palette: [
+            'rgba(46, 125, 50, 0.85)',   // Primary Green
+            'rgba(0, 123, 255, 0.85)',   // Blue
+            'rgba(111, 66, 193, 0.85)',  // Purple
+            'rgba(255, 193, 7, 0.85)',   // Yellow
+            'rgba(220, 53, 69, 0.85)',   // Red
+            'rgba(23, 162, 184, 0.85)',  // Cyan
+            'rgba(253, 126, 20, 0.85)',  // Orange
+            'rgba(108, 117, 125, 0.85)'  // Grey
+        ],
+        paletteBorder: [
+            '#2e7d32', '#007bff', '#6f42c1', '#ffc107', '#dc3545', '#17a2b8', '#fd7e14', '#6c757d'
+        ]
+    },
+
+    // Lazy Rendering Registry
+    pendingChartRenders: {},
+    lazyIntersectionObserver: null,
+
+    /**
+     * Initialize reports page
+     */
+    async init() {
+        const isAuth = await Auth.requireAuth();
+        if (!isAuth) return;
+
+        const user = Auth.getUser();
+        const isPayableStaff = user && (user.role === CONFIG.ROLES.PAYABLE_STAFF);
+
+        if (isPayableStaff) {
+            Utils.showToast('Access denied: Reports is not available for Payable Unit Staff.', 'error');
+            window.location.replace('dashboard.html');
+            return;
+        }
+
+        const isAuditUnit = user && (user.role === CONFIG.ROLES.AUDIT_UNIT);
+        if (isAuditUnit) {
+            const requestsBtn = document.querySelector('.tab-btn[data-tab="requests"]');
+            if (requestsBtn) requestsBtn.style.display = 'none';
+            const requestsSection = document.getElementById('officialDebtProfileSection');
+            if (requestsSection) requestsSection.style.display = 'none';
+        }
+
+        this.setupSidebar();
+        this.setupEventListeners();
+        await this.loadSystemConfig();
+        await this.loadAllReports();
+        window.addEventListener('beforeprint', () => {
+            Object.entries(this.pendingChartRenders).forEach(([canvasId, renderFn]) => {
+                try {
+                    renderFn();
+                } catch (e) {
+                    console.error('Error drawing chart on print:', e);
+                }
+            });
+            this.pendingChartRenders = {};
+        });
+
+        this.changeTab('summary');
+    },
+
+    /**
+     * Setup sidebar navigation
+     */
+    setupSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.innerHTML = Components.getSidebar('reports');
+        }
+    },
+
+    /**
+     * Setup event listeners
+     */
+    setupEventListeners() {
+        // Year selector
+        const yearSelector = document.getElementById('yearSelector');
+        if (yearSelector) {
+            yearSelector.addEventListener('change', (e) => {
+                this.currentYear = e.target.value;
+                document.getElementById('currentYearLabel').textContent = this.currentYear;
+                this.expandedAccountTypeGroups.clear();
+
+                // Clear date filter inputs on year change
+                const fromInput = document.getElementById('reportDateFrom');
+                const toInput = document.getElementById('reportDateTo');
+                if (fromInput) fromInput.value = '';
+                if (toInput) toInput.value = '';
+                const statusLabel = document.getElementById('dateFilterStatus');
+                if (statusLabel) statusLabel.textContent = 'Showing full year summary';
+
+                this.loadYearSummary();
+            });
+        }
+
+        document.getElementById('accountTypeFilter')?.addEventListener('change', () => {
+            this.accountTypeFilters.accountType = document.getElementById('accountTypeFilter')?.value || 'ALL';
+            this.accountTypeFilters.subAccountType = 'ALL';
+            this.populateSubAccountTypeFilter(this.currentAccountTypeRows);
+            this.renderAccountTypeTable(this.currentAccountTypeRows);
+        });
+
+        document.getElementById('subAccountTypeFilter')?.addEventListener('change', () => {
+            this.accountTypeFilters.subAccountType = document.getElementById('subAccountTypeFilter')?.value || 'ALL';
+            this.renderAccountTypeTable(this.currentAccountTypeRows);
+        });
+
+        // Logout
+        document.getElementById('logoutBtn')?.addEventListener('click', () => Auth.logout());
+
+        // Mobile menu
+        document.getElementById('menuToggle')?.addEventListener('click', () => {
+            document.getElementById('sidebar')?.classList.toggle('active');
+        });
+
+        // Print button
+        document.getElementById('printBtn')?.addEventListener('click', () => window.print());
+
+        // Export button
+        document.getElementById('exportBtn')?.addEventListener('click', () => this.exportToCSV());
+
+        // Debt Profile Request
+        document.getElementById('requestDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileRequest());
+        document.getElementById('reRequestDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileRequest());
+
+        // Debt Profile Approval
+        document.getElementById('approveDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileApproval('approve'));
+        document.getElementById('rejectDebtProfileBtn')?.addEventListener('click', () => this.handleDebtProfileApproval('reject'));
+
+        // View Report
+        document.getElementById('viewApprovedReportBtn')?.addEventListener('click', () => this.loadFullDebtReport());
+
+        // Historical Reports Dropdown Listeners
+        this.setupHistoricalReportsListeners();
+
+        // Debt Profile Events (using delegation for components that might be re-rendered)
+        document.addEventListener('click', (e) => {
+            const id = e.target.id || e.target.closest('button')?.id;
+            
+            if (id === 'editNarrativeBtn') {
+                console.log('Edit Narrative button clicked');
+                this.handleDebtProfileRequest();
+            } else if (id === 'createNewReportBtn') {
+                console.log('Create New Report button clicked');
+                this.handleDebtProfileRequest(true); // pass true for fresh report
+            } else if (id === 'downloadFullPDF') {
+                this.downloadDebtReportGenerated('pdf');
+            } else if (id === 'downloadFullExcel') {
+                this.downloadDebtReportGenerated('excel');
+            }
+        });
+        
+        // Auto-Generate button (inside modal)
+        document.getElementById('autoGenerateBtn')?.addEventListener('click', () => this.generateSmartNarrative());
+
+        // Modal Close logic
+        const modalOverlay = document.getElementById('analyticalFormModalOverlay');
+        if (modalOverlay) {
+            modalOverlay.querySelectorAll('.close-modal, .cancel-modal').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    console.log('Closing modal');
+                    modalOverlay.classList.remove('active');
+                });
+            });
+        } else {
+            console.error('analyticalFormModalOverlay not found in DOM');
+        }
+
+        // Modal Submit logic
+        const analyticalForm = document.getElementById('analyticalReportForm');
+        if (analyticalForm) {
+            analyticalForm.onsubmit = async (e) => {
+                e.preventDefault();
+                console.log('Submitting analytical report form');
+                await this.submitDebtProfileRequest();
+            };
+        }
+
+        // Listen for SWR background updates
+        document.addEventListener('apiDataUpdated', (e) => {
+            const { action, data, params } = e.detail;
+
+            // If the user hasn't switched the year dropdown, re-apply the fresh data
+            if (action === 'getSummary' && params.year === this.currentYear) {
+                this.summaryData = data;
+                this.renderYearSummary(data);
+                this.renderFinancialInsights(data.summary);
+                this.renderCategoryTable(data.categoryBreakdown);
+                this.renderAccountTypeTable(data.accountTypeBreakdown);
+                this.renderMonthlyTable(data.monthlyBreakdown);
+                this.queueChartRender('categoryChart', () => this.drawCategoryChart(data.categoryBreakdown));
+                this.queueChartRender('categoryParetoChart', () => this.drawCategoryParetoChart(data.categoryBreakdown));
+                this.queueChartRender('categoryShareShiftChart', () => this.drawCategoryShareShiftChart(data.categoryBreakdown));
+                this.queueChartRender('monthlyChart', () => this.drawMonthlyChart(data.monthlyBreakdown));
+                this.queueChartRender('statusCountChart', () => this.drawStatusCharts(data.summary));
+                this.queueChartRender('statusAmountChart', () => this.drawStatusCharts(data.summary));
+                this.queueChartRender('cashCommitChart', () => this.drawCashCommitChart(data.summary));
+                this.queueChartRender('accrualsSnapshotChart', () => this.drawAccrualsSnapshot(data.summary));
+                this.setupLazyChartRendering();
+            }
+            if (action === 'getAllYearsSummary') {
+                this.allYearsData = data;
+                this.renderAllYearsSummary(data);
+                this.queueChartRender('debtTrendChart', () => this.drawDebtTrendChart(data));
+                this.queueChartRender('netPayableChart', () => this.drawNetPayableChart(data));
+                this.setupLazyChartRendering();
+            }
+            if (action === 'getDebtProfile') {
+                this.debtProfile = data;
+                this.renderDebtProfile(data);
+                this.queueChartRender('debtConcentrationChart', () => this.drawDebtConcentration(data));
+                this.queueChartRender('topDebtorsChart', () => this.drawTopDebtorsChart(data));
+                this.setupLazyChartRendering();
+            }
+            if (action === 'getTaxByMonth' && params.year === this.currentYear) {
+                this.taxMonthlyData = data;
+                this.queueChartRender('taxSplitChart', () => this.drawTaxSplitChart(data));
+                this.setupLazyChartRendering();
+            }
+        });
+    },
+
+    /**
+     * Load all reports data (initial load)
+     */
+    async loadAllReports() {
+        this.showLoading(true);
+
+        try {
+            await Promise.all([
+                this.loadYearSummary(),
+                this.loadAllYearsSummary(),
+                this.loadDebtProfile(),
+                this.loadHistoricalReports(),
+                this.checkDebtProfileStatus()
+            ]);
+            this.populateAccountMultiSelectOptions();
+        } catch (error) {
+            console.error('Error loading reports:', error);
+            Utils.showToast('Error loading reports', 'error');
+        }
+
+        this.showLoading(false);
+    },
+
+    async loadSystemConfig() {
+        try {
+            const result = await API.getSystemConfig();
+            if (result.success) {
+                this.systemConfig = result.config || result;
+            }
+        } catch (e) {
+            console.warn('System config load failed:', e);
+        }
+    },
+
+    /**
+     * Load summary for selected year
+     */
+    async loadYearSummary() {
+        const result = await API.getSummary(this.currentYear);
+
+        if (result.success) {
+            this.summaryData = result;
+            this.renderYearSummary(result);
+            this.renderFinancialInsights(result.summary);
+            this.renderCategoryTable(result.categoryBreakdown);
+            this.renderAccountTypeTable(result.accountTypeBreakdown);
+            this.renderMonthlyTable(result.monthlyBreakdown);
+            this.queueChartRender('categoryChart', () => this.drawCategoryChart(result.categoryBreakdown));
+            this.queueChartRender('categoryParetoChart', () => this.drawCategoryParetoChart(result.categoryBreakdown));
+            this.queueChartRender('categoryShareShiftChart', () => this.drawCategoryShareShiftChart(result.categoryBreakdown));
+            this.queueChartRender('monthlyChart', () => this.drawMonthlyChart(result.monthlyBreakdown));
+            this.queueChartRender('statusCountChart', () => this.drawStatusCharts(result.summary));
+            this.queueChartRender('statusAmountChart', () => this.drawStatusCharts(result.summary));
+            this.queueChartRender('cashCommitChart', () => this.drawCashCommitChart(result.summary));
+            this.queueChartRender('accrualsSnapshotChart', () => this.drawAccrualsSnapshot(result.summary));
+            this.setupLazyChartRendering();
+        } else {
+            Utils.showToast(result.error || 'Failed to load summary', 'error');
+        }
+
+        await Promise.all([
+            this.loadVoucherAnalytics(),
+            this.loadTaxByMonth(),
+            this.loadTaxSummary(),
+            this.loadTaxPayments()
+        ]);
+    },
+
+    parseDateFlexible(value) {
+        if (!value) return null;
+        if (value instanceof Date) return value;
+        const str = String(value).trim();
+        if (!str) return null;
+
+        // Match "3/10/2026 13:13:38" or "03/10/2026"
+        const m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (m) {
+            const p1 = parseInt(m[1], 10);
+            const p2 = parseInt(m[2], 10);
+            const yyyy = parseInt(m[3], 10);
+            const hh = parseInt(m[4] || '0', 10);
+            const mm = parseInt(m[5] || '0', 10);
+            const ss = parseInt(m[6] || '0', 10);
+
+            let day = p1, month = p2;
+            if (p1 <= 12 && p2 > 12) {
+                month = p1;
+                day = p2;
+            } else if (p1 > 12 && p2 <= 12) {
+                day = p1;
+                month = p2;
+            } else if (p1 <= 12 && p2 <= 12) {
+                month = p1;
+                day = p2;
+            }
+
+            const out = new Date(yyyy, month - 1, day, hh, mm, ss);
+            return isNaN(out.getTime()) ? null : out;
+        }
+
+        const d = new Date(str);
+        return isNaN(d.getTime()) ? null : d;
+    },
+
+    async loadAgingAnalysis2026() {
+        const section = document.getElementById('agingSection');
+        section?.classList.remove('hidden');
+
+        // Pull UNPAID vouchers. If you have huge data, we can page through.
+        // This assumes your getVouchers supports pagination and returns totalPages.
+        const all = [];
+
+        this.showLoading(true);
+        try {
+            // 1. Fetch first page to get total count
+            const firstRes = await API.getVouchers('2026', { status: 'Unpaid' }, 1, 200);
+            if (!firstRes.success) return;
+
+            all.push(...(firstRes.vouchers || []));
+            const totalPages = firstRes.totalPages || 1;
+
+            // 2. Fetch remaining pages in parallel (if any)
+            if (totalPages > 1) {
+                const promises = [];
+                for (let p = 2; p <= totalPages; p++) {
+                    promises.push(API.getVouchers('2026', { status: 'Unpaid' }, p, 200));
+                }
+                const results = await Promise.all(promises);
+                results.forEach(res => {
+                    if (res.success && res.vouchers) all.push(...res.vouchers);
+                });
+            }
+
+            const now = new Date();
+            const buckets = [
+                { label: '0–7 days', min: 0, max: 7, count: 0, amount: 0 },
+                { label: '8–14 days', min: 8, max: 14, count: 0, amount: 0 },
+                { label: '15–30 days', min: 15, max: 30, count: 0, amount: 0 },
+                { label: '31–60 days', min: 31, max: 60, count: 0, amount: 0 },
+                { label: '61–90 days', min: 61, max: 90, count: 0, amount: 0 },
+                { label: '90+ days', min: 91, max: 99999, count: 0, amount: 0 },
+            ];
+
+            all.forEach(v => {
+                const created = this.parseDateFlexible(v.createdAt || v.date);
+                if (!created) return;
+
+                const ageDays = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+                const amt = Number(v.grossAmount || 0);
+
+                const b = buckets.find(x => ageDays >= x.min && ageDays <= x.max);
+                if (!b) return;
+                b.count += 1;
+                b.amount += amt;
+            });
+
+            // Draw chart
+            const ctx = document.getElementById('agingChart');
+            if (ctx) {
+                if (this.agingChart) this.agingChart.destroy();
+
+                this.agingChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: buckets.map(b => b.label),
+                        datasets: [{
+                            label: 'Total Amount (₦)',
+                            data: buckets.map(b => b.amount),
+                            backgroundColor: 'rgba(255,193,7,0.65)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { position: 'top' } },
+                        scales: {
+                            y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } }
+                        }
+                    }
+                });
+            }
+
+            // Render table
+            const t = document.getElementById('agingTable');
+            if (t) {
+                t.innerHTML = `
+                <div class="table-container">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Bucket</th>
+                        <th class="text-center">Count</th>
+                        <th class="text-right">Total Amount</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    ${buckets.map(b => `
+                        <tr>
+                        <td class="drill-down-link" onclick="Reports.drillDown('aging', '${b.label}')"><strong>${b.label}</strong></td>
+                        <td class="text-center">${Utils.formatNumber(b.count)}</td>
+                        <td class="text-right">${Utils.formatCurrency(b.amount)}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+            }
+
+        } catch (e) {
+            console.error('Aging analysis error:', e);
+            Utils.showToast('Could not compute aging analysis', 'warning');
+        } finally {
+            this.showLoading(false);
+        }
+    },
+
+    getVoucherAmount(voucher) {
+        const val = voucher?.grossAmount ?? voucher?.amount ?? voucher?.totalAmount ?? voucher?.contractSum ?? 0;
+        const num = Number(val);
+        return Number.isFinite(num) ? num : 0;
+    },
+
+    isYesValue(value) {
+        const raw = String(value || '').trim().toLowerCase();
+        return raw === 'yes' || raw === 'y' || raw === 'true';
+    },
+
+    isRevalidatedVoucher(voucher) {
+        const hasOldNumber = !!String(voucher?.oldVoucherNumber || '').trim();
+        return hasOldNumber || this.isYesValue(voucher?.oldVoucherAvailable);
+    },
+
+    getRevalidationCounts(vouchers) {
+        let revalidatedVouchers = 0;
+        let revalidatedWithoutOldNumber = 0;
+
+        (vouchers || []).forEach((v) => {
+            const hasOldNumber = !!String(v?.oldVoucherNumber || '').trim();
+            const markedAvailable = this.isYesValue(v?.oldVoucherAvailable);
+            if (hasOldNumber || markedAvailable) {
+                revalidatedVouchers++;
+                if (!hasOldNumber && markedAvailable) revalidatedWithoutOldNumber++;
+            }
+        });
+
+        return { revalidatedVouchers, revalidatedWithoutOldNumber };
+    },
+
+    getTotalVoucherAmount(summary) {
+        if (!summary) return 0;
+        const paid = Number(summary.totalPaidAmount || 0);
+        const unpaid = Number(summary.totalUnpaidAmount || 0);
+        const cancelled = Number(summary.totalCancelledAmount || 0);
+        return paid + unpaid + cancelled;
+    },
+
+    drawAgingAnalysisFromVouchers(vouchers) {
+        const section = document.getElementById('agingSection');
+        section?.classList.remove('hidden');
+
+        const unpaid = (vouchers || []).filter(v => String(v.status || '').toLowerCase() === 'unpaid');
+        const isEmpty = !unpaid.length;
+        this.toggleChartPlaceholder('agingChart', isEmpty);
+
+        if (isEmpty) {
+            document.getElementById('agingTable')?.replaceChildren();
+            if (this.agingChart) this.agingChart.destroy();
+            return;
+        }
+
+        const now = new Date();
+        const buckets = [
+            { label: '0-7 days', min: 0, max: 7, count: 0, amount: 0 },
+            { label: '8-14 days', min: 8, max: 14, count: 0, amount: 0 },
+            { label: '15-30 days', min: 15, max: 30, count: 0, amount: 0 },
+            { label: '31-60 days', min: 31, max: 60, count: 0, amount: 0 },
+            { label: '61-90 days', min: 61, max: 90, count: 0, amount: 0 },
+            { label: '90+ days', min: 91, max: 99999, count: 0, amount: 0 },
+        ];
+
+        unpaid.forEach(v => {
+            const created = this.parseDateFlexible(v.createdAt || v.date);
+            if (!created) return;
+
+            const ageDays = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+            const amt = this.getVoucherAmount(v);
+
+            const b = buckets.find(x => ageDays >= x.min && ageDays <= x.max);
+            if (!b) return;
+            b.count += 1;
+            b.amount += amt;
+        });
+
+        const ctx = document.getElementById('agingChart');
+        if (ctx) {
+            if (this.agingChart) this.agingChart.destroy();
+
+            this.agingChart = new Chart(ctx, {
+                data: {
+                    labels: buckets.map(b => b.label),
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Outstanding Amount',
+                            data: buckets.map(b => b.amount),
+                            backgroundColor: this.THEME.dangerAccent,
+                            borderColor: this.THEME.dangerAccentBorder,
+                            yAxisID: 'y'
+                        },
+                        {
+                            type: 'line',
+                            label: 'Voucher Count',
+                            data: buckets.map(b => b.count),
+                            borderColor: this.THEME.accentBlueBorder,
+                            backgroundColor: this.THEME.accentBlue,
+                            tension: 0.3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'top' } },
+                    scales: {
+                        y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } },
+                        y1: {
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            ticks: { callback: v => Number(v).toLocaleString() }
+                        }
+                    }
+                }
+            });
+        }
+
+        const t = document.getElementById('agingTable');
+        if (t) {
+            t.innerHTML = `
+            <div class="table-container">
+            <table>
+                <thead>
+                <tr>
+                    <th>Bucket</th>
+                    <th class="text-center">Count</th>
+                    <th class="text-right">Total Amount</th>
+                </tr>
+                </thead>
+                <tbody>
+                ${buckets.map(b => `
+                    <tr>
+                    <td><strong>${b.label}</strong></td>
+                    <td class="text-center">${Utils.formatNumber(b.count)}</td>
+                    <td class="text-right">${Utils.formatCurrency(b.amount)}</td>
+                    </tr>
+                `).join('')}
+                </tbody>
+            </table>
+            </div>
+        `;
+        }
+    },
+
+    /**
+     * Draw category bar chart
+     */
+    drawCategoryChart(categories) {
+        const ctx = document.getElementById('categoryChart');
+        if (!ctx) return;
+
+        const isEmpty = !categories || categories.length === 0 || categories.every(c => !c.amountPaid && !c.balance);
+        this.toggleChartPlaceholder('categoryChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.categoryChart) this.categoryChart.destroy();
+            return;
+        }
+
+        const labels = categories.map(c => c.category);
+        const paidData = categories.map(c => c.amountPaid);
+        const balanceData = categories.map(c => c.balance);
+
+        if (this.categoryChart) {
+            this.categoryChart.destroy();
+        }
+
+        this.categoryChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Amount Paid',
+                        data: paidData,
+                        backgroundColor: this.THEME.successPaid,
+                        borderColor: this.THEME.successPaidBorder,
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Balance (Unpaid)',
+                        data: balanceData,
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    title: { display: false }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function (value) {
+                                return '₦' + Number(value).toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    },
+
+    drawCategoryParetoChart(categories) {
+        const ctx = document.getElementById('categoryParetoChart');
+        if (!ctx) return;
+
+        const isEmpty = !categories || !categories.length || categories.every(c => !c.balance);
+        this.toggleChartPlaceholder('categoryParetoChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.categoryParetoChart) this.categoryParetoChart.destroy();
+            return;
+        }
+
+        // Sort by unpaid balance desc
+        const sorted = [...categories].sort((a, b) => (b.balance || 0) - (a.balance || 0));
+
+        const labels = sorted.map(c => c.category);
+        const balances = sorted.map(c => Number(c.balance || 0));
+        const total = balances.reduce((s, v) => s + v, 0) || 1;
+
+        // Cumulative %
+        let running = 0;
+        const cumPct = balances.map(v => {
+            running += v;
+            return Number(((running / total) * 100).toFixed(2));
+        });
+
+        if (this.categoryParetoChart) this.categoryParetoChart.destroy();
+
+        this.categoryParetoChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Unpaid Balance',
+                        data: balances,
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1,
+                        yAxisID: 'y'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Cumulative %',
+                        data: cumPct,
+                        borderColor: this.THEME.accentBlueBorder,
+                        backgroundColor: this.THEME.accentBlue,
+                        tension: 0.25,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: {
+                        ticks: { callback: v => '₦' + Number(v).toLocaleString() }
+                    },
+                    y1: {
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        grid: { drawOnChartArea: false },
+                        ticks: { callback: v => v + '%' }
+                    }
+                }
+            }
+        });
+    },
+
+    /**
+     * Draw monthly line chart
+     */
+    async drawMonthlyChart(months) {
+        const ctx = document.getElementById('monthlyChart');
+        if (!ctx) return;
+
+        const isEmpty = !months || months.length === 0 || months.every(m => !(m.paidAmount || m.amountPaid) && !(m.unpaidAmount || m.balance));
+        this.toggleChartPlaceholder('monthlyChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.monthlyChart) this.monthlyChart.destroy();
+            return;
+        }
+
+        const labels = months.map(m => m.month);
+        const paidData = months.map(m => m.paidAmount !== undefined ? m.paidAmount : (m.amountPaid || 0));
+        const unpaidData = months.map(m => m.unpaidAmount !== undefined ? m.unpaidAmount : (m.balance || 0));
+
+        let prevYearPaid = Array(12).fill(0);
+        const prevYear = String(parseInt(this.currentYear, 10) - 1);
+        
+        try {
+            if (!this.prevYearSummaryCache) this.prevYearSummaryCache = {};
+            
+            let prevData = this.prevYearSummaryCache[prevYear];
+            if (!prevData) {
+                const res = await API.getSummary(prevYear);
+                if (res.success && res.monthlyBreakdown) {
+                    prevData = res.monthlyBreakdown;
+                    this.prevYearSummaryCache[prevYear] = prevData;
+                }
+            }
+            if (prevData) {
+                prevYearPaid = prevData.map(m => m.paidAmount !== undefined ? m.paidAmount : (m.amountPaid || 0));
+            }
+        } catch (e) {
+            console.warn('Failed to load comparative year data:', e);
+        }
+
+        if (this.monthlyChart) {
+            this.monthlyChart.destroy();
+        }
+
+        this.monthlyChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: `${this.currentYear} Paid Disbursements`,
+                        data: paidData,
+                        borderColor: this.THEME.successPaidBorder,
+                        backgroundColor: 'rgba(40,167,69,0.05)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: `${this.currentYear} Unpaid Liabilities`,
+                        data: unpaidData,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        backgroundColor: 'rgba(220,53,69,0.05)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: `${prevYear} Paid Disbursements (Comparative)`,
+                        data: prevYearPaid,
+                        borderColor: this.THEME.softGreyBorder,
+                        borderDash: [5, 5],
+                        fill: false,
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    title: { display: false }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function (value) {
+                                return '₦' + Number(value).toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    },
+
+    renderFinancialInsights(summary) {
+        const container = document.getElementById('financialInsightsCards');
+        if (!container || !summary) return;
+
+        const totalVoucherAmount = this.getTotalVoucherAmount(summary);
+        const paid = Number(summary.totalPaidAmount || 0);
+        const unpaid = Number(summary.totalUnpaidAmount || 0);
+        const cancelled = Number(summary.totalCancelledAmount || 0);
+        const contractSum = Number(summary.totalProcessedContractSum || 0);
+        const paymentEfficiency = totalVoucherAmount > 0 ? (paid / totalVoucherAmount) * 100 : 0;
+        const accrualRate = totalVoucherAmount > 0 ? (unpaid / totalVoucherAmount) * 100 : 0;
+        const commitmentGap = Math.max(contractSum - paid, 0);
+        const avgVoucher = this.voucherStats?.average || (summary.totalVouchersRaised ? (totalVoucherAmount / summary.totalVouchersRaised) : 0);
+
+        container.innerHTML = `
+            <div class="stat-card info">
+                <div class="stat-label">Total Voucher Amount (Raised)</div>
+                <div class="stat-value">${Utils.formatCurrency(totalVoucherAmount)}</div>
+                <div class="stat-subvalue">Paid + Unpaid + Cancelled</div>
+            </div>
+            <div class="stat-card paid">
+                <div class="stat-label">Cash Outflow (Paid)</div>
+                <div class="stat-value">${Utils.formatCurrency(paid)}</div>
+                <div class="stat-subvalue">Actual cash impact</div>
+            </div>
+            <div class="stat-card unpaid">
+                <div class="stat-label">Accrued Expenses</div>
+                <div class="stat-value">${Utils.formatCurrency(unpaid)}</div>
+                <div class="stat-subvalue">${accrualRate.toFixed(1)}% of raised</div>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-label">Payment Efficiency</div>
+                <div class="stat-value">${paymentEfficiency.toFixed(1)}%</div>
+                <div class="stat-subvalue">
+                    Paid / Total Raised
+                    <div class="progress-bar-mini" style="margin-top:5px;">
+                        <div class="progress-fill success" style="width: ${Math.min(paymentEfficiency, 100)}%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Average Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(avgVoucher)}</div>
+                <div class="stat-subvalue">Per voucher (amount)</div>
+            </div>
+            <div class="stat-card cancelled">
+                <div class="stat-label">Commitment Gap</div>
+                <div class="stat-value">${Utils.formatCurrency(commitmentGap)}</div>
+                <div class="stat-subvalue">Contract Sum - Paid</div>
+            </div>
+        `;
+    },
+
+    drawCashCommitChart(summary) {
+        const ctx = document.getElementById('cashCommitChart');
+        if (!ctx) return;
+
+        const totalVoucherAmount = this.getTotalVoucherAmount(summary);
+        const paid = Number(summary?.totalPaidAmount || 0);
+        const contractSum = Number(summary?.totalProcessedContractSum || 0);
+
+        const isEmpty = !summary || (!paid && !totalVoucherAmount && !contractSum);
+        this.toggleChartPlaceholder('cashCommitChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.cashCommitChart) this.cashCommitChart.destroy();
+            return;
+        }
+
+        if (this.cashCommitChart) this.cashCommitChart.destroy();
+
+        this.cashCommitChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Paid (Cash Outflow)', 'Total Voucher Amount', 'Contract Sum'],
+                datasets: [{
+                    label: 'Amount',
+                    data: [paid, totalVoucherAmount, contractSum],
+                    backgroundColor: [this.THEME.successPaid, this.THEME.accentBlue, this.THEME.warningAccent],
+                    borderColor: [this.THEME.successPaidBorder, this.THEME.accentBlueBorder, this.THEME.warningAccentBorder],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } }
+                }
+            }
+        });
+    },
+
+    drawAccrualsSnapshot(summary) {
+        const ctx = document.getElementById('accrualsSnapshotChart');
+        if (!ctx) return;
+
+        const paid = Number(summary?.totalPaidAmount || 0);
+        const unpaid = Number(summary?.totalUnpaidAmount || 0);
+        const cancelled = Number(summary?.totalCancelledAmount || 0);
+        const total = paid + unpaid + cancelled;
+
+        const isEmpty = !summary || total === 0;
+        this.toggleChartPlaceholder('accrualsSnapshotChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.accrualsSnapshotChart) this.accrualsSnapshotChart.destroy();
+            return;
+        }
+
+        if (this.accrualsSnapshotChart) this.accrualsSnapshotChart.destroy();
+
+        this.accrualsSnapshotChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Total Raised'],
+                datasets: [
+                    { label: 'Paid', data: [paid], backgroundColor: this.THEME.successPaid, borderColor: this.THEME.successPaidBorder, borderWidth: 1 },
+                    { label: 'Unpaid (Accrual)', data: [unpaid], backgroundColor: this.THEME.dangerAccent, borderColor: this.THEME.dangerAccentBorder, borderWidth: 1 },
+                    { label: 'Cancelled', data: [cancelled], backgroundColor: this.THEME.softGrey, borderColor: this.THEME.softGreyBorder, borderWidth: 1 }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { stacked: true },
+                    y: {
+                        stacked: true,
+                        ticks: { callback: v => '₦' + Number(v).toLocaleString() }
+                    }
+                }
+            }
+        });
+
+        const note = document.getElementById('accrualsSnapshotNote');
+        if (note) {
+            note.textContent = `Accrual rate: ${accrualRate.toFixed(1)}% of raised | Accrual vs Contract: ${accrualToContract.toFixed(1)}%`;
+        }
+    },
+
+    drawCategoryShareShiftChart(categories) {
+        const ctx = document.getElementById('categoryShareShiftChart');
+        if (!ctx) return;
+
+        const isEmpty = !categories || !categories.length || categories.every(c => !c.amountPaid && !c.balance);
+        this.toggleChartPlaceholder('categoryShareShiftChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.categoryShareShiftChart) this.categoryShareShiftChart.destroy();
+            return;
+        }
+
+        const totalPaid = categories.reduce((s, c) => s + Number(c.amountPaid || 0), 0) || 1;
+        const totalUnpaid = categories.reduce((s, c) => s + Number(c.balance || 0), 0) || 1;
+
+        const rows = categories.map(c => ({
+            category: c.category,
+            paidShare: Number(((Number(c.amountPaid || 0) / totalPaid) * 100).toFixed(2)),
+            unpaidShare: Number(((Number(c.balance || 0) / totalUnpaid) * 100).toFixed(2))
+        }));
+
+        rows.sort((a, b) => b.unpaidShare - a.unpaidShare);
+
+        if (this.categoryShareShiftChart) this.categoryShareShiftChart.destroy();
+
+        this.categoryShareShiftChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: rows.map(r => r.category),
+                datasets: [
+                    {
+                        label: 'Paid Share %',
+                        data: rows.map(r => r.paidShare),
+                        backgroundColor: this.THEME.successPaid,
+                        borderColor: this.THEME.successPaidBorder,
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Unpaid Share %',
+                        data: rows.map(r => r.unpaidShare),
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { ticks: { callback: v => v + '%' } }
+                }
+            }
+        });
+    },
+
+    drawNetPayableChart(allYearsData) {
+        const ctx = document.getElementById('netPayableChart');
+        if (!ctx) return;
+
+        const total = Number(allYearsData?.grandTotals?.currentOutstandingBalance || 0);
+        const currentRow = allYearsData?.yearsSummary?.find(y => y.label === this.currentYear);
+
+        // Calculate unpaid debt originating specifically from current year
+        const currentUnpaid = Number(currentRow?.unpaidAmount || (currentRow ? Math.max(currentRow.currentBalance - currentRow.balanceBroughtForward, 0) : 0));
+        // Calculate unpaid debt originating from prior years
+        const priorUnpaid = Math.max(total - currentUnpaid, 0);
+
+        const isEmpty = !allYearsData || total === 0;
+        this.toggleChartPlaceholder('netPayableChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.netPayableChart) this.netPayableChart.destroy();
+            return;
+        }
+
+        if (this.netPayableChart) this.netPayableChart.destroy();
+
+        this.netPayableChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: [`Current Year (${this.currentYear})`, 'Prior Years'],
+                datasets: [{
+                    data: [currentUnpaid, priorUnpaid],
+                    backgroundColor: [this.THEME.accentBlue, this.THEME.softGrey],
+                    borderColor: [this.THEME.accentBlueBorder, this.THEME.softGreyBorder],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: c => `${c.label}: ₦${Number(c.raw || 0).toLocaleString()}`
+                        }
+                    }
+                }
+            }
+        });
+
+        const kpi = document.getElementById('netPayableKPI');
+        if (kpi) {
+            const share = total > 0 ? (currentUnpaid / total) * 100 : 0;
+            kpi.innerHTML = `
+                <div class="stat-label">Net Payable Position (All Years)</div>
+                <div class="stat-value text-danger">${Utils.formatCurrency(total)}</div>
+                <div class="stat-subvalue">${this.currentYear} Share: ${share.toFixed(1)}% (${Utils.formatCurrency(currentUnpaid)}) | Prior Years: ${Utils.formatCurrency(priorUnpaid)}</div>
+            `;
+        }
+    },
+
+    async loadTaxSummary() {
+        if (!API.getTaxSummary) return;
+        const result = await API.getTaxSummary(this.currentYear);
+        if (result.success) {
+            this.taxSummary = result.summary;
+            this.renderTaxSummary(result.summary);
+        }
+    },
+
+    renderTaxSummary(summary) {
+        if (!summary) return;
+        
+        const liabilityEl = document.getElementById('taxTotalLiability');
+        const paidEl = document.getElementById('taxTotalPaid');
+        const outstandingEl = document.getElementById('taxTotalOutstanding');
+        const complianceEl = document.getElementById('taxComplianceRate');
+        
+        if (liabilityEl) liabilityEl.textContent = Utils.formatCurrency(summary.totalTaxLiability);
+        if (paidEl) paidEl.textContent = Utils.formatCurrency(summary.totalPaid);
+        if (outstandingEl) outstandingEl.textContent = Utils.formatCurrency(summary.totalOutstanding);
+        if (complianceEl) complianceEl.textContent = (summary.complianceRate || 0).toFixed(1) + '%';
+    },
+
+    async loadTaxByMonth() {
+        if (!API.getTaxByMonth) return;
+        const result = await API.getTaxByMonth(this.currentYear);
+        if (result.success) {
+            this.taxMonthlyData = result;
+            this.drawTaxSplitChart(result);
+        } else {
+            Utils.showToast(result.error || 'Failed to load tax monthly data', 'error');
+        }
+    },
+
+    drawTaxSplitChart(data) {
+        const ctx = document.getElementById('taxSplitChart');
+        if (!ctx) return;
+
+        const months = data?.months || data;
+        const isEmpty = !months || !months.length || months.every(m => !m.totalTax && !m.paidTax);
+        this.toggleChartPlaceholder('taxSplitChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.taxSplitChart) this.taxSplitChart.destroy();
+            return;
+        }
+
+        const labels = months.map(m => m.month);
+        const liability = months.map(m => Number(m.totalTax || 0));
+        const paid = months.map(m => Number(m.paidTax || 0));
+
+        if (this.taxSplitChart) this.taxSplitChart.destroy();
+
+        this.taxSplitChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Total Tax Liability',
+                        data: liability,
+                        backgroundColor: this.THEME.warningAccent,
+                        borderColor: this.THEME.warningAccentBorder,
+                        borderWidth: 1
+                    },
+                    {
+                        type: 'line',
+                        label: 'Tax Paid',
+                        data: paid,
+                        borderColor: this.THEME.successPaidBorder,
+                        backgroundColor: 'rgba(40,167,69,0.05)',
+                        tension: 0.3,
+                        yAxisID: 'y'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } }
+                }
+            }
+        });
+    },
+
+    async loadVoucherAnalytics() {
+        const year = this.currentYear;
+        if (this.voucherCache[year]) {
+            this.applyVoucherAnalytics(this.voucherCache[year]);
+            return;
+        }
+
+        const all = [];
+        try {
+            const firstRes = await API.getVouchers(year, null, 1, 200);
+            if (!firstRes.success) return;
+
+            all.push(...(firstRes.vouchers || []));
+            const totalPages = firstRes.totalPages || 1;
+
+            if (totalPages > 1) {
+                const promises = [];
+                for (let p = 2; p <= totalPages; p++) {
+                    promises.push(API.getVouchers(year, null, p, 200));
+                }
+                const results = await Promise.all(promises);
+                results.forEach(res => {
+                    if (res.success && res.vouchers) all.push(...res.vouchers);
+                });
+            }
+        } catch (e) {
+            console.error('Voucher analytics load error:', e);
+        }
+
+        this.voucherCache[year] = all;
+        this.applyVoucherAnalytics(all);
+    },
+
+    getMonthIndexFromVoucher(voucher) {
+        const pmtMonth = voucher?.pmtMonth || voucher?.paymentMonth;
+        if (pmtMonth) {
+            const idx = CONFIG.MONTHS.findIndex(m => m.toLowerCase() === String(pmtMonth).toLowerCase());
+            if (idx >= 0) return idx;
+        }
+
+        const date = this.parseDateFlexible(voucher?.createdAt || voucher?.date);
+        if (date) return date.getMonth();
+        return null;
+    },
+
+    applyVoucherAnalytics(vouchers) {
+        const stats = this.computeVoucherStats(vouchers || []);
+        this.voucherStats = stats;
+        if (this.summaryData?.summary) {
+            const rev = this.getRevalidationCounts(vouchers || []);
+            this.summaryData.summary.revalidatedVouchers = rev.revalidatedVouchers;
+            this.summaryData.summary.revalidatedWithoutOldNumber = rev.revalidatedWithoutOldNumber;
+            this.renderYearSummary(this.summaryData);
+        }
+        const fromVouchers = this.buildAccountTypeBreakdownFromVouchers(vouchers || []);
+        if (fromVouchers.length) {
+            this.renderAccountTypeTable(fromVouchers);
+        }
+        this.renderFinancialInsights(this.summaryData?.summary);
+        this.renderVoucherValueCards(stats);
+        this.queueChartRender('voucherDistChart', () => this.drawVoucherDistributionChart(stats));
+        this.queueChartRender('revalidatedImpactChart', () => this.drawRevalidatedImpactChart(stats));
+        this.queueChartRender('cancelledImpactChart', () => this.drawCancelledImpactChart(stats));
+        this.queueChartRender('agingChart', () => this.drawAgingAnalysisFromVouchers(vouchers || []));
+        this.setupLazyChartRendering();
+    },
+
+    computeVoucherStats(vouchers) {
+        const activeVouchers = (vouchers || []).filter(v => 
+            String(v?.status || '').trim().toLowerCase() !== 'cancelled' && 
+            this.isVoucherMatchingAccountFilter(v)
+        );
+        const amounts = activeVouchers.map(v => this.getVoucherAmount(v)).filter(v => v > 0);
+        const total = amounts.reduce((s, v) => s + v, 0);
+        const count = amounts.length;
+        const avg = count ? total / count : 0;
+
+        const sorted = [...amounts].sort((a, b) => a - b);
+        const pct = (p) => {
+            if (!sorted.length) return 0;
+            const idx = Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)));
+            return sorted[idx];
+        };
+
+        const revalidated = (vouchers || []).filter(v => this.isVoucherMatchingAccountFilter(v) && this.isRevalidatedVoucher(v));
+        const revalidatedAmount = revalidated.reduce((s, v) => s + this.getVoucherAmount(v), 0);
+
+        const cancelled = (vouchers || []).filter(v => this.isVoucherMatchingAccountFilter(v) && String(v.status || '').toLowerCase() === 'cancelled');
+        const cancelledAmount = cancelled.reduce((s, v) => s + this.getVoucherAmount(v), 0);
+
+        const cancelledByMonth = Array(12).fill(0);
+        const cancelledCountByMonth = Array(12).fill(0);
+        cancelled.forEach(v => {
+            const idx = this.getMonthIndexFromVoucher(v);
+            if (idx === null || idx === undefined) return;
+            cancelledByMonth[idx] += this.getVoucherAmount(v);
+            cancelledCountByMonth[idx] += 1;
+        });
+
+        return {
+            totalAmount: total,
+            count,
+            average: avg,
+            median: pct(0.5),
+            p75: pct(0.75),
+            p90: pct(0.9),
+            amounts: sorted,
+            revalidatedCount: revalidated.length,
+            revalidatedAmount,
+            cancelledCount: cancelled.length,
+            cancelledAmount,
+            cancelledByMonth,
+            cancelledCountByMonth
+        };
+    },
+
+    renderVoucherValueCards(stats) {
+        const container = document.getElementById('voucherValueCards');
+        const largestEl = document.getElementById('spotlightLargestVoucher');
+        const avgEl = document.getElementById('spotlightAvgVoucher');
+        const medianEl = document.getElementById('spotlightMedianVoucher');
+
+        if (stats && stats.amounts && stats.amounts.length > 0) {
+            const largest = Math.max(...stats.amounts);
+            if (largestEl) largestEl.textContent = Utils.formatCurrency(largest);
+            if (avgEl) avgEl.textContent = Utils.formatCurrency(stats.average || 0);
+            if (medianEl) medianEl.textContent = Utils.formatCurrency(stats.median || 0);
+        } else if (stats) {
+            if (largestEl) largestEl.textContent = '₦0.00';
+            if (avgEl) avgEl.textContent = Utils.formatCurrency(stats.average || 0);
+            if (medianEl) medianEl.textContent = Utils.formatCurrency(stats.median || 0);
+        }
+
+        if (!container || !stats) return;
+
+        container.innerHTML = `
+            <div class="stat-card">
+                <div class="stat-label">Average Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.average)}</div>
+                <div class="stat-subvalue">Mean amount</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Median Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.median)}</div>
+                <div class="stat-subvalue">P50</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">P75 Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.p75)}</div>
+                <div class="stat-subvalue">Upper quartile</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">P90 Voucher Value</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.p90)}</div>
+                <div class="stat-subvalue">High value threshold</div>
+            </div>
+        `;
+    },
+
+    drawVoucherDistributionChart(stats) {
+        const ctx = document.getElementById('voucherDistChart');
+        if (!ctx) return;
+
+        const isEmpty = !stats || !stats.amounts || stats.amounts.length === 0;
+        this.toggleChartPlaceholder('voucherDistChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.voucherDistChart) this.voucherDistChart.destroy();
+            return;
+        }
+
+        const values = stats.amounts;
+        const min = values[0];
+        const max = values[values.length - 1];
+        const binCount = 6;
+        const step = (max - min) / binCount || 1;
+
+        const bins = Array(binCount).fill(0);
+        values.forEach(v => {
+            const idx = Math.min(binCount - 1, Math.floor((v - min) / step));
+            bins[idx] += 1;
+        });
+
+        const labels = bins.map((_, i) => {
+            const start = min + (step * i);
+            const end = i === binCount - 1 ? max : (start + step);
+            return `${Utils.formatCurrency(start)} - ${Utils.formatCurrency(end)}`;
+        });
+
+        if (this.voucherDistChart) this.voucherDistChart.destroy();
+
+        this.voucherDistChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Voucher Count',
+                    data: bins,
+                    backgroundColor: this.THEME.accentBlue,
+                    borderColor: this.THEME.accentBlueBorder,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { ticks: { callback: v => Number(v).toLocaleString() } }
+                }
+            }
+        });
+    },
+
+    drawRevalidatedImpactChart(stats) {
+        const ctx = document.getElementById('revalidatedImpactChart');
+        if (!ctx) return;
+
+        const totalAmount = this.getTotalVoucherAmount(this.summaryData?.summary || {});
+        const revalidatedAmount = Number(stats?.revalidatedAmount || 0);
+        const newAmount = Math.max(totalAmount - revalidatedAmount, 0);
+        const share = totalAmount > 0 ? (revalidatedAmount / totalAmount) * 100 : 0;
+
+        const isEmpty = !stats || totalAmount === 0;
+        this.toggleChartPlaceholder('revalidatedImpactChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.revalidatedImpactChart) this.revalidatedImpactChart.destroy();
+            return;
+        }
+
+        if (this.revalidatedImpactChart) this.revalidatedImpactChart.destroy();
+
+        this.revalidatedImpactChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Revalidated', 'New'],
+                datasets: [{
+                    data: [revalidatedAmount, newAmount],
+                    backgroundColor: [this.THEME.accentBlue, this.THEME.softGrey],
+                    borderColor: [this.THEME.accentBlueBorder, this.THEME.softGreyBorder],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: c => `${c.label}: ₦${Number(c.raw || 0).toLocaleString()}`
+                        }
+                    }
+                }
+            }
+        });
+
+        const kpi = document.getElementById('revalidatedImpactKPI');
+        if (kpi) {
+            kpi.innerHTML = `
+                <div class="stat-label">Revalidated Share</div>
+                <div class="stat-value">${share.toFixed(1)}%</div>
+                <div class="stat-subvalue">${Utils.formatCurrency(revalidatedAmount)} (${Utils.formatNumber(stats.revalidatedCount)} vouchers)</div>
+            `;
+        }
+    },
+
+    drawCancelledImpactChart(stats) {
+        const ctx = document.getElementById('cancelledImpactChart');
+        if (!ctx) return;
+
+        const amountSeries = stats?.cancelledByMonth || Array(12).fill(0);
+        const countSeries = stats?.cancelledCountByMonth || Array(12).fill(0);
+
+        const isEmpty = !stats || (!amountSeries.some(v => v > 0) && !countSeries.some(v => v > 0));
+        this.toggleChartPlaceholder('cancelledImpactChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.cancelledImpactChart) this.cancelledImpactChart.destroy();
+            return;
+        }
+
+        const labels = CONFIG.MONTHS;
+
+        if (this.cancelledImpactChart) this.cancelledImpactChart.destroy();
+
+        this.cancelledImpactChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Cancelled Amount',
+                        data: amountSeries,
+                        backgroundColor: this.THEME.dangerAccent,
+                        borderColor: this.THEME.dangerAccentBorder,
+                        borderWidth: 1,
+                        yAxisID: 'y'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Cancelled Count',
+                        data: countSeries,
+                        borderColor: this.THEME.softGreyBorder,
+                        backgroundColor: this.THEME.softGrey,
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } },
+                    y1: {
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { callback: v => Number(v).toLocaleString() }
+                    }
+                }
+            }
+        });
+
+        const totalAmount = this.getTotalVoucherAmount(this.summaryData?.summary || {});
+        const cancelledAmount = Number(stats.cancelledAmount || 0);
+        const share = totalAmount > 0 ? (cancelledAmount / totalAmount) * 100 : 0;
+
+        const kpi = document.getElementById('cancelledImpactKPI');
+        if (kpi) {
+            kpi.innerHTML = `
+                <div class="stat-label">Cancelled Impact</div>
+                <div class="stat-value">${Utils.formatCurrency(cancelledAmount)}</div>
+                <div class="stat-subvalue">${share.toFixed(1)}% of total (${Utils.formatNumber(stats.cancelledCount)} vouchers)</div>
+            `;
+        }
+    },
+
+    /**
+     * Load all years summary for debt tracking
+     */
+    async loadAllYearsSummary() {
+        const result = await API.getAllYearsSummary();
+
+        if (result.success) {
+            this.allYearsData = result;
+            this.renderAllYearsSummary(result);
+            this.drawDebtTrendChart(result);
+            this.drawNetPayableChart(result);
+        } else {
+            Utils.showToast(result.error || 'Failed to load all-years summary', 'error');
+        }
+    },
+
+    /**
+     * Load debt profile (2026)
+     */
+    async loadDebtProfile() {
+        const result = await API.getDebtProfile();
+
+        if (result.success) {
+            this.debtProfile = result;
+            this.renderDebtProfile(result);
+            this.drawDebtConcentration(result);
+            this.drawTopDebtorsChart(result);
+        } else {
+            Utils.showToast(result.error || 'Failed to load debt profile', 'error');
+        }
+    },
+
+    drawStatusCharts(summary) {
+        if (!summary) return;
+
+        const countCtx = document.getElementById('statusCountChart');
+        const amtCtx = document.getElementById('statusAmountChart');
+        if (!countCtx || !amtCtx) return;
+
+        const paidCount = Number(summary.paidVouchers || 0);
+        const unpaidCount = Number(summary.unpaidVouchers || 0);
+        const cancelledCount = Number(summary.cancelledVouchers || 0);
+
+        const paidAmt = Number(summary.totalPaidAmount || 0);
+        const unpaidAmt = Number(summary.totalUnpaidAmount || 0);
+        const cancelledAmt = Number(summary.totalCancelledAmount || 0);
+
+        const isEmptyCount = !paidCount && !unpaidCount && !cancelledCount;
+        const isEmptyAmt = !paidAmt && !unpaidAmt && !cancelledAmt;
+
+        this.toggleChartPlaceholder('statusCountChart', isEmptyCount);
+        this.toggleChartPlaceholder('statusAmountChart', isEmptyAmt);
+
+        if (this.statusCountChart) this.statusCountChart.destroy();
+        if (this.statusAmountChart) this.statusAmountChart.destroy();
+
+        if (isEmptyCount && isEmptyAmt) return;
+
+        const labels = ['Paid', 'Unpaid', 'Cancelled'];
+        const colors = [this.THEME.successPaid, this.THEME.warningAccent, this.THEME.dangerAccent];
+        const borderColors = [this.THEME.successPaidBorder, this.THEME.warningAccentBorder, this.THEME.dangerAccentBorder];
+
+        if (!isEmptyCount) {
+            this.statusCountChart = new Chart(countCtx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{ data: [paidCount, unpaidCount, cancelledCount], backgroundColor: colors, borderColor: borderColors, borderWidth: 1 }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        if (!isEmptyAmt) {
+            this.statusAmountChart = new Chart(amtCtx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{ data: [paidAmt, unpaidAmt, cancelledAmt], backgroundColor: colors, borderColor: borderColors, borderWidth: 1 }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ₦${Number(ctx.raw || 0).toLocaleString()}`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    },
+
+    drawDebtTrendChart(allYearsData) {
+        const ctx = document.getElementById('debtTrendChart');
+        if (!ctx) return;
+
+        const points = (allYearsData?.yearsSummary || [])
+            .filter(y => !y.error && y.label)
+            .map(y => ({ year: y.label, balance: Number(y.currentBalance || 0) }));
+
+        const isEmpty = !allYearsData || points.length === 0 || points.every(p => !p.balance);
+        this.toggleChartPlaceholder('debtTrendChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.debtTrendChart) this.debtTrendChart.destroy();
+            return;
+        }
+
+        if (this.debtTrendChart) this.debtTrendChart.destroy();
+
+        this.debtTrendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: points.map(p => p.year),
+                datasets: [{
+                    label: 'Outstanding Balance',
+                    data: points.map(p => p.balance),
+                    borderColor: this.THEME.dangerAccentBorder,
+                    backgroundColor: 'rgba(220,53,69,0.15)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } },
+                scales: {
+                    y: {
+                        ticks: { callback: (v) => '₦' + Number(v).toLocaleString() }
+                    }
+                }
+            }
+        });
+    },
+
+    drawTopDebtorsChart(debtProfile) {
+        const ctx = document.getElementById('topDebtorsChart');
+        if (!ctx) return;
+
+        const top = (debtProfile?.topDebtors || []).slice(0, 10);
+        const labels = top.map(d => Utils.truncate(d.payee || '-', 18));
+        const values = top.map(d => Number(d.amount || 0));
+
+        const isEmpty = !debtProfile || top.length === 0 || top.every(d => !d.amount);
+        this.toggleChartPlaceholder('topDebtorsChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.topDebtorsChart) this.topDebtorsChart.destroy();
+            return;
+        }
+
+        if (this.topDebtorsChart) this.topDebtorsChart.destroy();
+
+        this.topDebtorsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Amount Owed',
+                    data: values,
+                    backgroundColor: this.THEME.dangerAccent,
+                    borderColor: this.THEME.dangerAccentBorder,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } },
+                scales: {
+                    x: {
+                        ticks: { callback: (v) => '₦' + Number(v).toLocaleString() }
+                    }
+                }
+            }
+        });
+    },
+
+    downloadChart(canvasId, filenameBase) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            Utils.showToast('Chart not found', 'warning');
+            return;
+        }
+
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = `${filenameBase}_${this.currentYear}_${new Date().toISOString().slice(0, 10)}.png`;
+        link.click();
+    },
+
+    drawDebtConcentration(data) {
+        const ctx = document.getElementById('debtConcentrationChart');
+        if (!ctx) return;
+
+        const totalDebt = Number(data?.totalDebt || 0);
+        const top10 = (data?.topDebtors || []).slice(0, 10);
+        const top10Sum = top10.reduce((s, d) => s + Number(d.amount || 0), 0);
+        const others = Math.max(totalDebt - top10Sum, 0);
+
+        const pct = totalDebt > 0 ? ((top10Sum / totalDebt) * 100) : 0;
+
+        const isEmpty = !data || totalDebt === 0;
+        this.toggleChartPlaceholder('debtConcentrationChart', isEmpty);
+
+        if (isEmpty) {
+            if (this.debtConcentrationChart) this.debtConcentrationChart.destroy();
+            return;
+        }
+
+        if (this.debtConcentrationChart) this.debtConcentrationChart.destroy();
+
+        this.debtConcentrationChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Top 10 Payees', 'Others'],
+                datasets: [{
+                    data: [top10Sum, others],
+                    backgroundColor: [this.THEME.dangerAccent, this.THEME.softGrey],
+                    borderColor: [this.THEME.dangerAccentBorder, this.THEME.softGreyBorder],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: (c) => `${c.label}: ₦${Number(c.raw || 0).toLocaleString()}`
+                        }
+                    }
+                }
+            }
+        });
+
+        // KPI box update
+        const kpi = document.getElementById('debtConcentrationKPI');
+        if (kpi) {
+            kpi.querySelector('.stat-value').textContent = `${pct.toFixed(1)}%`;
+        }
+    },
+
+    /**
+     * Render year summary cards
+     * Uses definitions from backend getSummary:
+     * - Total Vouchers Raised: count (ACCOUNT OR MAIL not empty)
+     * - Paid/Unpaid/Cancelled: amounts from GROSS AMOUNT
+     * - Total Contract Sum: sum(CONTRACT SUM)
+     * - Total Debt: Contract Sum - (Paid + Cancelled)
+     * - Average Payment Rate: Paid count / Total Raised * 100
+     * - Revalidated: count(OLD VOUCHER NUMBER not empty OR OLD VOUCHER NO AVAILABLE? = YES)
+     */
+    renderYearSummary(data) {
+        const container = document.getElementById('yearSummaryCards');
+        if (!container || !data.summary) return;
+
+        const stats = data.summary;
+
+        container.innerHTML = `
+            <!-- Total Vouchers Raised (COUNT) -->
+            <div class="stat-card">
+                <div class="stat-label">Total Vouchers Raised</div>
+                <div class="stat-value">${Utils.formatNumber(stats.totalVouchersRaised)}</div>
+                <div class="stat-subvalue">Count of vouchers with Voucher Number</div>
+            </div>
+            
+            <!-- Paid Vouchers (AMOUNT) -->
+            <div class="stat-card paid">
+                <div class="stat-label">Paid Vouchers (Amount)</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.totalPaidAmount)}</div>
+                <div class="stat-subvalue">
+                    ${Utils.formatNumber(stats.paidVouchers)} voucher(s) paid
+                </div>
+            </div>
+            
+            <!-- Unpaid Vouchers (AMOUNT) -->
+            <div class="stat-card unpaid">
+                <div class="stat-label">Unpaid Vouchers (Amount)</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.totalUnpaidAmount)}</div>
+                <div class="stat-subvalue">
+                    ${Utils.formatNumber(stats.unpaidVouchers)} voucher(s) unpaid
+                </div>
+            </div>
+            
+            <!-- Cancelled Vouchers (AMOUNT) -->
+            <div class="stat-card cancelled">
+                <div class="stat-label">Cancelled Vouchers (Amount)</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.totalCancelledAmount)}</div>
+                <div class="stat-subvalue">
+                    ${Utils.formatNumber(stats.cancelledVouchers)} voucher(s) cancelled
+                </div>
+            </div>
+            
+            <!-- Total Contract Sum (AMOUNT) -->
+            <div class="stat-card info">
+                <div class="stat-label">Total Contract Sum</div>
+                <div class="stat-value">${Utils.formatCurrency(stats.totalProcessedContractSum)}</div>
+            <div class="stat-subvalue">From Processed Contracts</div>
+                </div>
+            
+            <!-- Total Debt (AMOUNT) -->
+            <div class="stat-card">
+                <div class="stat-label">Total Debt</div>
+                <div class="stat-value text-danger">${Utils.formatCurrency(stats.totalDebt)}</div>
+                <div class="stat-subvalue">
+                    = Contract Sum - (Paid + Cancelled)
+                </div>
+            </div>
+            
+            <!-- Average Payment Rate -->
+            <div class="stat-card info">
+                <div class="stat-label">Average Payment Rate</div>
+                <div class="stat-value">${stats.averagePaymentPercent}%</div>
+                <div class="stat-subvalue">
+                    Based on voucher count: Paid / Total Raised
+                    <div class="progress-bar-mini" style="margin-top:5px;">
+                        <div class="progress-fill" style="width: ${Math.min(stats.averagePaymentPercent, 100)}%"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Revalidated Vouchers (COUNT) -->
+            <div class="stat-card">
+                <div class="stat-label">Revalidated Vouchers</div>
+                <div class="stat-value">${Utils.formatNumber(stats.revalidatedVouchers)}</div>
+                <div class="stat-subvalue">Old number present or marked available</div>
+            </div>
+        `;
+    },
+
+    sortCategoryTable(field) {
+        if (this.categorySortField === field) {
+            this.categorySortDir = this.categorySortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.categorySortField = field;
+            this.categorySortDir = 'asc';
+        }
+        this.renderCategoryTable(this.currentCategoryBreakdown);
+    },
+
+    getSortIcon(field) {
+        if (this.categorySortField !== field) {
+            return '<span class="sort-indicator" style="opacity: 0.3;">↕</span>';
+        }
+        return `<span class="sort-indicator">${this.categorySortDir === 'asc' ? '▲' : '▼'}</span>`;
+    },
+
+    /**
+     * Render category breakdown table with sorting support
+     */
+    renderCategoryTable(categories) {
+        const container = document.getElementById('categoryTable');
+        if (!container) return;
+
+        this.currentCategoryBreakdown = Array.isArray(categories) ? categories : [];
+
+        if (!categories || categories.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No category data available</p>';
+            return;
+        }
+
+        // Sort categories (default alphabetical by category)
+        const field = this.categorySortField || 'category';
+        const dir = this.categorySortDir || 'asc';
+        const sortedCats = [...categories].sort((a, b) => {
+            let valA = a[field];
+            let valB = b[field];
+            if (typeof valA === 'string' || field === 'category') {
+                valA = String(valA || '').toLowerCase();
+                valB = String(valB || '').toLowerCase();
+                return dir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            }
+            valA = Number(valA || 0);
+            valB = Number(valB || 0);
+            return dir === 'asc' ? valA - valB : valB - valA;
+        });
+
+        // Calculate totals
+        let totalVouchers = 0;
+        let totalPaid = 0;
+        let totalBalance = 0;
+
+        categories.forEach(cat => {
+            totalVouchers += cat.vouchersRaised;
+            totalPaid += cat.amountPaid;
+            totalBalance += cat.balance;
+        });
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="sortable-th" onclick="Reports.sortCategoryTable('category')">Category ${this.getSortIcon('category')}</th>
+                            <th class="text-center sortable-th" onclick="Reports.sortCategoryTable('vouchersRaised')">Vouchers Raised ${this.getSortIcon('vouchersRaised')}</th>
+                            <th class="text-right sortable-th" onclick="Reports.sortCategoryTable('amountPaid')">Amount Paid ${this.getSortIcon('amountPaid')}</th>
+                            <th class="text-right sortable-th" onclick="Reports.sortCategoryTable('balance')">Balance ${this.getSortIcon('balance')}</th>
+                            <th class="text-center sortable-th" onclick="Reports.sortCategoryTable('percentagePaid')">% Paid ${this.getSortIcon('percentagePaid')}</th>
+                            <th class="text-center sortable-th" onclick="Reports.sortCategoryTable('percentOfTotalPayment')">% of Total Pmt ${this.getSortIcon('percentOfTotalPayment')}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        sortedCats.forEach(cat => {
+            const percentBar = `
+                <div class="progress-bar-mini">
+                    <div class="progress-fill ${cat.percentagePaid >= 70 ? 'success' : cat.percentagePaid >= 40 ? 'warning' : 'danger'}" 
+                         style="width: ${Math.min(cat.percentagePaid, 100)}%"></div>
+                </div>
+                <small>${cat.percentagePaid}%</small>
+            `;
+
+            const safeCat = cat.category.replace(/'/g, "\\'");
+            html += `
+                <tr>
+                    <td class="drill-down-link" onclick="Reports.drillDown('category', '${safeCat}')"><strong>${cat.category}</strong></td>
+                    <td class="text-center">${Utils.formatNumber(cat.vouchersRaised)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(cat.amountPaid)}</td>
+                    <td class="text-right text-danger">${Utils.formatCurrency(cat.balance)}</td>
+                    <td class="text-center">${percentBar}</td>
+                    <td class="text-center">${cat.percentOfTotalPayment}%</td>
+                </tr>
+            `;
+        });
+
+        // Totals row
+        const totalPercentPaid = totalPaid + totalBalance > 0
+            ? ((totalPaid / (totalPaid + totalBalance)) * 100).toFixed(2)
+            : 0;
+
+        html += `
+            <tr class="totals-row">
+                <td><strong>TOTAL</strong></td>
+                <td class="text-center"><strong>${Utils.formatNumber(totalVouchers)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-danger"><strong>${Utils.formatCurrency(totalBalance)}</strong></td>
+                <td class="text-center"><strong>${totalPercentPaid}%</strong></td>
+                <td class="text-center"><strong>100%</strong></td>
+            </tr>
+        `;
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    },
+
+    getConfiguredAccountTypes() {
+        return Object.keys(this.systemConfig?.accountTypes || {});
+    },
+
+    getConfiguredSubTypes(baseType) {
+        const map = this.systemConfig?.accountTypes || {};
+        return Array.isArray(map[baseType]) ? map[baseType] : [];
+    },
+
+    parseMonthFromDateStr(dateInput, pmtMonthStr) {
+        if (!dateInput) return null;
+        if (dateInput instanceof Date) return dateInput.getMonth();
+        const str = String(dateInput).trim();
+        if (!str) return null;
+
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const lower = str.toLowerCase();
+        for (let i = 0; i < monthsList.length; i++) {
+            const mName = monthsList[i].toLowerCase();
+            if (lower.includes(mName) || lower.includes(mName.substring(0, 3))) {
+                return i;
+            }
+        }
+
+        const m = str.match(/^(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{1,4})/);
+        if (m) {
+            let n1 = parseInt(m[1], 10);
+            let n2 = parseInt(m[2], 10);
+            let n3 = parseInt(m[3], 10);
+
+            let p1 = n1 > 1000 ? n2 : n1;
+            let p2 = n1 > 1000 ? n3 : n2;
+
+            let pmtIdx = pmtMonthStr ? monthsList.findIndex(x => x.toLowerCase() === String(pmtMonthStr).toLowerCase()) : -1;
+            let monthNum = -1;
+
+            if (p1 > 12 && p2 <= 12) {
+                monthNum = p2;
+            } else if (p2 > 12 && p1 <= 12) {
+                monthNum = p1;
+            } else if (p1 <= 12 && p2 <= 12) {
+                if (pmtIdx >= 0) {
+                    if (p1 - 1 <= pmtIdx && p2 - 1 > pmtIdx) {
+                        monthNum = p1;
+                    } else if (p2 - 1 <= pmtIdx && p1 - 1 > pmtIdx) {
+                        monthNum = p2;
+                    } else {
+                        monthNum = (p2 <= pmtIdx + 1 && p2 > p1) ? p2 : p1;
+                    }
+                } else {
+                    if (p1 <= 7 && p2 > 7) monthNum = p1;
+                    else if (p2 <= 7 && p1 > 7) monthNum = p2;
+                    else monthNum = p1;
+                }
+            }
+
+            if (monthNum >= 1 && monthNum <= 12) {
+                return monthNum - 1;
+            }
+        }
+
+        const d = this.parseDateFlexible(str);
+        return d && !isNaN(d.getTime()) ? d.getMonth() : null;
+    },
+
+    getMonthNameFromDate(dateInput, pmtMonthStr) {
+        const idx = this.parseMonthFromDateStr(dateInput, pmtMonthStr);
+        if (idx === null || idx < 0 || idx > 11) return null;
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        return monthsList[idx];
+    },
+
+    isCapitalCategory(v) {
+        if (!v) return false;
+        const c = String(v.category || v.categories || '').trim().toLowerCase();
+        const a = String(v.accountType || '').trim().toLowerCase();
+        return c === 'capital' || a === 'capital' || a === 'cap';
+    },
+
+    buildAccountTypeBreakdownFromVouchers(vouchers) {
+        const stats = {};
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+        (vouchers || []).forEach((v) => {
+            if (!this.isVoucherMatchingAccountFilter(v)) return;
+
+            const baseType = String(v?.accountType || '').trim() || 'Unspecified';
+            const subType = String(v?.subAccountType || '').trim();
+            const key = `${baseType}::${subType}`;
+            if (!stats[key]) {
+                stats[key] = {
+                    accountType: baseType,
+                    subAccountType: subType,
+                    count: 0,
+                    totalAmount: 0,
+                    paidCurrentMonth: 0,
+                    paidPreviousMonth: 0,
+                    paidAmount: 0,
+                    unpaidCurrentMonth: 0,
+                    unpaidPreviousMonths: 0,
+                    unpaidAmount: 0
+                };
+            }
+
+            const amount = this.getVoucherAmount(v);
+            const status = String(v?.status || '').trim().toLowerCase();
+            stats[key].count += 1;
+            stats[key].totalAmount += amount;
+
+            const pmtMonth = String(v?.pmtMonth || '').trim();
+            const raisedDate = v?.createdAt || v?.date;
+            const raisedMonth = this.getMonthNameFromDate(raisedDate) || pmtMonth;
+
+            const pmtIdx = monthsList.indexOf(pmtMonth);
+            const raisedIdx = monthsList.indexOf(raisedMonth);
+
+            if (status === 'paid') {
+                if (raisedIdx >= 0 && pmtIdx >= 0 && raisedIdx < pmtIdx) {
+                    stats[key].paidPreviousMonth += amount;
+                } else {
+                    stats[key].paidCurrentMonth += amount;
+                }
+                stats[key].paidAmount += amount;
+            } else if (status === 'unpaid') {
+                if (raisedIdx < 0 || pmtIdx < 0 || raisedIdx >= pmtIdx) {
+                    stats[key].unpaidCurrentMonth += amount;
+                } else {
+                    stats[key].unpaidPreviousMonths += amount;
+                }
+                stats[key].unpaidAmount += amount;
+            }
+        });
+
+        return Object.values(stats).map((row) => {
+            const paymentRate = row.totalAmount > 0 ? (row.paidAmount / row.totalAmount) * 100 : 0;
+            return {
+                ...row,
+                displayName: row.subAccountType ? `${row.accountType} (${row.subAccountType})` : row.accountType,
+                paymentRate: Number(paymentRate.toFixed(2))
+            };
+        });
+    },
+
+    parseAccountTypeRow(row) {
+        const rawBase = String(row?.accountType || '').trim();
+        const rawSub = String(row?.subAccountType || '').trim();
+
+        if (rawSub) {
+            return { baseType: rawBase || 'Unspecified', subType: rawSub };
+        }
+
+        const m = rawBase.match(/^(.*)\((.*)\)$/);
+        if (m) {
+            const base = String(m[1] || '').trim();
+            const sub = String(m[2] || '').trim();
+            return { baseType: base || 'Unspecified', subType: sub };
+        }
+
+        return { baseType: rawBase || 'Unspecified', subType: '' };
+    },
+
+    toggleAccTypeDropdown(e) {
+        if (e) e.stopPropagation();
+        const dropdown = document.getElementById('accTypeMultiSelectDropdown');
+        if (!dropdown) return;
+        const isShow = dropdown.classList.contains('show');
+        if (isShow) {
+            dropdown.classList.remove('show');
+        } else {
+            dropdown.classList.add('show');
+            const closeOnOutside = (evt) => {
+                const container = document.getElementById('accTypeMultiSelectContainer');
+                if (container && !container.contains(evt.target)) {
+                    dropdown.classList.remove('show');
+                    document.removeEventListener('click', closeOnOutside);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+        }
+    },
+
+    toggleSubAccTypeDropdown(e) {
+        if (e) e.stopPropagation();
+        const dropdown = document.getElementById('subAccTypeMultiSelectDropdown');
+        if (!dropdown) return;
+        const isShow = dropdown.classList.contains('show');
+        if (isShow) {
+            dropdown.classList.remove('show');
+        } else {
+            dropdown.classList.add('show');
+            const closeOnOutside = (evt) => {
+                const container = document.getElementById('subAccTypeMultiSelectContainer');
+                if (container && !container.contains(evt.target)) {
+                    dropdown.classList.remove('show');
+                    document.removeEventListener('click', closeOnOutside);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+        }
+    },
+
+    populateAccTypeMultiSelectOptions(accountTypes) {
+        const container = document.getElementById('accTypeMultiSelectOptions');
+        if (!container) return;
+
+        const baseTypes = Array.from(new Set([
+            ...(accountTypes || []).map((row) => this.parseAccountTypeRow(row).baseType),
+            ...this.getConfiguredAccountTypes()
+        ])).filter(Boolean).sort();
+
+        const selectedSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAll = selectedSet.has('ALL') || selectedSet.size === 0;
+
+        let html = `
+            <label class="account-option-item">
+                <input type="checkbox" value="ALL" ${isAll ? 'checked' : ''} onchange="Reports.handleAccTypeCheckboxChange('ALL', this.checked)">
+                <strong>All Account Types</strong>
+            </label>
+        `;
+
+        baseTypes.forEach(base => {
+            const isChecked = !isAll && selectedSet.has(base);
+            const safeBase = this.escapeHtml(base);
+            html += `
+                <label class="account-option-item">
+                    <input type="checkbox" value="${safeBase}" ${isChecked ? 'checked' : ''} onchange="Reports.handleAccTypeCheckboxChange('${safeBase.replace(/'/g, "\\'")}', this.checked)">
+                    <span>${safeBase}</span>
+                </label>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.updateAccTypeButtonLabels();
+    },
+
+    populateSubAccTypeMultiSelectOptions(accountTypes) {
+        const container = document.getElementById('subAccTypeMultiSelectOptions');
+        if (!container) return;
+
+        const selectedBaseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAllBase = selectedBaseSet.has('ALL') || selectedBaseSet.size === 0;
+
+        const fromRows = (accountTypes || [])
+            .map((row) => this.parseAccountTypeRow(row))
+            .filter((x) => x.subType && (isAllBase || selectedBaseSet.has(x.baseType)))
+            .map((x) => x.subType);
+
+        const fromConfig = isAllBase
+            ? this.getConfiguredAccountTypes().flatMap((base) => this.getConfiguredSubTypes(base))
+            : Array.from(selectedBaseSet).flatMap((base) => this.getConfiguredSubTypes(base));
+
+        const subs = Array.from(new Set([...fromRows, ...fromConfig])).filter(Boolean).sort();
+        const selectedSubSet = this.accountTypeFilters.subAccountTypes || new Set(['ALL']);
+        const isAllSub = selectedSubSet.has('ALL') || selectedSubSet.size === 0;
+
+        let html = `
+            <label class="account-option-item">
+                <input type="checkbox" value="ALL" ${isAllSub ? 'checked' : ''} onchange="Reports.handleSubAccTypeCheckboxChange('ALL', this.checked)">
+                <strong>All Sub Account Types</strong>
+            </label>
+        `;
+
+        subs.forEach(sub => {
+            const isChecked = !isAllSub && selectedSubSet.has(sub);
+            const safeSub = this.escapeHtml(sub);
+            html += `
+                <label class="account-option-item">
+                    <input type="checkbox" value="${safeSub}" ${isChecked ? 'checked' : ''} onchange="Reports.handleSubAccTypeCheckboxChange('${safeSub.replace(/'/g, "\\'")}', this.checked)">
+                    <span>${safeSub}</span>
+                </label>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.updateAccTypeButtonLabels();
+    },
+
+    handleAccTypeCheckboxChange(key, isChecked) {
+        if (!this.accountTypeFilters.accountTypes) this.accountTypeFilters.accountTypes = new Set(['ALL']);
+
+        if (key === 'ALL') {
+            this.accountTypeFilters.accountTypes = new Set(['ALL']);
+        } else {
+            this.accountTypeFilters.accountTypes.delete('ALL');
+            if (isChecked) {
+                this.accountTypeFilters.accountTypes.add(key);
+            } else {
+                this.accountTypeFilters.accountTypes.delete(key);
+            }
+            if (this.accountTypeFilters.accountTypes.size === 0) {
+                this.accountTypeFilters.accountTypes.add('ALL');
+            }
+        }
+
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    handleSubAccTypeCheckboxChange(key, isChecked) {
+        if (!this.accountTypeFilters.subAccountTypes) this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+
+        if (key === 'ALL') {
+            this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+        } else {
+            this.accountTypeFilters.subAccountTypes.delete('ALL');
+            if (isChecked) {
+                this.accountTypeFilters.subAccountTypes.add(key);
+            } else {
+                this.accountTypeFilters.subAccountTypes.delete(key);
+            }
+            if (this.accountTypeFilters.subAccountTypes.size === 0) {
+                this.accountTypeFilters.subAccountTypes.add('ALL');
+            }
+        }
+
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    selectAllAccTypes() {
+        this.accountTypeFilters.accountTypes = new Set(['ALL']);
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    clearAllAccTypes() {
+        this.accountTypeFilters.accountTypes = new Set(['ALL']);
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    selectAllSubAccTypes() {
+        this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    clearAllSubAccTypes() {
+        this.accountTypeFilters.subAccountTypes = new Set(['ALL']);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    updateAccTypeButtonLabels() {
+        const typeLabel = document.getElementById('accTypeMultiSelectLabel');
+        const subLabel = document.getElementById('subAccTypeMultiSelectLabel');
+
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        if (typeLabel) {
+            if (baseSet.has('ALL') || baseSet.size === 0) {
+                typeLabel.textContent = 'Account Type: All';
+            } else {
+                const arr = Array.from(baseSet);
+                typeLabel.textContent = arr.length === 1 ? `Account Type: ${arr[0]}` : `Account Type: ${arr[0]} (+${arr.length - 1})`;
+            }
+        }
+
+        const subSet = this.accountTypeFilters.subAccountTypes || new Set(['ALL']);
+        if (subLabel) {
+            if (subSet.has('ALL') || subSet.size === 0) {
+                subLabel.textContent = 'Sub-Type: All';
+            } else {
+                const arr = Array.from(subSet);
+                subLabel.textContent = arr.length === 1 ? `Sub-Type: ${arr[0]}` : `Sub-Type: ${arr[0]} (+${arr.length - 1})`;
+            }
+        }
+    },
+
+    getFilteredAccountTypeRows(accountTypes) {
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const subSet = this.accountTypeFilters.subAccountTypes || new Set(['ALL']);
+
+        const isAllBase = baseSet.has('ALL') || baseSet.size === 0;
+        const isAllSub = subSet.has('ALL') || subSet.size === 0;
+
+        return (accountTypes || []).filter((row) => {
+            const parsed = this.parseAccountTypeRow(row);
+            const baseMatches = isAllBase || baseSet.has(parsed.baseType);
+            const subMatches = isAllSub || (parsed.subType && subSet.has(parsed.subType));
+            return baseMatches && subMatches;
+        });
+    },
+
+    toggleAccountTypeGroup(baseType) {
+        if (this.expandedAccountTypeGroups.has(baseType)) {
+            this.expandedAccountTypeGroups.delete(baseType);
+        } else {
+            this.expandedAccountTypeGroups.add(baseType);
+        }
+        this.renderAccountTypeTable(this.currentAccountTypeRows);
+    },
+
+    renderAccountTypeTable(accountTypes) {
+        const container = document.getElementById('accountTypeTable');
+        if (!container) return;
+
+        this.currentAccountTypeRows = Array.isArray(accountTypes) ? accountTypes : [];
+        this.populateAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+        this.populateSubAccTypeMultiSelectOptions(this.currentAccountTypeRows);
+
+        const rows = this.getFilteredAccountTypeRows(this.currentAccountTypeRows);
+        const baseSet = this.accountTypeFilters.accountTypes || new Set(['ALL']);
+        const isAllBase = baseSet.has('ALL') || baseSet.size === 0;
+
+        if (!rows.length) {
+            container.innerHTML = '<p class="text-muted text-center">No account type data available for selected filter</p>';
+            return;
+        }
+
+        const grouped = {};
+        rows.forEach((row) => {
+            const parsed = this.parseAccountTypeRow(row);
+            const baseType = parsed.baseType;
+            const subType = parsed.subType;
+            if (!grouped[baseType]) {
+                grouped[baseType] = {
+                    count: 0,
+                    totalAmount: 0,
+                    paidAmount: 0,
+                    unpaidAmount: 0,
+                    children: {}
+                };
+            }
+
+            grouped[baseType].count += Number(row.count || 0);
+            grouped[baseType].totalAmount += Number(row.totalAmount || 0);
+            grouped[baseType].paidAmount += Number(row.paidAmount || 0);
+            grouped[baseType].unpaidAmount += Number(row.unpaidAmount || 0);
+
+            if (subType) {
+                if (!grouped[baseType].children[subType]) {
+                    grouped[baseType].children[subType] = {
+                        name: subType,
+                        count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0
+                    };
+                }
+                grouped[baseType].children[subType].count += Number(row.count || 0);
+                grouped[baseType].children[subType].totalAmount += Number(row.totalAmount || 0);
+                grouped[baseType].children[subType].paidAmount += Number(row.paidAmount || 0);
+                grouped[baseType].children[subType].unpaidAmount += Number(row.unpaidAmount || 0);
+            }
+        });
+
+        // Only inject empty configured account types if ALL base types are selected
+        if (isAllBase) {
+            this.getConfiguredAccountTypes().forEach((baseType) => {
+                if (!grouped[baseType]) {
+                    grouped[baseType] = {
+                        count: 0,
+                        totalAmount: 0,
+                        paidAmount: 0,
+                        unpaidAmount: 0,
+                        children: {}
+                    };
+                }
+                this.getConfiguredSubTypes(baseType).forEach((subType) => {
+                    if (!grouped[baseType].children[subType]) {
+                        grouped[baseType].children[subType] = {
+                            name: subType,
+                            count: 0,
+                            totalAmount: 0,
+                            paidAmount: 0,
+                            unpaidAmount: 0
+                        };
+                    }
+                });
+            });
+        }
+
+        const configuredBaseOrder = this.getConfiguredAccountTypes();
+        const baseOrderIndex = {};
+        configuredBaseOrder.forEach((name, idx) => { baseOrderIndex[name] = idx; });
+
+        let totalCount = 0;
+        let totalAmount = 0;
+        let totalPaid = 0;
+        let totalUnpaid = 0;
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Account Type</th>
+                            <th class="text-center">Vouchers</th>
+                            <th class="text-right">Total Amount</th>
+                            <th class="text-right">Paid Amount</th>
+                            <th class="text-right">Unpaid Amount</th>
+                            <th class="text-center">Payment Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        Object.keys(grouped)
+            .sort((a, b) => {
+                const ai = Object.prototype.hasOwnProperty.call(baseOrderIndex, a) ? baseOrderIndex[a] : Number.MAX_SAFE_INTEGER;
+                const bi = Object.prototype.hasOwnProperty.call(baseOrderIndex, b) ? baseOrderIndex[b] : Number.MAX_SAFE_INTEGER;
+                if (ai !== bi) return ai - bi;
+                return grouped[b].totalAmount - grouped[a].totalAmount;
+            })
+            .forEach((baseType) => {
+                const parent = grouped[baseType];
+                const paymentRate = parent.totalAmount > 0 ? (parent.paidAmount / parent.totalAmount) * 100 : 0;
+                const children = Object.values(parent.children || {});
+                const hasChildren = children.length > 0;
+                const isExpanded = this.expandedAccountTypeGroups.has(baseType);
+                const subOrder = this.getConfiguredSubTypes(baseType);
+                const subOrderIndex = {};
+                subOrder.forEach((name, idx) => { subOrderIndex[name] = idx; });
+
+                totalCount += parent.count;
+                totalAmount += parent.totalAmount;
+                totalPaid += parent.paidAmount;
+                totalUnpaid += parent.unpaidAmount;
+
+                const safeBase = baseType.replace(/'/g, "\\'");
+                html += `
+                    <tr class="parent-account-row">
+                        <td>
+                            <span class="drill-down-link" onclick="Reports.drillDown('accountType', '${safeBase}')"><strong>${baseType}</strong></span>
+                            ${hasChildren ? `<button class="btn btn-sm btn-secondary" style="margin-left:8px;padding:2px 8px;" onclick="Reports.toggleAccountTypeGroup('${safeBase}')">${isExpanded ? '-' : '+'}</button>` : ''}
+                        </td>
+                        <td class="text-center">${Utils.formatNumber(parent.count)}</td>
+                        <td class="text-right">${Utils.formatCurrency(parent.totalAmount)}</td>
+                        <td class="text-right text-success">${Utils.formatCurrency(parent.paidAmount)}</td>
+                        <td class="text-right text-danger">${Utils.formatCurrency(parent.unpaidAmount)}</td>
+                        <td class="text-center">${paymentRate.toFixed(2)}%</td>
+                    </tr>
+                `;
+
+                if (hasChildren && isExpanded) {
+                    children
+                        .sort((a, b) => {
+                            const ai = Object.prototype.hasOwnProperty.call(subOrderIndex, a.name) ? subOrderIndex[a.name] : Number.MAX_SAFE_INTEGER;
+                            const bi = Object.prototype.hasOwnProperty.call(subOrderIndex, b.name) ? subOrderIndex[b.name] : Number.MAX_SAFE_INTEGER;
+                            if (ai !== bi) return ai - bi;
+                            return b.totalAmount - a.totalAmount;
+                        })
+                        .forEach((child) => {
+                            const childRate = child.totalAmount > 0 ? (child.paidAmount / child.totalAmount) * 100 : 0;
+                            html += `
+                                <tr class="sub-account-row">
+                                    <td style="padding-left:42px;" class="drill-down-link" onclick="Reports.drillDown('accountType', '${safeBase}', '${child.name.replace(/'/g, "\\'")}')">${child.name}</td>
+                                    <td class="text-center">${Utils.formatNumber(child.count)}</td>
+                                    <td class="text-right">${Utils.formatCurrency(child.totalAmount)}</td>
+                                    <td class="text-right text-success">${Utils.formatCurrency(child.paidAmount)}</td>
+                                    <td class="text-right text-danger">${Utils.formatCurrency(child.unpaidAmount)}</td>
+                                    <td class="text-center">${childRate.toFixed(2)}%</td>
+                                </tr>
+                            `;
+                        });
+                }
+            });
+
+        const grandRate = totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
+        html += `
+            <tr class="totals-row">
+                <td><strong>TOTAL</strong></td>
+                <td class="text-center"><strong>${Utils.formatNumber(totalCount)}</strong></td>
+                <td class="text-right"><strong>${Utils.formatCurrency(totalAmount)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-danger"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
+                <td class="text-center"><strong>${grandRate.toFixed(2)}%</strong></td>
+            </tr>
+        `;
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    },
+
+    /**
+     * Render monthly breakdown table
+     */
+    renderMonthlyTable(months) {
+        const container = document.getElementById('monthlyTable');
+        if (!container) return;
+
+        if (!months || months.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No monthly data available</p>';
+            return;
+        }
+
+        let totalCount = 0;
+        let totalPaidCurrentMonth = 0;
+        let totalPaidPreviousMonth = 0;
+        let totalPaid = 0;
+        let totalUnpaidCurrentMonth = 0;
+        let totalUnpaidPreviousMonths = 0;
+        let totalUnpaid = 0;
+
+        let html = `
+            <div class="table-container" style="overflow-x: auto;">
+                <table class="table-responsive">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" style="vertical-align: middle;">Month</th>
+                            <th rowspan="2" class="text-center" style="vertical-align: middle;">Voucher Count</th>
+                            <th colspan="3" class="text-center" style="border-bottom: 1px solid rgba(0,0,0,0.1); background-color: rgba(40, 167, 69, 0.05);">Amount Paid</th>
+                            <th colspan="3" class="text-center" style="border-bottom: 1px solid rgba(0,0,0,0.1); background-color: rgba(220, 53, 69, 0.05);">Amount Unpaid</th>
+                            <th rowspan="2" class="text-right" style="vertical-align: middle;">Total Expenditure</th>
+                        </tr>
+                        <tr>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 600; background-color: rgba(40, 167, 69, 0.05);" title="Vouchers raised this month and paid same month">From Raised This Month</th>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 600; background-color: rgba(40, 167, 69, 0.05);" title="Vouchers raised in previous month(s) and paid this month">From Previous Vouchers</th>
+                            <th class="text-right text-success" style="font-size: 11px; font-weight: 700; background-color: rgba(40, 167, 69, 0.1);">Total Payment</th>
+                            <th class="text-right text-warning" style="font-size: 11px; font-weight: 600; background-color: rgba(220, 53, 69, 0.05);" title="Vouchers raised this month and remaining unpaid">From Raised This Month</th>
+                            <th class="text-right text-warning" style="font-size: 11px; font-weight: 600; background-color: rgba(220, 53, 69, 0.05);" title="Vouchers raised in previous month(s) and remaining unpaid">From Previous Vouchers</th>
+                            <th class="text-right text-danger" style="font-size: 11px; font-weight: 700; background-color: rgba(220, 53, 69, 0.1);">Total Unpaid</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        months.forEach(month => {
+            const count = Number(month.count || 0);
+            const paidTot = Number(month.paidAmount || 0);
+            const unpaidTot = Number(month.unpaidAmount || 0);
+
+            let paidCurr = Number(month.paidCurrentMonth);
+            let paidPrev = Number(month.paidPreviousMonth);
+            if ((isNaN(paidCurr) && isNaN(paidPrev)) || (paidCurr === 0 && paidPrev === 0 && paidTot > 0)) {
+                paidCurr = paidTot;
+                paidPrev = 0;
+            } else {
+                paidCurr = isNaN(paidCurr) ? 0 : paidCurr;
+                paidPrev = isNaN(paidPrev) ? 0 : paidPrev;
+            }
+
+            let unpaidCurr = Number(month.unpaidCurrentMonth);
+            let unpaidPrev = Number(month.unpaidPreviousMonths);
+            if ((isNaN(unpaidCurr) && isNaN(unpaidPrev)) || (unpaidCurr === 0 && unpaidPrev === 0 && unpaidTot > 0)) {
+                unpaidCurr = unpaidTot;
+                unpaidPrev = 0;
+            } else {
+                unpaidCurr = isNaN(unpaidCurr) ? 0 : unpaidCurr;
+                unpaidPrev = isNaN(unpaidPrev) ? 0 : unpaidPrev;
+            }
+
+            totalCount += count;
+            totalPaidCurrentMonth += paidCurr;
+            totalPaidPreviousMonth += paidPrev;
+            totalPaid += paidTot;
+            totalUnpaidCurrentMonth += unpaidCurr;
+            totalUnpaidPreviousMonths += unpaidPrev;
+            totalUnpaid += unpaidTot;
+
+            const monthTotal = paidTot + unpaidTot;
+
+            html += `
+                <tr>
+                    <td class="drill-down-link" onclick="Reports.drillDown('month', '${month.month}')"><strong>${month.month}</strong></td>
+                    <td class="text-center">${Utils.formatNumber(count)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(paidCurr)}</td>
+                    <td class="text-right text-success">${Utils.formatCurrency(paidPrev)}</td>
+                    <td class="text-right text-success" style="font-weight:700;">${Utils.formatCurrency(paidTot)}</td>
+                    <td class="text-right text-warning">${Utils.formatCurrency(unpaidCurr)}</td>
+                    <td class="text-right text-warning">${Utils.formatCurrency(unpaidPrev)}</td>
+                    <td class="text-right text-danger" style="font-weight:700;">${Utils.formatCurrency(unpaidTot)}</td>
+                    <td class="text-right">${Utils.formatCurrency(monthTotal)}</td>
+                </tr>
+            `;
+        });
+
+        // Totals row
+        html += `
+            <tr class="totals-row">
+                <td><strong>TOTAL</strong></td>
+                <td class="text-center"><strong>${Utils.formatNumber(totalCount)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidCurrentMonth)}</strong></td>
+                <td class="text-right text-success"><strong>${Utils.formatCurrency(totalPaidPreviousMonth)}</strong></td>
+                <td class="text-right text-success" style="font-weight:700;"><strong>${Utils.formatCurrency(totalPaid)}</strong></td>
+                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidCurrentMonth)}</strong></td>
+                <td class="text-right text-warning"><strong>${Utils.formatCurrency(totalUnpaidPreviousMonths)}</strong></td>
+                <td class="text-right text-danger" style="font-weight:700;"><strong>${Utils.formatCurrency(totalUnpaid)}</strong></td>
+                <td class="text-right"><strong>${Utils.formatCurrency(totalPaid + totalUnpaid)}</strong></td>
+            </tr>
+        `;
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    },
+
+    /**
+     * Render all years summary (debt tracking)
+     */
+    renderAllYearsSummary(data) {
+        const container = document.getElementById('allYearsTable');
+        if (!container) return;
+
+        if (!data.yearsSummary || data.yearsSummary.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No data available</p>';
+            return;
+        }
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Year</th>
+                            <th class="text-right">Balance B/F</th>
+                            <th class="text-center">Total Vouchers</th>
+                            <th class="text-right">Total Amount</th>
+                            <th class="text-right">Paid</th>
+                            <th class="text-center">Revalidated</th>
+                            <th class="text-center">Cancelled</th>
+                            <th class="text-right">Current Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        data.yearsSummary.forEach(year => {
+            if (year.error) {
+                html += `
+                    <tr>
+                        <td><strong>${year.label}</strong></td>
+                        <td colspan="7" class="text-muted text-center">${year.error}</td>
+                    </tr>
+                `;
+            } else {
+                html += `
+                    <tr>
+                        <td><strong>${year.label}</strong></td>
+                        <td class="text-right">${Utils.formatCurrency(year.balanceBroughtForward)}</td>
+                        <td class="text-center">${Utils.formatNumber(year.totalVouchers || 0)}</td>
+                        <td class="text-right">${Utils.formatCurrency(year.totalAmount || 0)}</td>
+                        <td class="text-right text-success">${Utils.formatCurrency(year.paidAmount || 0)}</td>
+                        <td class="text-center">${Utils.formatNumber(year.revalidatedVouchers || 0)}</td>
+                        <td class="text-center">${Utils.formatNumber(year.cancelledVouchers || 0)}</td>
+                        <td class="text-right text-danger"><strong>${Utils.formatCurrency(year.currentBalance || 0)}</strong></td>
+                    </tr>
+                `;
+            }
+        });
+
+        // Grand totals
+        if (data.grandTotals) {
+            html += `
+                <tr class="totals-row">
+                    <td><strong>GRAND TOTAL</strong></td>
+                    <td class="text-right">-</td>
+                    <td class="text-center"><strong>${Utils.formatNumber(data.grandTotals.totalVouchers)}</strong></td>
+                    <td class="text-right"><strong>${Utils.formatCurrency(data.grandTotals.totalAmount)}</strong></td>
+                    <td class="text-right text-success"><strong>${Utils.formatCurrency(data.grandTotals.totalPaid)}</strong></td>
+                    <td class="text-center"><strong>${Utils.formatNumber(data.grandTotals.totalRevalidated)}</strong></td>
+                    <td class="text-center"><strong>-</strong></td>
+                    <td class="text-right text-danger"><strong>${Utils.formatCurrency(data.grandTotals.currentOutstandingBalance)}</strong></td>
+                </tr>
+            `;
+        }
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+        // Update grand total card
+        const grandTotalCard = document.getElementById('grandTotalDebt');
+        if (grandTotalCard && data.grandTotals) {
+            grandTotalCard.innerHTML = `
+                <div class="stat-label">Total Outstanding Debt (All Years)</div>
+                <div class="stat-value text-danger">${Utils.formatCurrency(data.grandTotals.currentOutstandingBalance)}</div>
+                <div class="stat-subvalue">From ${data.yearsSummary.length} years</div>
+            `;
+        }
+    },
+
+    /**
+     * Render debt profile (2026)
+     */
+    renderDebtProfile(data) {
+        const categoryContainer = document.getElementById('debtByCategory');
+        const debtorsContainer = document.getElementById('topDebtors');
+
+        if (categoryContainer && data.debtByCategory) {
+            if (data.debtByCategory.length === 0) {
+                categoryContainer.innerHTML = '<p class="text-muted text-center">No unpaid vouchers</p>';
+            } else {
+                let html = '<div class="debt-list">';
+                data.debtByCategory.forEach(cat => {
+                    const percent = data.totalDebt > 0 ? ((cat.amount / data.totalDebt) * 100).toFixed(1) : 0;
+                    html += `
+                        <div class="debt-item">
+                            <div class="debt-info">
+                                <strong>${cat.category}</strong>
+                                <span class="text-muted">(${cat.count} vouchers)</span>
+                            </div>
+                            <div class="debt-amount">
+                                ${Utils.formatCurrency(cat.amount)}
+                                <small class="text-muted">${percent}%</small>
+                            </div>
+                            <div class="debt-bar">
+                                <div class="debt-bar-fill" style="width: ${percent}%"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                categoryContainer.innerHTML = html;
+            }
+        }
+
+        if (debtorsContainer && data.topDebtors) {
+            if (data.topDebtors.length === 0) {
+                debtorsContainer.innerHTML = '<p class="text-muted text-center">No unpaid vouchers</p>';
+            } else {
+                let html = `
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Payee</th>
+                                    <th class="text-center">Vouchers</th>
+                                    <th class="text-right">Amount Owed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                data.topDebtors.forEach((debtor, index) => {
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td title="${debtor.payee}">${Utils.truncate(debtor.payee, 30)}</td>
+                            <td class="text-center">${debtor.count}</td>
+                            <td class="text-right text-danger"><strong>${Utils.formatCurrency(debtor.amount)}</strong></td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table></div>';
+                debtorsContainer.innerHTML = html;
+            }
+        }
+
+        // Update total debt card for 2026
+        const totalDebtCard = document.getElementById('totalDebt2026');
+        if (totalDebtCard && data.totalDebt !== undefined) {
+            totalDebtCard.innerHTML = `
+                <div class="stat-label">Total Unpaid (2026)</div>
+                <div class="stat-value text-danger">${Utils.formatCurrency(data.totalDebt)}</div>
+            `;
+        }
+    },
+
+    /**
+     * Export data to CSV
+     */
+    exportToCSV() {
+        if (!this.summaryData || !this.summaryData.categoryBreakdown) {
+            Utils.showToast('No data to export', 'warning');
+            return;
+        }
+
+        const s = this.summaryData.summary;
+
+        let csv = 'PAYABLE VOUCHER 2026 - REPORT\n';
+        csv += `Generated: ${new Date().toLocaleString()}\n\n`;
+
+        // SUMMARY SECTION
+        csv += 'SUMMARY\n';
+        csv += `Total Vouchers Raised (Count),${s.totalVouchersRaised}\n`;
+        csv += `Paid Vouchers (Amount),${s.totalPaidAmount}\n`;
+        csv += `Paid Vouchers (Count),${s.paidVouchers}\n`;
+        csv += `Unpaid Vouchers (Amount),${s.totalUnpaidAmount}\n`;
+        csv += `Unpaid Vouchers (Count),${s.unpaidVouchers}\n`;
+        csv += `Cancelled Vouchers (Amount),${s.totalCancelledAmount}\n`;
+        csv += `Cancelled Vouchers (Count),${s.cancelledVouchers}\n`;
+        csv += `Total Contract Sum,${s.totalProcessedContractSum}\n`;
+        csv += `Total Debt,${s.totalDebt}\n`;
+        csv += `Average Payment Rate (%),${s.averagePaymentPercent}\n`;
+        csv += `Revalidated Vouchers (Count),${s.revalidatedVouchers}\n`;
+        csv += `Revalidated Criteria,OLD VOUCHER NUMBER present OR OLD VOUCHER NO AVAILABLE? = YES\n\n`;
+
+        // CATEGORY BREAKDOWN
+        csv += 'CATEGORY BREAKDOWN\n';
+        csv += 'Category,Vouchers Raised,Amount Paid,Balance,% Paid\n';
+        this.summaryData.categoryBreakdown.forEach(cat => {
+            csv += `${cat.category},${cat.vouchersRaised},${cat.amountPaid},${cat.balance},${cat.percentagePaid}%\n`;
+        });
+        csv += '\n';
+
+        if (Array.isArray(this.summaryData.accountTypeBreakdown) && this.summaryData.accountTypeBreakdown.length) {
+            csv += 'ACCOUNT TYPE BREAKDOWN\n';
+            csv += 'Account Type,Vouchers,Total Amount,Paid Amount,Unpaid Amount,Payment Rate %\n';
+            this.summaryData.accountTypeBreakdown.forEach(typeRow => {
+                const label = typeRow.displayName || typeRow.accountType || 'Unspecified';
+                csv += `${label},${typeRow.count || 0},${typeRow.totalAmount || 0},${typeRow.paidAmount || 0},${typeRow.unpaidAmount || 0},${typeRow.paymentRate || 0}\n`;
+            });
+            csv += '\n';
+        }
+
+        // MONTHLY BREAKDOWN
+        csv += 'MONTHLY BREAKDOWN\n';
+        csv += 'Month,Count,Paid,Unpaid\n';
+        this.summaryData.monthlyBreakdown.forEach(month => {
+            csv += `${month.month},${month.count},${month.paidAmount},${month.unpaidAmount}\n`;
+        });
+
+        // Download CSV
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `PayableVoucher_Report_${this.currentYear}_${new Date().toISOString().split('T')[0]}.csv`;
+        link.click();
+
+        Utils.showToast('Report exported successfully', 'success');
+    },
+
+    /**
+     * Show/hide loading overlay
+     */
+    showLoading(show, message = 'Loading report data...') {
+        if (window.Components && typeof Components.setLoading === 'function') {
+            Components.setLoading(show, message);
+            return;
+        }
+        const loader = document.getElementById('loadingOverlay');
+        if (loader) {
+            if (show) {
+                loader.classList.remove('hidden');
+            } else {
+                loader.classList.add('hidden');
+            }
+        }
+    },
+
+    // ==================== DEBT PROFILE WORKFLOW ====================
+
+    async checkDebtProfileStatus() {
+        const result = await API.getDebtProfileRequestStatus();
+        if (result.success) {
+            this.debtRequestStatus = result;
+            this.renderDebtProfileStatus();
+        }
+    },
+
+    async loadHistoricalReports() {
+        try {
+            const dropdown = document.getElementById('reportDropdown');
+            if (!dropdown) return;
+
+            dropdown.innerHTML = '<option value="">-- Loading Saved Reports... --</option>';
+            const result = await API.getDebtProfileList();
+            if (result.success) {
+                this.historicalReports = result.reports || [];
+                const reports = this.historicalReports;
+
+                // Update KPI summary bar
+                const totalCount = reports.length;
+                const approvedCount = reports.filter(r => String(r.status || '').toUpperCase() === 'APPROVED').length;
+                const pendingCount = reports.filter(r => String(r.status || '').toUpperCase() === 'PENDING').length;
+
+                let lastDateStr = '-';
+                if (reports.length > 0) {
+                    const sorted = [...reports].sort((a, b) => new Date(b.createdAt || b.timestamp || 0) - new Date(a.createdAt || a.timestamp || 0));
+                    if (sorted[0] && (sorted[0].createdAt || sorted[0].timestamp)) {
+                        lastDateStr = new Date(sorted[0].createdAt || sorted[0].timestamp).toLocaleDateString('en-GB');
+                    }
+                }
+
+                const kpiTotal = document.getElementById('debtKpiTotal');
+                const kpiApproved = document.getElementById('debtKpiApproved');
+                const kpiPending = document.getElementById('debtKpiPending');
+                const kpiLastDate = document.getElementById('debtKpiLastDate');
+
+                if (kpiTotal) kpiTotal.textContent = totalCount;
+                if (kpiApproved) kpiApproved.textContent = approvedCount;
+                if (kpiPending) kpiPending.textContent = pendingCount;
+                if (kpiLastDate) kpiLastDate.textContent = lastDateStr;
+
+                if (!reports || reports.length === 0) {
+                    dropdown.innerHTML = '<option value="">-- No Saved Reports Available --</option>';
+                    return;
+                }
+
+                dropdown.innerHTML = `<option value="">-- Select Saved Report (${reports.length}) --</option>`;
+                reports.forEach(report => {
+                    const option = document.createElement('option');
+                    option.value = report.requestId;
+                    const dateStr = report.createdAt ? new Date(report.createdAt).toLocaleDateString('en-GB') : '-';
+                    const statusBadge = String(report.status || '').toUpperCase() === 'APPROVED' ? '[APPROVED]' : '[PENDING]';
+                    const title = report.title || report.reportTitle || 'Official Debt Profile';
+                    option.textContent = `${statusBadge} ${title} (${dateStr})`;
+                    dropdown.appendChild(option);
+                });
+            } else {
+                dropdown.innerHTML = '<option value="">-- Error loading reports --</option>';
+                console.error('Error fetching historical reports:', result.error);
+            }
+        } catch (e) {
+            console.error('Failed to load historical reports:', e);
+        }
+    },
+
+    setupHistoricalReportsListeners() {
+        const dropdown = document.getElementById('reportDropdown');
+        const viewBtn = document.getElementById('viewReportBtn');
+        const editBtn = document.getElementById('editReportBtn');
+        const deleteBtn = document.getElementById('deleteReportBtn');
+        const previewBtn = document.getElementById('previewReportBtn');
+        const generateNewBtn = document.getElementById('generateNewReportBtn');
+
+        if (!dropdown) return;
+
+        dropdown.addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (!val) {
+                if (viewBtn) viewBtn.disabled = true;
+                if (editBtn) editBtn.disabled = true;
+                if (deleteBtn) deleteBtn.disabled = true;
+                if (previewBtn) previewBtn.disabled = true;
+                this.selectedReportId = null;
+                
+                document.getElementById('fullDebtReportContainer')?.classList.add('hidden');
+                document.getElementById('debtProfileWorkflowCard')?.classList.remove('hidden');
+                this.renderDebtProfileStatus();
+                return;
+            }
+
+            const report = this.historicalReports.find(r => r.requestId === val);
+            if (report) {
+                this.selectedReportId = val;
+                
+                this.debtRequestStatus = {
+                    success: true,
+                    requestId: report.requestId,
+                    timestamp: report.timestamp,
+                    requester: report.requesterName,
+                    filters: report.filters,
+                    status: report.status,
+                    approver: report.approverEmail,
+                    approvalDate: report.approvalDate,
+                    comments: report.comments,
+                    narrative: {
+                        title: report.title,
+                        summary: report.summary,
+                        analysis: report.analysis,
+                        recommendations: report.recommendations
+                    }
+                };
+
+                if (viewBtn) viewBtn.disabled = (report.status !== 'APPROVED');
+                if (editBtn) editBtn.disabled = false;
+                if (deleteBtn) deleteBtn.disabled = false;
+                if (previewBtn) previewBtn.disabled = (report.status !== 'APPROVED');
+            }
+        });
+
+        viewBtn?.addEventListener('click', () => {
+            if (this.selectedReportId) {
+                this.loadFullDebtReport();
+            }
+        });
+
+        editBtn?.addEventListener('click', () => {
+            if (this.selectedReportId) {
+                this.handleDebtProfileRequest(false);
+            }
+        });
+
+        deleteBtn?.addEventListener('click', async () => {
+            if (!this.selectedReportId) return;
+            const confirm = await Utils.confirm(`Are you sure you want to permanently delete report ${this.selectedReportId}? This action cannot be undone.`, "Delete Report");
+            if (!confirm) return;
+
+            this.showLoading(true);
+            const result = await API.deleteDebtProfile(this.selectedReportId);
+            this.showLoading(false);
+
+            if (result.success) {
+                Utils.showToast(result.message || 'Report deleted successfully', 'success');
+                this.selectedReportId = null;
+                dropdown.value = '';
+                
+                if (viewBtn) viewBtn.disabled = true;
+                if (editBtn) editBtn.disabled = true;
+                if (deleteBtn) deleteBtn.disabled = true;
+                if (previewBtn) previewBtn.disabled = true;
+
+                await this.loadHistoricalReports();
+                document.getElementById('fullDebtReportContainer')?.classList.add('hidden');
+                await this.checkDebtProfileStatus();
+            } else {
+                Utils.showToast(result.error || 'Failed to delete report', 'error');
+            }
+        });
+
+        previewBtn?.addEventListener('click', () => {
+            if (this.selectedReportId) {
+                this.downloadDebtReportGenerated('pdf');
+            }
+        });
+
+        generateNewBtn?.addEventListener('click', async () => {
+            dropdown.value = '';
+            this.selectedReportId = null;
+            if (viewBtn) viewBtn.disabled = true;
+            if (editBtn) editBtn.disabled = true;
+            if (deleteBtn) deleteBtn.disabled = true;
+            if (previewBtn) previewBtn.disabled = true;
+
+            document.getElementById('fullDebtReportContainer')?.classList.add('hidden');
+            document.getElementById('debtProfileWorkflowCard')?.classList.remove('hidden');
+            await this.checkDebtProfileStatus();
+        });
+    },
+
+    renderDebtProfileStatus() {
+        const status = this.debtRequestStatus?.status || 'NONE';
+        const user = Auth.getUser();
+        const isAdmin = user && [CONFIG.ROLES.ADMIN, CONFIG.ROLES.DFA, CONFIG.ROLES.DDFA].includes(user.role);
+
+        // Hide all
+        ['Initial', 'Pending', 'Rejected', 'Approved'].forEach(s => {
+            document.getElementById(`debtProfileStatus${s}`)?.classList.add('hidden');
+        });
+
+        if (status === 'NONE') {
+            document.getElementById('debtProfileStatusInitial')?.classList.remove('hidden');
+        } else if (status === 'PENDING') {
+            document.getElementById('debtProfileStatusPending')?.classList.remove('hidden');
+            document.getElementById('pendingRequester').textContent = this.debtRequestStatus.requester;
+            document.getElementById('pendingDate').textContent = Utils.formatDateTime(this.debtRequestStatus.timestamp);
+            
+            if (isAdmin) {
+                document.getElementById('approverActions')?.classList.remove('hidden');
+            }
+        } else if (status === 'REJECTED') {
+            document.getElementById('debtProfileStatusRejected')?.classList.remove('hidden');
+            document.getElementById('rejectionReason').textContent = `Reason: ${this.debtRequestStatus.comments || 'No comments'}`;
+        } else if (status === 'APPROVED') {
+            document.getElementById('debtProfileStatusApproved')?.classList.remove('hidden');
+            document.getElementById('approvalDateLabel').textContent = Utils.formatDateTime(this.debtRequestStatus.approvalDate);
+        }
+    },
+
+    async handleDebtProfileRequest(fresh = false) {
+        console.log('handleDebtProfileRequest called', { fresh });
+        const modal = document.getElementById('analyticalFormModalOverlay');
+        if (modal) {
+            // Reset fields if fresh
+            const titleInput = document.getElementById('reportTitle');
+            const summaryInput = document.getElementById('reportSummary');
+            const analysisInput = document.getElementById('reportAnalysis');
+            const recommendationsInput = document.getElementById('reportRecommendations');
+
+            if (fresh) {
+                if (titleInput) titleInput.value = `Debt Profile Report - ${this.currentYear}`;
+                if (summaryInput) summaryInput.value = '';
+                if (analysisInput) analysisInput.value = '';
+                if (recommendationsInput) recommendationsInput.value = '';
+            } else if (this.debtRequestStatus?.narrative) {
+                // If we have existing narrative, pre-fill it for editing
+                const n = this.debtRequestStatus.narrative;
+                if (titleInput) titleInput.value = n.title || `Debt Profile Report - ${this.currentYear}`;
+                if (summaryInput) summaryInput.value = n.summary || '';
+                if (analysisInput) analysisInput.value = n.analysis || '';
+                if (recommendationsInput) recommendationsInput.value = n.recommendations || '';
+            } else if (titleInput && !titleInput.value) {
+                titleInput.value = `Debt Profile Report - ${this.currentYear}`;
+            }
+
+            console.log('Opening modal overlay');
+            modal.classList.add('active');
+        } else {
+            console.error('Modal overlay "analyticalFormModalOverlay" not found');
+            Utils.showToast('Report configuration error', 'error');
+        }
+    },
+
+    /**
+     * Automatically generates insights based on current summary data
+     */
+    generateSmartNarrative() {
+        if (!this.summaryData) {
+            Utils.showToast('Loading data stats...', 'info');
+            return;
+        }
+
+        const res = this.summaryData;
+        const s = res.data?.summary || {};
+        const p = res.performance || {};
+        const cm = res.currentMonth || {};
+        const cats = res.categoryBreakdown || [];
+        const topCat = cats.length > 0 ? cats[0] : null;
+
+        const totalDebt = res.totalDebtProfile || s.totalDebt || 0;
+        const efficiency = p.efficiency || '0%';
+        const growth = p.growth || '0%';
+        const balanceBF = res.balanceBF || 0;
+        
+        const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        // SECTION 1: OVERVIEW
+        const summary = `This report provides a comprehensive financial overview of the Federal Medical Centre, Abeokuta, as of ${today}. It serves as a performance analysis, integrating carryover liabilities from 2025 (${Utils.formatCurrency(balanceBF)}) with new 2026 obligations. The report evaluates contract sums, payment efficiency, and debt growth rates to guide management decision-making.`;
+        
+        // SECTION 5: ANALYSIS
+        const analysis = `Financial evaluation for 2026 reveals a total contract sum commitment of ${Utils.formatCurrency(p.contractSum)}. Payment efficiency currently stands at ${efficiency}, indicating the ratio of vouchers settled against total obligations raised. A growth rate of ${growth} is observed relative to the 2025 starting balance. Sectoral analysis identifies "${topCat ? topCat.name : 'Operations'}" as the lead expenditure category. In the current month (${cm.name}), the hospital processed ${Utils.formatCurrency(cm.newObligations)} in new vouchers while effecting ${Utils.formatCurrency(cm.payments)} in payments.`;
+        
+        // SECTION 6: RECOMMENDATIONS
+        const recommendations = `1. Prioritize the settlement of 2025 Balance B/F (${Utils.formatCurrency(balanceBF)}) to reduce legacy interest/inflation risk.\n2. Implement stricter commitment controls in the "${topCat ? topCat.name : 'High-Expenditure'}" sector.\n3. Target a payment efficiency improvement of 15% in the next quarter via automated voucher processing.\n4. Revalidate all outstanding 2026 vouchers to ensure budgetary alignment before the next fiscal cycle.`;
+
+        document.getElementById('reportTitle').value = `DEBT PROFILE & FINANCIAL REPORT - ${this.currentYear}`;
+        document.getElementById('reportSummary').value = summary;
+        document.getElementById('reportAnalysis').value = analysis;
+        document.getElementById('reportRecommendations').value = recommendations;
+        
+        Utils.showToast('Comprehensive analytical insights generated!', 'success');
+    },
+
+    async submitDebtProfileRequest() {
+        const titleVal = document.getElementById('reportTitle').value;
+        const summaryVal = document.getElementById('reportSummary').value;
+        const analysisVal = document.getElementById('reportAnalysis').value;
+        const recommendationsVal = document.getElementById('reportRecommendations').value;
+
+        const reportData = {
+            title: titleVal,
+            summary: summaryVal,
+            analysis: analysisVal,
+            recommendations: recommendationsVal,
+            filters: { year: this.currentYear, requestedAt: new Date().toISOString() }
+        };
+
+        this.showLoading(true);
+        let result;
+        if (this.selectedReportId) {
+            result = await API.updateDebtProfileNarrative(this.selectedReportId, {
+                title: titleVal,
+                summary: summaryVal,
+                analysis: analysisVal,
+                recommendations: recommendationsVal
+            });
+        } else {
+            result = await API.requestDebtProfile(reportData);
+        }
+        this.showLoading(false);
+
+        if (result.success) {
+            document.getElementById('analyticalFormModalOverlay')?.classList.remove('active');
+            Utils.showToast(result.message || 'Request processed successfully', 'success');
+            
+            if (this.selectedReportId) {
+                await this.loadHistoricalReports();
+                const dropdown = document.getElementById('reportDropdown');
+                if (dropdown) dropdown.value = this.selectedReportId;
+                
+                const report = this.historicalReports.find(r => r.requestId === this.selectedReportId);
+                if (report) {
+                    this.debtRequestStatus = {
+                        success: true,
+                        requestId: report.requestId,
+                        timestamp: report.timestamp,
+                        requester: report.requesterName,
+                        filters: report.filters,
+                        status: report.status,
+                        approver: report.approverEmail,
+                        approvalDate: report.approvalDate,
+                        comments: report.comments,
+                        narrative: {
+                            title: report.title,
+                            summary: report.summary,
+                            analysis: report.analysis,
+                            recommendations: report.recommendations
+                        }
+                    };
+                    await this.loadFullDebtReport();
+                }
+            } else {
+                await this.checkDebtProfileStatus();
+                if (this.debtRequestStatus?.status === 'APPROVED') {
+                    await this.loadFullDebtReport();
+                }
+            }
+        } else {
+            Utils.showToast(result.error || 'Request failed', 'error');
+        }
+        return result;
+    },
+
+    async handleDebtProfileApproval(action) {
+        const comments = document.getElementById('approvalComments').value;
+        if (action === 'reject' && !comments) {
+            Utils.showToast('Comments are required for rejection', 'warning');
+            return;
+        }
+
+        const confirm = await Utils.confirm(`Are you sure you want to ${action} this request?`, `${action.toUpperCase()} Request`);
+        if (!confirm) return;
+
+        this.showLoading(true);
+        const result = action === 'approve' 
+            ? await API.approveDebtProfile(this.debtRequestStatus.requestId, comments)
+            : await API.rejectDebtProfile(this.debtRequestStatus.requestId, comments);
+        this.showLoading(false);
+
+        if (result.success) {
+            Utils.showToast(`Request ${action}d successfully`, 'success');
+            await this.checkDebtProfileStatus();
+        } else {
+            Utils.showToast(result.error || 'Action failed', 'error');
+        }
+    },
+
+    async loadFullDebtReport() {
+        this.showLoading(true);
+        const result = await API.getDebtProfileFullData(this.debtRequestStatus.requestId);
+        this.showLoading(false);
+
+        if (result.success) {
+            this.debtReportData = result.data;
+            this.renderFullDebtReport();
+            document.getElementById('fullDebtReportContainer').classList.remove('hidden');
+            document.getElementById('debtProfileWorkflowCard').classList.add('hidden');
+            Utils.showToast('Report loaded successfully', 'success');
+        } else {
+            Utils.showToast(result.error || 'Failed to load report data', 'error');
+        }
+    },
+
+    renderFullDebtReport() {
+        const data = this.debtReportData;
+        const narrative = this.debtRequestStatus?.narrative || {};
+        if (!data) return;
+
+        // Header & Narrative
+        document.getElementById('reportHeaderTitle').textContent = narrative.title || 'Official Debt Profile Report';
+        document.getElementById('reportGeneratedDate').textContent = Utils.formatDateTime(this.debtRequestStatus.timestamp);
+        document.getElementById('reportSummaryText').textContent = narrative.summary || 'No summary provided.';
+        document.getElementById('reportAnalysisText').textContent = narrative.analysis || 'No detailed analysis provided.';
+        document.getElementById('reportRecommendationsText').textContent = narrative.recommendations || 'No recommendations provided.';
+
+        // Stats
+        document.getElementById('reportTotalDebt').textContent = Utils.formatCurrency(data.summary.totalDebt);
+        document.getElementById('reportOverdueDebt').textContent = Utils.formatCurrency(data.summary.overdueAmount);
+        document.getElementById('reportOverdueCount').textContent = `${data.summary.overdueCount} vouchers`;
+
+        // Automated System Insights (Optional element)
+        const reportNarrative = document.getElementById('reportNarrative');
+        if (reportNarrative) {
+            const overduePct = (data.summary.overdueAmount / (data.summary.totalDebt || 1) * 100).toFixed(1);
+            reportNarrative.textContent = `Data analysis shows that ${overduePct}% of the outstanding debt is overdue by more than 90 days. The debt is distributed across ${Object.keys(data.byCategory || {}).length} categories.`;
+        }
+
+        // Charts
+        this.drawReportCharts(data);
+
+        // Details Table
+        const tableContainer = document.getElementById('reportDetailsTableContainer');
+        if (data.details && data.details.length > 0) {
+            tableContainer.innerHTML = `
+                <div class="table-container">
+                    <table class="table-hover">
+                        <thead>
+                            <tr>
+                                <th>Payee</th>
+                                <th>Particulars</th>
+                                <th>Category</th>
+                                <th>Dept</th>
+                                <th>Date</th>
+                                <th class="text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.details.map(d => `
+                                <tr>
+                                    <td>${d.payee}</td>
+                                    <td>${d.particular}</td>
+                                    <td><span class="badge badge-info">${d.category}</span></td>
+                                    <td>${d.department}</td>
+                                    <td>${d.date}</td>
+                                    <td class="text-right"><strong>${Utils.formatCurrency(d.amount)}</strong></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            tableContainer.innerHTML = '<p class="text-center text-muted">No detail records found.</p>';
+        }
+    },
+
+    drawReportCharts(data) {
+        // Aging Chart
+        const agingCtx = document.getElementById('reportAgingChart');
+        if (agingCtx) {
+            if (this.reportAgingChart) this.reportAgingChart.destroy();
+            this.reportAgingChart = new Chart(agingCtx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(data.byAge),
+                    datasets: [{
+                        data: Object.values(data.byAge),
+                        backgroundColor: [this.THEME.successPaid, this.THEME.warningAccent, this.THEME.dangerAccent]
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // Category Chart
+        const catCtx = document.getElementById('reportCategoryChart');
+        if (catCtx) {
+            if (this.reportCategoryChart) this.reportCategoryChart.destroy();
+            const topCats = Object.entries(data.byCategory)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8);
+            
+            this.reportCategoryChart = new Chart(catCtx, {
+                type: 'bar',
+                data: {
+                    labels: topCats.map(c => c[0]),
+                    datasets: [{
+                        label: 'Amount',
+                        data: topCats.map(c => c[1]),
+                        backgroundColor: this.THEME.primaryGreen,
+                        borderColor: this.THEME.primaryGreenBorder,
+                        borderWidth: 1
+                    }]
+                },
+                options: { 
+                    indexAxis: 'y', 
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { x: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } } }
+                }
+            });
+        }
+
+        // Department Chart
+        const deptCtx = document.getElementById('reportDepartmentChart');
+        if (deptCtx) {
+            if (this.reportDepartmentChart) this.reportDepartmentChart.destroy();
+            const depts = Object.entries(data.byDepartment).sort((a,b) => b[1] - a[1]);
+            this.reportDepartmentChart = new Chart(deptCtx, {
+                type: 'bar',
+                data: {
+                    labels: depts.map(d => String(d[0] || '').replace('::', ' - ').replace(/\s+-\s*$/, '')),
+                    datasets: [{
+                        label: 'Amount',
+                        data: depts.map(d => d[1]),
+                        backgroundColor: this.THEME.softGrey,
+                        borderColor: this.THEME.softGreyBorder,
+                        borderWidth: 1
+                    }]
+                },
+                options: { 
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { ticks: { callback: v => '₦' + Number(v).toLocaleString() } } }
+                }
+            });
+        }
+    },
+
+    async downloadDebtReportGenerated(format) {
+        if (!this.debtRequestStatus?.requestId) return;
+
+        // Ensure current form details reflect in the report (Auto-save if edited)
+        const currentTitle = document.getElementById('reportTitle')?.value?.trim();
+        const currentSummary = document.getElementById('reportSummary')?.value?.trim();
+        const currentAnalysis = document.getElementById('reportAnalysis')?.value?.trim();
+        const currentRecs = document.getElementById('reportRecommendations')?.value?.trim();
+        
+        const dbNarrative = this.debtRequestStatus.narrative || {};
+        
+        const hasChanges = (currentTitle && currentTitle !== (dbNarrative.title || '').trim()) || 
+                          (currentSummary && currentSummary !== (dbNarrative.summary || '').trim()) ||
+                          (currentAnalysis && currentAnalysis !== (dbNarrative.analysis || '').trim()) ||
+                          (currentRecs && currentRecs !== (dbNarrative.recommendations || '').trim());
+        
+        let freshRequestId = this.debtRequestStatus?.requestId;
+        
+        if (hasChanges) {
+            console.log('Detected narrative changes. Current form vs DB:', {
+                current: { title: currentTitle, summary: currentSummary, analysis: currentAnalysis, recs: currentRecs },
+                db: dbNarrative
+            });
+            Utils.showToast('Saving latest narrative edits first...', 'info');
+            const syncRes = await this.submitDebtProfileRequest();
+            if (syncRes && syncRes.success && syncRes.requestId) {
+                freshRequestId = syncRes.requestId;
+                console.log('Sync successful. New requestId:', freshRequestId);
+            } else {
+                console.error('Narrative sync failed or no requestId returned:', syncRes);
+                Utils.showToast('Could not sync narrative. Exporting previous version.', 'warning');
+            }
+        }
+
+        if (!freshRequestId) {
+            Utils.showToast('No report request found. Generate a profile first.', 'error');
+            return;
+        }
+
+        Utils.showToast(`Generating high-quality ${format.toUpperCase()}...`, 'info');
+        this.showLoading(true);
+        
+        try {
+            if (format === 'pdf') {
+                const result = await API.getDebtProfilePDF(freshRequestId);
+                if (result && result.success && result.pdfBase64) {
+                    const blob = Utils.base64ToBlob(result.pdfBase64, 'application/pdf');
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = (currentTitle || 'Debt_Profile_Report').replace(/\s+/g, '_') + '.pdf';
+                    link.click();
+                    Utils.showToast('PDF downloaded successfully', 'success');
+                } else {
+                    throw new Error(result?.error || 'Failed to generate PDF');
+                }
+            } else if (format === 'excel') {
+                const result = await API.getDebtProfileExcel(freshRequestId);
+                if (result && result.success && result.downloadUrl) {
+                    window.open(result.downloadUrl, '_blank');
+                    Utils.showToast('Excel report opened in new tab', 'success');
+                } else {
+                    throw new Error(result?.error || 'Failed to generate Excel');
+                }
+            }
+        } catch (err) {
+            Utils.showToast(err.message, 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    },
+
+    changeTab(tabName) {
+        const user = Auth.getUser();
+        if (user && user.role === CONFIG.ROLES.AUDIT_UNIT && tabName === 'requests') {
+            tabName = 'summary';
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.getAttribute('data-tab') === tabName) {
+                btn.classList.add('active');
+            }
+        });
+
+        const tabClasses = {
+            summary: 'tab-section-summary',
+            expense: 'tab-section-expense',
+            tax: 'tab-section-tax',
+            debt: 'tab-section-debt',
+            requests: 'tab-section-requests'
+        };
+
+        Object.entries(tabClasses).forEach(([name, className]) => {
+            document.querySelectorAll('.' + className).forEach(el => {
+                if (name === tabName) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            });
+        });
+    },
+
+    /**
+     * Account Multi-Select Filter logic
+     */
+    toggleAccountDropdown(e) {
+        if (e) e.stopPropagation();
+        const dropdown = document.getElementById('accountMultiSelectDropdown');
+        if (!dropdown) return;
+        
+        const isShow = dropdown.classList.contains('show');
+        if (isShow) {
+            dropdown.classList.remove('show');
+        } else {
+            dropdown.classList.add('show');
+            const closeOnOutsideClick = (evt) => {
+                const container = document.getElementById('accountMultiSelectContainer');
+                if (container && !container.contains(evt.target)) {
+                    dropdown.classList.remove('show');
+                    document.removeEventListener('click', closeOnOutsideClick);
+                }
+            };
+            setTimeout(() => {
+                document.addEventListener('click', closeOnOutsideClick);
+            }, 0);
+        }
+    },
+
+    getAvailableAccountTypes() {
+        const typesSet = new Set(this.defaultAccountTypes || []);
+        if (this.systemConfig?.accountTypes) {
+            Object.keys(this.systemConfig.accountTypes).forEach(t => {
+                if (t) typesSet.add(t);
+            });
+        }
+        const vouchers = this.voucherCache[this.currentYear] || [];
+        vouchers.forEach(v => {
+            if (v.accountType) typesSet.add(v.accountType);
+        });
+        return Array.from(typesSet);
+    },
+
+    populateAccountMultiSelectOptions() {
+        const container = document.getElementById('accountMultiSelectOptions');
+        if (!container) return;
+
+        const available = this.getAvailableAccountTypes();
+        const isAllSelected = !this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0;
+
+        let html = `
+            <label class="account-option-item">
+                <input type="checkbox" value="ALL" ${isAllSelected ? 'checked' : ''} onchange="Reports.handleAccountCheckboxChange('ALL', this.checked)">
+                <strong>All Accounts (Default)</strong>
+            </label>
+        `;
+
+        available.forEach(type => {
+            const isChecked = !isAllSelected && this.selectedAccounts.has(type);
+            const safeType = this.escapeHtml(type);
+            html += `
+                <label class="account-option-item">
+                    <input type="checkbox" value="${safeType}" ${isChecked ? 'checked' : ''} onchange="Reports.handleAccountCheckboxChange('${safeType.replace(/'/g, "\\'")}', this.checked)">
+                    <span>${safeType}</span>
+                </label>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.updateAccountMultiSelectButtonLabel();
+    },
+
+    handleAccountCheckboxChange(accountKey, isChecked) {
+        if (!this.selectedAccounts) this.selectedAccounts = new Set(['ALL']);
+
+        if (accountKey === 'ALL') {
+            this.selectedAccounts = new Set(['ALL']);
+        } else {
+            this.selectedAccounts.delete('ALL');
+            if (isChecked) {
+                this.selectedAccounts.add(accountKey);
+            } else {
+                this.selectedAccounts.delete(accountKey);
+            }
+            if (this.selectedAccounts.size === 0) {
+                this.selectedAccounts.add('ALL');
+            }
+        }
+
+        this.populateAccountMultiSelectOptions();
+        this.applyDateAndAccountFilter();
+    },
+
+    selectAllAccounts() {
+        this.selectedAccounts = new Set(['ALL']);
+        this.populateAccountMultiSelectOptions();
+        this.applyDateAndAccountFilter();
+    },
+
+    clearAllAccounts() {
+        this.selectedAccounts = new Set(['ALL']);
+        this.populateAccountMultiSelectOptions();
+        this.applyDateAndAccountFilter();
+    },
+
+    updateAccountMultiSelectButtonLabel() {
+        const labelEl = document.getElementById('accountMultiSelectLabel');
+        if (!labelEl) return;
+
+        if (!this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0) {
+            labelEl.textContent = 'Account: All';
+        } else {
+            const arr = Array.from(this.selectedAccounts);
+            if (arr.length === 1) {
+                labelEl.textContent = `Account: ${arr[0]}`;
+            } else if (arr.length === 2) {
+                labelEl.textContent = `Account: ${arr[0]}, ${arr[1]}`;
+            } else {
+                labelEl.textContent = `Account: ${arr[0]}, ${arr[1]} (+${arr.length - 2})`;
+            }
+        }
+    },
+
+    isVoucherMatchingAccountFilter(v) {
+        if (!v) return false;
+
+        // Exempt Capital category by default unless explicitly selected
+        const isCap = this.isCapitalCategory(v);
+        const hasExplicitCapital = this.selectedAccounts && 
+            !this.selectedAccounts.has('ALL') && 
+            Array.from(this.selectedAccounts).some(a => String(a).toLowerCase() === 'capital' || String(a).toLowerCase() === 'cap');
+
+        if (isCap && !hasExplicitCapital) {
+            return false;
+        }
+
+        if (!this.selectedAccounts || this.selectedAccounts.has('ALL') || this.selectedAccounts.size === 0) {
+            return true;
+        }
+
+        const vType = String(v?.accountType || '').trim();
+        const vSubType = String(v?.subAccountType || '').trim();
+        const vCat = String(v?.category || v?.categories || '').trim();
+        const selectedArr = Array.from(this.selectedAccounts);
+
+        for (const target of selectedArr) {
+            const targetLower = target.toLowerCase();
+            if (vType.toLowerCase() === targetLower) return true;
+            if (vSubType && vSubType.toLowerCase() === targetLower) return true;
+            if (vCat.toLowerCase() === targetLower) return true;
+            if ((targetLower === 'ohd' || targetLower === 'overhead') && 
+                (vType.toLowerCase() === 'ohd' || vType.toLowerCase() === 'overhead')) {
+                return true;
+            }
+        }
+
+        return false;
+    },
+
+    async applyDateAndAccountFilter() {
+        const fromDate = document.getElementById('reportDateFrom')?.value;
+        const toDate = document.getElementById('reportDateTo')?.value;
+
+        this.showLoading(true);
+
+        try {
+            if (!this.voucherCache[this.currentYear] || this.voucherCache[this.currentYear].length === 0) {
+                await this.loadVoucherAnalytics();
+            }
+
+            const start = fromDate ? new Date(fromDate).getTime() : 0;
+            const end = toDate ? new Date(toDate).getTime() : Infinity;
+
+            const vouchers = (this.voucherCache[this.currentYear] || []).filter(v => {
+                const vDate = this.parseDateFlexible(v.createdAt || v.date);
+                if (vDate) {
+                    const t = vDate.getTime();
+                    if (t < start || t > end) return false;
+                }
+                return this.isVoucherMatchingAccountFilter(v);
+            });
+
+            const statusLabel = document.getElementById('dateFilterStatus');
+            if (statusLabel) {
+                const parts = [];
+                if (fromDate || toDate) {
+                    const formattedFrom = fromDate ? new Date(fromDate).toLocaleDateString('en-GB') : 'Start';
+                    const formattedTo = toDate ? new Date(toDate).toLocaleDateString('en-GB') : 'End';
+                    parts.push(`Date: ${formattedFrom} to ${formattedTo}`);
+                } else {
+                    parts.push('Full year');
+                }
+                if (!this.selectedAccounts.has('ALL') && this.selectedAccounts.size > 0) {
+                    parts.push(`Accounts: ${Array.from(this.selectedAccounts).join(', ')}`);
+                }
+                statusLabel.textContent = `Showing filter: ${parts.join(' | ')} (${vouchers.length} vouchers)`;
+            }
+
+            this.rebuildReportData(vouchers);
+            this.applyVoucherAnalytics(vouchers);
+        } catch (error) {
+            console.error('Error applying filters:', error);
+            Utils.showToast('Failed to apply filters', 'error');
+        } finally {
+            this.showLoading(false);
+        }
+    },
+
+    async applyDateFilter() {
+        await this.applyDateAndAccountFilter();
+        Utils.showToast('Date range filter applied successfully', 'success');
+    },
+
+    clearDateFilter() {
+        const fromInput = document.getElementById('reportDateFrom');
+        const toInput = document.getElementById('reportDateTo');
+        if (fromInput) fromInput.value = '';
+        if (toInput) toInput.value = '';
+
+        this.applyDateAndAccountFilter();
+        Utils.showToast('Date filter cleared', 'info');
+    },
+
+    rebuildReportData(vouchers) {
+        let totalVouchersRaised = vouchers.length;
+        let totalPaidAmount = 0;
+        let paidVouchers = 0;
+        let totalUnpaidAmount = 0;
+        let unpaidVouchers = 0;
+        let totalCancelledAmount = 0;
+        let cancelledVouchers = 0;
+        let totalProcessedContractSum = 0;
+        let revalidatedVouchers = 0;
+
+        vouchers.forEach(v => {
+            const gross = parseFloat(v.grossAmount || 0);
+            const contract = parseFloat(v.contractSum || 0);
+            
+            if (v.oldVoucherNumber || String(v.oldVoucherAvailable).toLowerCase() === 'yes') {
+                revalidatedVouchers++;
+            }
+
+            if (v.status === 'Paid') {
+                totalPaidAmount += gross;
+                paidVouchers++;
+            } else if (v.status === 'Unpaid') {
+                totalUnpaidAmount += gross;
+                unpaidVouchers++;
+            } else if (v.status === 'Cancelled') {
+                totalCancelledAmount += gross;
+                cancelledVouchers++;
+            }
+
+            if (contract) totalProcessedContractSum += contract;
+        });
+
+        let totalDebt = totalUnpaidAmount;
+        let averagePaymentPercent = totalPaidAmount + totalUnpaidAmount > 0 
+            ? Math.round((totalPaidAmount / (totalPaidAmount + totalUnpaidAmount)) * 100)
+            : 0;
+
+        const summary = {
+            totalVouchersRaised,
+            totalPaidAmount,
+            paidVouchers,
+            totalUnpaidAmount,
+            unpaidVouchers,
+            totalCancelledAmount,
+            cancelledVouchers,
+            totalProcessedContractSum,
+            totalDebt,
+            averagePaymentPercent,
+            revalidatedVouchers
+        };
+
+        const categoryMap = {};
+        vouchers.forEach(v => {
+            const cat = v.categories || 'Uncategorized';
+            if (!categoryMap[cat]) {
+                categoryMap[cat] = { category: cat, vouchersRaised: 0, amountPaid: 0, balance: 0 };
+            }
+            const gross = parseFloat(v.grossAmount || 0);
+            categoryMap[cat].vouchersRaised++;
+            if (v.status === 'Paid') {
+                categoryMap[cat].amountPaid += gross;
+            } else if (v.status === 'Unpaid') {
+                categoryMap[cat].balance += gross;
+            }
+        });
+        const categoryBreakdown = Object.values(categoryMap).map(cat => {
+            const total = cat.amountPaid + cat.balance;
+            cat.percentagePaid = total > 0 ? parseFloat(((cat.amountPaid / total) * 100).toFixed(2)) : 0;
+            cat.percentOfTotalPayment = totalPaidAmount > 0 ? parseFloat(((cat.amountPaid / totalPaidAmount) * 100).toFixed(2)) : 0;
+            return cat;
+        });
+
+        const accountTypeBreakdown = this.buildAccountTypeBreakdownFromVouchers(vouchers);
+
+        const monthlyMap = {};
+        const monthsList = CONFIG.MONTHS || ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        monthsList.forEach((m, idx) => {
+            monthlyMap[idx] = {
+                month: m,
+                count: 0,
+                paidCurrentMonth: 0,
+                paidPreviousMonth: 0,
+                paidAmount: 0,
+                unpaidCurrentMonth: 0,
+                unpaidPreviousMonths: 0,
+                unpaidAmount: 0
+            };
+        });
+
+        vouchers.forEach(v => {
+            if (!this.isVoucherMatchingAccountFilter(v)) return;
+
+            const pmtMonth = String(v?.pmtMonth || '').trim();
+            const raisedDate = v?.createdAt || v?.date;
+            const raisedMonth = this.getMonthNameFromDate(raisedDate, pmtMonth) || pmtMonth;
+
+            let raisedIdx = monthsList.indexOf(raisedMonth);
+            if (raisedIdx < 0) {
+                const pIdx = monthsList.indexOf(pmtMonth);
+                raisedIdx = pIdx >= 0 ? pIdx : 0;
+            }
+
+            if (monthlyMap[raisedIdx]) {
+                monthlyMap[raisedIdx].count++;
+            }
+
+            const gross = parseFloat(v.grossAmount || 0);
+            const status = String(v.status || '').trim().toLowerCase();
+            let pmtIdx = monthsList.indexOf(pmtMonth);
+
+            if (status === 'paid') {
+                if (pmtIdx < 0) pmtIdx = raisedIdx;
+
+                if (monthlyMap[pmtIdx]) {
+                    const cell = monthlyMap[pmtIdx];
+                    if (raisedIdx < pmtIdx) {
+                        cell.paidPreviousMonth += gross;
+                    } else {
+                        cell.paidCurrentMonth += gross;
+                    }
+                    cell.paidAmount += gross;
+                }
+
+                // Accrued unpaid liability for months prior to payment month
+                for (let m = raisedIdx; m < pmtIdx; m++) {
+                    if (monthlyMap[m]) {
+                        const cell = monthlyMap[m];
+                        if (raisedIdx === m) {
+                            cell.unpaidCurrentMonth += gross;
+                        } else {
+                            cell.unpaidPreviousMonths += gross;
+                        }
+                        cell.unpaidAmount += gross;
+                    }
+                }
+            } else if (status === 'unpaid' || status === 'pending' || status === 'pending deletion') {
+                // Accrued unpaid liability for all months from raised month onward
+                for (let m = raisedIdx; m < 12; m++) {
+                    if (monthlyMap[m]) {
+                        const cell = monthlyMap[m];
+                        if (raisedIdx === m) {
+                            cell.unpaidCurrentMonth += gross;
+                        } else {
+                            cell.unpaidPreviousMonths += gross;
+                        }
+                        cell.unpaidAmount += gross;
+                    }
+                }
+            }
+        });
+
+        const monthlyBreakdown = Object.values(monthlyMap);
+
+        this.summaryData = {
+            success: true,
+            summary,
+            categoryBreakdown,
+            accountTypeBreakdown,
+            monthlyBreakdown
+        };
+
+        this.renderYearSummary(this.summaryData);
+        this.renderFinancialInsights(summary);
+        this.renderCategoryTable(categoryBreakdown);
+        this.renderAccountTypeTable(accountTypeBreakdown);
+        this.renderMonthlyTable(monthlyBreakdown);
+        this.queueChartRender('categoryChart', () => this.drawCategoryChart(categoryBreakdown));
+        
+        const paretoMode = document.getElementById('paretoGroupSelector')?.value || 'category';
+        if (paretoMode === 'category') {
+            this.queueChartRender('categoryParetoChart', () => this.drawCategoryParetoChart(categoryBreakdown));
+        } else {
+            this.queueChartRender('categoryParetoChart', () => this.drawVendorParetoChart());
+        }
+
+        this.queueChartRender('monthlyChart', () => this.drawMonthlyChart(monthlyBreakdown));
+        this.queueChartRender('statusCountChart', () => this.drawStatusCharts(summary));
+        this.queueChartRender('statusAmountChart', () => this.drawStatusCharts(summary));
+
+        let totalTaxLiability = 0;
+        let totalTaxPaid = 0;
+        let totalTaxOutstanding = 0;
+        
+        vouchers.forEach(v => {
+            const vat = parseFloat(v.vat || 0);
+            const wht = parseFloat(v.wht || 0);
+            const stamp = parseFloat(v.stampDuty || 0);
+            const taxLiab = vat + wht + stamp;
+            totalTaxLiability += taxLiab;
+            
+            if (v.status === 'Paid') {
+                totalTaxPaid += taxLiab;
+            } else {
+                totalTaxOutstanding += taxLiab;
+            }
+        });
+        
+        const taxSummary = {
+            totalTaxLiability,
+            totalPaid: totalTaxPaid,
+            totalOutstanding: totalTaxOutstanding,
+            complianceRate: totalTaxLiability > 0 ? (totalTaxPaid / totalTaxLiability) * 100 : 0
+        };
+        
+        this.taxSummary = taxSummary;
+        this.renderTaxSummary(taxSummary);
+
+        const taxMonths = CONFIG.MONTHS.map(m => ({ month: m, totalTax: 0, paidTax: 0 }));
+        vouchers.forEach(v => {
+            const idx = this.getMonthIndexFromVoucher(v);
+            if (idx !== null && idx !== undefined && taxMonths[idx]) {
+                const vat = parseFloat(v.vat || 0);
+                const wht = parseFloat(v.wht || 0);
+                const stamp = parseFloat(v.stampDuty || 0);
+                const taxLiab = vat + wht + stamp;
+                
+                taxMonths[idx].totalTax += taxLiab;
+                if (v.status === 'Paid') {
+                    taxMonths[idx].paidTax += taxLiab;
+                }
+            }
+        });
+        this.taxMonthlyData = taxMonths;
+        this.queueChartRender('taxSplitChart', () => this.drawTaxSplitChart(taxMonths));
+        this.setupLazyChartRendering();
+    },
+
+    drillDown(type, key, subKey = '') {
+        const titleEl = document.getElementById('drillDownTitle');
+        const tbody = document.getElementById('drillDownTableBody');
+        const modal = document.getElementById('drillDownModal');
+        if (!titleEl || !tbody || !modal) return;
+
+        this.activeDrillDown = { type, key, subKey };
+
+        let titleText = `Contributing Vouchers - ${key}`;
+        if (subKey) titleText += ` (${subKey})`;
+        titleEl.innerHTML = `<i class="fas fa-list-ul"></i> ${titleText}`;
+
+        let vouchers = this.voucherCache[this.currentYear] || [];
+
+        const fromDate = document.getElementById('reportDateFrom')?.value;
+        const toDate = document.getElementById('reportDateTo')?.value;
+        const start = fromDate ? new Date(fromDate).getTime() : 0;
+        const end = toDate ? new Date(toDate).getTime() : Infinity;
+
+        vouchers = vouchers.filter(v => {
+            const vDate = this.parseDateFlexible(v.createdAt || v.date);
+            if (vDate) {
+                const t = vDate.getTime();
+                if (t < start || t > end) return false;
+            }
+            return this.isVoucherMatchingAccountFilter(v);
+        });
+
+        let filtered = [];
+        if (type === 'category') {
+            filtered = vouchers.filter(v => (v.categories || 'Uncategorized') === key);
+        } else if (type === 'month') {
+            filtered = vouchers.filter(v => {
+                const monthIdx = this.getMonthIndexFromVoucher(v);
+                return monthIdx !== null && CONFIG.MONTHS[monthIdx] === key;
+            });
+        } else if (type === 'accountType') {
+            filtered = vouchers.filter(v => (v.accountType || 'Unassigned') === key && (!subKey || v.subAccountType === subKey));
+        } else if (type === 'aging') {
+            const now = new Date().getTime();
+            filtered = vouchers.filter(v => {
+                if (v.status !== 'Unpaid') return false;
+                const vDate = this.parseDateFlexible(v.date || v.createdAt);
+                if (!vDate) return false;
+                const days = Math.floor((now - vDate.getTime()) / (1000 * 60 * 60 * 24));
+                if (key === '0–7 days') return days >= 0 && days <= 7;
+                if (key === '8–14 days') return days >= 8 && days <= 14;
+                if (key === '15–30 days') return days >= 15 && days <= 30;
+                if (key === '31–60 days') return days >= 31 && days <= 60;
+                if (key === '61–90 days') return days >= 61 && days <= 90;
+                if (key === '90+ days') return days >= 91;
+                return false;
+            });
+        }
+
+        this.activeDrillDown.vouchers = filtered;
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No contributing vouchers found.</td></tr>';
+        } else {
+            let html = '';
+            filtered.forEach((v, index) => {
+                const net = parseFloat((v.grossAmount || 0) - ((v.vat || 0) + (v.wht || 0) + (v.stampDuty || 0)));
+                const sn = v.accountOrMail || '-';
+                const dateVal = v.date ? new Date(v.date).toLocaleDateString('en-GB') : '-';
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td style="font-weight:600; color:var(--primary-color);">${sn}</td>
+                        <td><strong>${v.payee || '-'}</strong></td>
+                        <td class="particular-cell" title="${this.escapeHtml(v.particular || '')}">${this.escapeHtml(v.particular || '')}</td>
+                        <td class="text-right amount-cell" style="font-variant-numeric: tabular-nums;">${Utils.formatCurrency(v.grossAmount || 0)}</td>
+                        <td class="text-right amount-cell" style="font-variant-numeric: tabular-nums;">${Utils.formatCurrency(net)}</td>
+                        <td class="text-center">
+                           <span class="badge status-${String(v.status).toLowerCase()}" style="background-color: ${v.status === 'Paid' ? 'rgba(40,167,69,0.1)' : v.status === 'Cancelled' ? 'rgba(220,53,69,0.1)' : 'rgba(255,193,7,0.1)'}; color: ${v.status === 'Paid' ? '#28a745' : v.status === 'Cancelled' ? '#dc3545' : '#ffc107'}; border: 1px solid ${v.status === 'Paid' ? 'rgba(40,167,69,0.2)' : v.status === 'Cancelled' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.2)'};">${v.status}</span>
+                        </td>
+                        <td>${dateVal}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        modal.classList.add('active');
+    },
+
+    closeDrillDownModal() {
+        document.getElementById('drillDownModal')?.classList.remove('active');
+    },
+
+    exportDrillDownCSV() {
+        if (!this.activeDrillDown || !this.activeDrillDown.vouchers || this.activeDrillDown.vouchers.length === 0) {
+            Utils.showToast('No data to export', 'warning');
+            return;
+        }
+
+        let csv = `PAYABLE VOUCHER DRILLDOWN - ${this.activeDrillDown.key}\n`;
+        csv += `Exported: ${new Date().toLocaleString()}\n\n`;
+        csv += 'S/N,Voucher No.,Payee,Particular,Gross Amount (NGN),Net Amount (NGN),Status,Date\n';
+
+        this.activeDrillDown.vouchers.forEach((v, idx) => {
+            const net = parseFloat((v.grossAmount || 0) - ((v.vat || 0) + (v.wht || 0) + (v.stampDuty || 0)));
+            const particularClean = String(v.particular || '').replace(/"/g, '""');
+            const payeeClean = String(v.payee || '').replace(/"/g, '""');
+            csv += `${idx + 1},"${v.accountOrMail || ''}","${payeeClean}","${particularClean}",${v.grossAmount || 0},${net},"${v.status || ''}","${v.date || ''}"\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', `Voucher_Drilldown_${this.activeDrillDown.key.replace(/\s+/g, '_')}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    },
+
+    exportCard(cardId, title) {
+        const card = document.getElementById(cardId);
+        const table = card?.querySelector('table');
+        if (!table) {
+            Utils.showToast('No table found to export', 'warning');
+            return;
+        }
+
+        let csv = `${title.toUpperCase()} REPORT\n`;
+        csv += `Exported: ${new Date().toLocaleString()}\n\n`;
+
+        const rows = table.querySelectorAll('tr');
+        rows.forEach(tr => {
+            const cols = tr.querySelectorAll('th, td');
+            const rowData = [];
+            cols.forEach(col => {
+                let btn = col.querySelector('button');
+                let text = col.innerText.trim();
+                if (btn) {
+                    text = text.replace(btn.innerText, '').trim();
+                }
+                text = text.replace(/"/g, '""');
+                rowData.push(`"${text}"`);
+            });
+            csv += rowData.join(',') + '\n';
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.setAttribute('download', `${title.replace(/\s+/g, '_')}_Report.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    },
+
+    toggleParetoGroup() {
+        const select = document.getElementById('paretoGroupSelector');
+        if (!select) return;
+        const mode = select.value;
+        
+        if (mode === 'category') {
+            this.drawCategoryParetoChart(this.summaryData.categoryBreakdown);
+        } else {
+            this.drawVendorParetoChart();
+        }
+    },
+
+    drawVendorParetoChart() {
+        const ctx = document.getElementById('categoryParetoChart');
+        if (!ctx) return;
+        
+        const vouchers = this.voucherCache[this.currentYear] || [];
+        const vendorMap = {};
+        
+        vouchers.forEach(v => {
+            if (v.status !== 'Unpaid') return;
+            const payee = v.payee || 'Unknown Payee';
+            vendorMap[payee] = (vendorMap[payee] || 0) + parseFloat(v.grossAmount || 0);
+        });
+        
+        const sorted = Object.entries(vendorMap)
+            .map(([name, balance]) => ({ name, balance }))
+            .sort((a, b) => b.balance - a.balance)
+            .slice(0, 15);
+            
+        const labels = sorted.map(c => c.name);
+        const balances = sorted.map(c => c.balance);
+        const total = Object.values(vendorMap).reduce((s, v) => s + v, 0) || 1;
+        
+        let running = 0;
+        const cumPct = balances.map(v => {
+            running += v;
+            return Number(((running / total) * 100).toFixed(2));
+        });
+
+        if (this.categoryParetoChart) this.categoryParetoChart.destroy();
+        
+        this.categoryParetoChart = new Chart(ctx, {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: 'Unpaid Vendor Debt',
+                        data: balances,
+                        backgroundColor: 'rgba(220, 53, 69, 0.65)',
+                        yAxisID: 'y'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Cumulative %',
+                        data: cumPct,
+                        borderColor: 'rgba(0, 123, 255, 1)',
+                        backgroundColor: 'rgba(0, 123, 255, 0.15)',
+                        tension: 0.25,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    y: {
+                        ticks: { callback: v => '₦' + Number(v).toLocaleString() }
+                    },
+                    y1: {
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        grid: { drawOnChartArea: false },
+                        ticks: { callback: v => v + '%' }
+                    }
+                }
+            }
+        });
+    },
+
+    async loadTaxPayments() {
+        const container = document.getElementById('taxPaymentsContainer');
+        if (!container) return;
+        
+        try {
+            const result = await API.getTaxPayments(this.currentYear);
+            if (result.success && result.payments) {
+                this.renderTaxPayments(result.payments);
+            } else {
+                container.innerHTML = '<p class="text-muted text-center">No remittance history found.</p>';
+            }
+        } catch (e) {
+            console.error('Error loading tax payments:', e);
+            container.innerHTML = '<p class="text-danger text-center">Error loading remittance ledger.</p>';
+        }
+    },
+
+    renderTaxPayments(payments) {
+        const container = document.getElementById('taxPaymentsContainer');
+        if (!container) return;
+
+        if (!payments || payments.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No remittance history logged.</p>';
+            return;
+        }
+
+        let html = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Tax Type</th>
+                            <th>Period</th>
+                            <th class="text-right">Amount</th>
+                            <th>Payment Method</th>
+                            <th>Reference No.</th>
+                            <th>Bank</th>
+                            <th>Document</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        payments.forEach(p => {
+            const pDate = p.date ? new Date(p.date).toLocaleDateString('en-GB') : '-';
+            const ref = p.referenceNumber || p.reference || '-';
+            const attachment = p.attachment || p.attachmentUrl || '';
+            const attachmentMarkup = attachment 
+                ? `<a href="${attachment}" target="_blank" style="color:var(--primary-color); font-weight:600;"><i class="fas fa-paperclip"></i> View Receipt</a>` 
+                : '<span class="text-muted" style="font-size:11px;">No attachment</span>';
+
+            html += `
+                <tr>
+                    <td>${pDate}</td>
+                    <td><span class="badge badge-info" style="background-color:rgba(0,123,255,0.1); color:#007bff; border:1px solid rgba(0,123,255,0.2);">${p.taxType}</span></td>
+                    <td>${p.period || '-'}</td>
+                    <td class="text-right" style="font-variant-numeric: tabular-nums; font-weight: 600;">${Utils.formatCurrency(p.amount || 0)}</td>
+                    <td>${p.paymentMethod || '-'}</td>
+                    <td><code>${ref}</code></td>
+                    <td>${p.bank || '-'}</td>
+                    <td>${attachmentMarkup}</td>
+                </tr>
+            `;
+        });
+
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+    },
+
+    toggleChartPlaceholder(canvasId, isEmpty) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return isEmpty;
+
+        const parent = canvas.parentElement;
+        const placeholderId = `${canvasId}-placeholder`;
+        let placeholder = document.getElementById(placeholderId);
+
+        if (isEmpty) {
+            canvas.style.display = 'none';
+            if (!placeholder) {
+                placeholder = document.createElement('div');
+                placeholder.id = placeholderId;
+                placeholder.className = 'chart-empty-placeholder';
+                placeholder.innerHTML = `
+                    <i class="fas fa-chart-bar"></i>
+                    <p>No financial data available for the selected period</p>
+                `;
+                parent.appendChild(placeholder);
+            } else {
+                placeholder.style.display = 'flex';
+            }
+        } else {
+            canvas.style.display = 'block';
+            if (placeholder) {
+                placeholder.style.display = 'none';
+            }
+        }
+        return isEmpty;
+    },
+
+    queueChartRender(canvasId, renderCallback) {
+        this.pendingChartRenders[canvasId] = renderCallback;
+        if (this.lazyIntersectionObserver) {
+            const canvas = document.getElementById(canvasId);
+            if (canvas) {
+                this.lazyIntersectionObserver.observe(canvas);
+            }
+        }
+    },
+
+    setupLazyChartRendering() {
+        if (this.lazyIntersectionObserver) {
+            this.lazyIntersectionObserver.disconnect();
+        }
+
+        this.lazyIntersectionObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const canvas = entry.target;
+                    const canvasId = canvas.id;
+                    if (this.pendingChartRenders && this.pendingChartRenders[canvasId]) {
+                        const renderFn = this.pendingChartRenders[canvasId];
+                        delete this.pendingChartRenders[canvasId];
+                        this.lazyIntersectionObserver.unobserve(canvas);
+                        renderFn();
+                    }
+                }
+            });
+        }, {
+            rootMargin: '150px 0px',
+            threshold: 0.01
+        });
+
+        document.querySelectorAll('canvas').forEach(canvas => {
+            this.lazyIntersectionObserver.observe(canvas);
+        });
+    },
+
+    escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+};
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => Reports.init());
