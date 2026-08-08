@@ -6454,7 +6454,7 @@ function sendUserCredentialEmail_(toEmail, userName, username, role, tempPasswor
     const htmlBody = 
       '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; color: #1e293b;">' +
         '<div style="background: linear-gradient(135deg, #1a5f2a, #0d3c16); color: white; padding: 20px; text-align: center;">' +
-          '<h2 style="margin: 0; font-size: 20px;">Federal Medical Centre, Azare</h2>' +
+          '<h2 style="margin: 0; font-size: 20px;">Federal Medical Centre, Abeokuta</h2>' +
           '<p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 14px;">Payable Voucher System 2026</p>' +
         '</div>' +
         '<div style="padding: 24px; background: #ffffff;">' +
